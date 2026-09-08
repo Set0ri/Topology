@@ -26,19 +26,17 @@ const haloGeoNormal = new THREE.SphereGeometry(6 * 1.45, 16, 16);
 const haloGeoSelected = new THREE.SphereGeometry(8 * 1.45, 16, 16);
 
 // Material caches keyed by `color_selected_light`
-const standardMaterialCache = new Map<string, THREE.MeshStandardMaterial>();
-function getCachedStandardMaterial(colorHex: string, isSelected: boolean, isLight: boolean): THREE.MeshStandardMaterial {
+const lambertMaterialCache = new Map<string, THREE.MeshLambertMaterial>();
+function getCachedMaterial(colorHex: string, isSelected: boolean, isLight: boolean): THREE.MeshLambertMaterial {
   const key = `${colorHex}_${isSelected ? 'sel' : 'norm'}_${isLight ? 'lt' : 'dk'}`;
-  let mat = standardMaterialCache.get(key);
+  let mat = lambertMaterialCache.get(key);
   if (!mat) {
-    mat = new THREE.MeshStandardMaterial({
+    mat = new THREE.MeshLambertMaterial({
       color: new THREE.Color(colorHex),
       emissive: new THREE.Color(colorHex),
-      emissiveIntensity: isLight ? (isSelected ? 0.6 : 0.25) : (isSelected ? 0.8 : 0.35),
-      roughness: 0.25,
-      metalness: 0.15,
+      emissiveIntensity: isLight ? (isSelected ? 0.75 : 0.45) : (isSelected ? 0.95 : 0.65),
     });
-    standardMaterialCache.set(key, mat);
+    lambertMaterialCache.set(key, mat);
   }
   return mat;
 }
@@ -51,7 +49,7 @@ function getCachedHaloMaterial(colorHex: string, isLight: boolean): THREE.MeshBa
     mat = new THREE.MeshBasicMaterial({
       color: new THREE.Color(colorHex),
       transparent: true,
-      opacity: isLight ? 0.35 : 0.25,
+      opacity: isLight ? 0.4 : 0.3,
       wireframe: true,
     });
     haloMaterialCache.set(key, mat);
@@ -95,12 +93,19 @@ export const TopologyGraph3D: React.FC = () => {
     const observer = new ResizeObserver(updateDimensions);
     observer.observe(containerRef.current);
 
-    // Initial camera auto-fit once simulation warms up
+    // Initial camera auto-fit once simulation warms up and nodes disperse
     const timer = setTimeout(() => {
       if (fgRef.current && nodes.length > 0) {
-        fgRef.current.zoomToFit(1000, 60);
+        const bbox = fgRef.current.getGraphBbox();
+        // Ensure nodes have actually dispersed before running zoomToFit
+        if (bbox && (Math.abs(bbox.x[1] - bbox.x[0]) > 20 || Math.abs(bbox.y[1] - bbox.y[0]) > 20)) {
+          fgRef.current.zoomToFit(800, 50);
+        } else {
+          // Safe fallback perspective position
+          fgRef.current.cameraPosition({ x: 0, y: 30, z: 280 }, { x: 0, y: 0, z: 0 }, 600);
+        }
       }
-    }, 600);
+    }, 700);
 
     return () => {
       observer.disconnect();
@@ -108,28 +113,39 @@ export const TopologyGraph3D: React.FC = () => {
     };
   }, [nodes.length]);
 
-  // Scene Lighting Injection for Rich Physically Based Spheres
+  // Guaranteed Scene Lighting Injection for Three.js Materials
   useEffect(() => {
-    if (fgRef.current) {
-      const scene = fgRef.current.scene();
-      if (scene) {
-        const existingLight = scene.getObjectByName('topology-custom-light');
-        if (!existingLight) {
-          const ambientLight = new THREE.AmbientLight(0xffffff, 0.95);
-          ambientLight.name = 'topology-custom-light';
-          scene.add(ambientLight);
+    let animId: number;
+    let attempts = 0;
+    const injectLights = () => {
+      attempts++;
+      if (fgRef.current) {
+        const scene = fgRef.current.scene();
+        if (scene) {
+          const existingLight = scene.getObjectByName('topology-custom-light');
+          if (!existingLight) {
+            const ambientLight = new THREE.AmbientLight(0xffffff, 1.1);
+            ambientLight.name = 'topology-custom-light';
+            scene.add(ambientLight);
 
-          const dirLight1 = new THREE.DirectionalLight(0xffffff, 0.7);
-          dirLight1.position.set(100, 200, 100);
-          scene.add(dirLight1);
+            const dirLight1 = new THREE.DirectionalLight(0xffffff, 0.85);
+            dirLight1.position.set(100, 200, 100);
+            scene.add(dirLight1);
 
-          const dirLight2 = new THREE.DirectionalLight(0xffffff, 0.4);
-          dirLight2.position.set(-100, -200, -100);
-          scene.add(dirLight2);
+            const dirLight2 = new THREE.DirectionalLight(0xffffff, 0.55);
+            dirLight2.position.set(-100, -200, -100);
+            scene.add(dirLight2);
+            return;
+          }
         }
       }
-    }
-  }, [isWebGLSupported]);
+      if (attempts < 60) {
+        animId = requestAnimationFrame(injectLights);
+      }
+    };
+    animId = requestAnimationFrame(injectLights);
+    return () => cancelAnimationFrame(animId);
+  }, []);
 
   // Auto-Rotate Presentation Mode
   useEffect(() => {
@@ -247,7 +263,7 @@ export const TopologyGraph3D: React.FC = () => {
 
     // Node Sphere using pooled geometry and cached material
     const sphereGeo = isSelected ? sphereGeoSelected : sphereGeoNormal;
-    const sphereMat = getCachedStandardMaterial(typeColor, isSelected, isLight);
+    const sphereMat = getCachedMaterial(typeColor, isSelected, isLight);
     const sphere = new THREE.Mesh(sphereGeo, sphereMat);
     group.add(sphere);
 
@@ -351,11 +367,15 @@ export const TopologyGraph3D: React.FC = () => {
             fgRef.current.d3ReheatSimulation();
           }
         }}
-        warmupTicks={60}
-        cooldownTicks={120}
-        cooldownTime={3500}
-        d3AlphaDecay={0.025}
-        d3VelocityDecay={0.3}
+        nodeRelSize={6}
+        nodeColor={(n: any) => getNodeTypeColor(n.type, theme)}
+        nodeVal={8}
+        nodeThreeObjectExtend={false}
+        onEngineStop={() => {
+          if (fgRef.current && nodes.length > 0) {
+            fgRef.current.zoomToFit(600, 40);
+          }
+        }}
         showNavInfo={false}
       />
 

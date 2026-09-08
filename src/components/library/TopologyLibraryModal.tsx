@@ -156,24 +156,24 @@ export const TopologyLibraryModal: React.FC<Props> = ({ isOpen, onClose }) => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-6 bg-black/40 dark:bg-black/60 backdrop-blur-md transition-all">
-      <div className="relative w-full max-w-4xl max-h-[92vh] flex flex-col rounded-3xl bg-white/95 dark:bg-[#181a24]/95 text-[#202124] dark:text-[#f8fafc] backdrop-blur-2xl shadow-elevated-2xl border-none overflow-hidden select-none animate-in fade-in zoom-in-95 duration-200">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-6 bg-black/50 dark:bg-black/70 backdrop-blur-md transition-all">
+      <div className="relative w-full max-w-4xl max-h-[92vh] flex flex-col rounded-3xl bg-[#f8fafc] dark:bg-[#0f111a] text-slate-900 dark:text-[#f8fafc] backdrop-blur-2xl shadow-elevated-2xl border-none overflow-hidden select-none animate-in fade-in zoom-in-95 duration-200">
         
         {/* Header Section */}
-        <div className="flex items-center justify-between px-4 py-3 sm:px-6 sm:py-4 bg-slate-50/50 dark:bg-white/2">
+        <div className="flex items-center justify-between px-4 py-3 sm:px-6 sm:py-4 bg-white/90 dark:bg-[#151724]/90 shadow-xs shrink-0">
           <div className="flex items-center gap-2.5 sm:gap-3">
-            <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-2xl bg-gradient-to-br from-[#1a73e8] to-[#9334e6] flex items-center justify-center text-white shadow-xs shrink-0">
-              <Compass size={18} />
+            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl bg-gradient-to-br from-[#1a73e8] to-[#9334e6] flex items-center justify-center text-white shadow-elevated-sm shrink-0">
+              <Compass size={20} />
             </div>
             <div>
               <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-                <h2 className="text-sm sm:text-base font-bold tracking-tight">Topology Archetype Hub</h2>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[#e6f4ea] text-[#137333] dark:bg-[#1e8e3e]/20 dark:text-[#34a853]">
+                <h2 className="text-base sm:text-lg font-bold tracking-tight text-slate-900 dark:text-white">Topology Archetype Hub</h2>
+                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-[#e6f4ea] text-[#137333] dark:bg-[#1e8e3e]/25 dark:text-[#34a853] shadow-xs">
                   {coverageMetrics.overallCoveragePercent}% Coverage
                 </span>
               </div>
-              <p className="text-[11px] sm:text-xs text-[#5f6368] dark:text-[#94a3b8] line-clamp-1">
-                Reusable software & agent DAG archetypes — never reinvent standard patterns.
+              <p className="text-xs text-slate-600 dark:text-slate-400 line-clamp-1 mt-0.5 font-medium">
+                Reusable software & agent DAG archetypes — avoid reinventing standard patterns.
               </p>
             </div>
           </div>
@@ -181,27 +181,29 @@ export const TopologyLibraryModal: React.FC<Props> = ({ isOpen, onClose }) => {
           <button
             type="button"
             onClick={onClose}
-            className="p-1.5 rounded-xl hover:bg-black/5 dark:hover:bg-white/10 text-[#5f6368] dark:text-[#94a3b8] hover:text-[#202124] dark:hover:text-[#f8fafc] transition-colors border-none cursor-pointer shrink-0"
+            className="p-2 rounded-xl hover:bg-black/5 dark:hover:bg-white/10 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors border-none cursor-pointer shrink-0"
           >
             <X size={18} />
           </button>
         </div>
 
         {/* Tab Navigation & Search */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-4 sm:px-6 pt-2.5 pb-2 bg-slate-100/40 dark:bg-white/2">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 px-4 sm:px-6 py-2.5 bg-slate-200/50 dark:bg-black/25 shrink-0">
           <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
             <button
               type="button"
               onClick={() => setActiveTab('canonical')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap transition-all border-none cursor-pointer ${
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-all border-none cursor-pointer ${
                 activeTab === 'canonical'
-                  ? 'bg-white dark:bg-[#222536] text-[#1a73e8] dark:text-[#8ab4f8] shadow-xs font-semibold'
-                  : 'text-[#5f6368] dark:text-[#94a3b8] hover:text-[#202124] dark:hover:text-[#f8fafc] bg-transparent'
+                  ? 'bg-white dark:bg-[#1f2338] text-[#1a73e8] dark:text-[#8ab4f8] shadow-elevated-xs font-bold'
+                  : 'text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white bg-transparent'
               }`}
             >
               <BookOpen size={14} />
               <span>Canonical Archetypes</span>
-              <span className="px-1.5 py-0.2 rounded-md text-[10px] bg-black/5 dark:bg-white/10 font-bold">
+              <span className={`px-1.5 py-0.2 rounded-md text-[10px] font-bold ${
+                activeTab === 'canonical' ? 'bg-[#1a73e8]/15 text-[#1a73e8] dark:bg-[#8ab4f8]/20 dark:text-[#8ab4f8]' : 'bg-black/5 dark:bg-white/10 text-slate-600 dark:text-slate-400'
+              }`}>
                 {CANONICAL_ARCHETYPES.length}
               </span>
             </button>
@@ -209,15 +211,17 @@ export const TopologyLibraryModal: React.FC<Props> = ({ isOpen, onClose }) => {
             <button
               type="button"
               onClick={() => setActiveTab('user')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap transition-all border-none cursor-pointer ${
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-all border-none cursor-pointer ${
                 activeTab === 'user'
-                  ? 'bg-white dark:bg-[#222536] text-[#1a73e8] dark:text-[#8ab4f8] shadow-xs font-semibold'
-                  : 'text-[#5f6368] dark:text-[#94a3b8] hover:text-[#202124] dark:hover:text-[#f8fafc] bg-transparent'
+                  ? 'bg-white dark:bg-[#1f2338] text-[#1a73e8] dark:text-[#8ab4f8] shadow-elevated-xs font-bold'
+                  : 'text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white bg-transparent'
               }`}
             >
               <FolderHeart size={14} />
               <span>My Published</span>
-              <span className="px-1.5 py-0.2 rounded-md text-[10px] bg-black/5 dark:bg-white/10 font-bold">
+              <span className={`px-1.5 py-0.2 rounded-md text-[10px] font-bold ${
+                activeTab === 'user' ? 'bg-[#1a73e8]/15 text-[#1a73e8] dark:bg-[#8ab4f8]/20 dark:text-[#8ab4f8]' : 'bg-black/5 dark:bg-white/10 text-slate-600 dark:text-slate-400'
+              }`}>
                 {userTopologies.length}
               </span>
             </button>
@@ -225,15 +229,15 @@ export const TopologyLibraryModal: React.FC<Props> = ({ isOpen, onClose }) => {
             <button
               type="button"
               onClick={() => setActiveTab('publish')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap transition-all border-none cursor-pointer ${
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-all border-none cursor-pointer ${
                 activeTab === 'publish'
-                  ? 'bg-white dark:bg-[#222536] text-[#1a73e8] dark:text-[#8ab4f8] shadow-xs font-semibold'
-                  : 'text-[#5f6368] dark:text-[#94a3b8] hover:text-[#202124] dark:hover:text-[#f8fafc] bg-transparent'
+                  ? 'bg-white dark:bg-[#1f2338] text-[#1a73e8] dark:text-[#8ab4f8] shadow-elevated-xs font-bold'
+                  : 'text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white bg-transparent'
               }`}
             >
               <PlusCircle size={14} />
-              <span>Publish Canvas</span>
-              <span className="px-1.5 py-0.2 rounded-md text-[10px] bg-[#1a73e8]/10 text-[#1a73e8] font-bold">
+              <span>Publish Active Canvas</span>
+              <span className="px-1.5 py-0.2 rounded-md text-[10px] bg-[#1a73e8]/15 text-[#1a73e8] dark:text-[#8ab4f8] font-bold">
                 {nodes.length}
               </span>
             </button>
@@ -241,14 +245,14 @@ export const TopologyLibraryModal: React.FC<Props> = ({ isOpen, onClose }) => {
 
           {/* Search Box (for canonical and user tabs) */}
           {activeTab !== 'publish' && (
-            <div className="relative w-full sm:w-60 shrink-0">
-              <Search size={13} className="absolute left-2.5 top-2.5 text-[#5f6368] dark:text-[#94a3b8]" />
+            <div className="relative w-full sm:w-64 shrink-0">
+              <Search size={14} className="absolute left-3 top-2.5 text-slate-500 dark:text-slate-400" />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search topologies, tags..."
-                className="w-full pl-7 pr-3 py-1.5 text-xs rounded-xl bg-black/4 dark:bg-white/5 text-[#202124] dark:text-[#f8fafc] placeholder-[#5f6368]/60 focus:outline-none focus:bg-black/6 dark:focus:bg-white/10 transition-all border-none"
+                className="w-full pl-8.5 pr-3 py-2 text-xs rounded-xl bg-white dark:bg-[#181a27] text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-[#1a73e8] shadow-xs border-none transition-all"
               />
             </div>
           )}
@@ -261,59 +265,62 @@ export const TopologyLibraryModal: React.FC<Props> = ({ isOpen, onClose }) => {
           {activeTab === 'canonical' && (
             <>
               {/* % Coverage Map Dashboard Card */}
-              <div className="p-4 rounded-3xl bg-gradient-to-r from-blue-50/60 via-indigo-50/40 to-purple-50/60 dark:from-blue-950/20 dark:via-indigo-950/15 dark:to-purple-950/20 shadow-xs">
+              <div className="p-4 sm:p-5 rounded-3xl bg-gradient-to-r from-blue-50 via-indigo-50/70 to-purple-50/80 dark:from-[#13192f] dark:via-[#1a1c35] dark:to-[#1e1730] shadow-elevated-xs">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
                   <div>
                     <div className="flex items-center gap-1.5 text-xs font-bold text-[#1a73e8] dark:text-[#8ab4f8] uppercase tracking-wider">
-                      <TrendingUp size={14} />
+                      <TrendingUp size={15} />
                       <span>Software Architecture % Coverage Map</span>
                     </div>
-                    <div className="text-sm font-semibold text-[#202124] dark:text-[#f8fafc] mt-0.5">
+                    <div className="text-sm sm:text-base font-bold text-slate-900 dark:text-white mt-1">
                       {coverageMetrics.readyCount} of {coverageMetrics.totalArchetypes} Standard Patterns Ready to Instantiate
                     </div>
                   </div>
-                  <div className="text-right">
-                    <div className="text-xl font-extrabold text-[#1a73e8] dark:text-[#8ab4f8]">
+                  <div className="sm:text-right">
+                    <div className="text-2xl font-black text-[#1a73e8] dark:text-[#8ab4f8]">
                       {coverageMetrics.overallCoveragePercent}%
                     </div>
-                    <div className="text-[10px] text-[#5f6368] dark:text-[#94a3b8]">Global Industry Coverage</div>
+                    <div className="text-[11px] font-medium text-slate-600 dark:text-slate-400">Global Industry Coverage</div>
                   </div>
                 </div>
 
                 {/* Overall Progress Bar */}
-                <div className="w-full h-2 rounded-full bg-black/5 dark:bg-white/10 overflow-hidden mb-3">
+                <div className="w-full h-2.5 rounded-full bg-slate-200/80 dark:bg-white/10 overflow-hidden mb-3.5">
                   <div 
-                    className="h-full rounded-full bg-gradient-to-r from-[#1a73e8] via-[#4285f4] to-[#34a853] transition-all duration-500" 
+                    className="h-full rounded-full bg-gradient-to-r from-[#1a73e8] via-[#4285f4] to-[#34a853] transition-all duration-500 shadow-xs" 
                     style={{ width: `${coverageMetrics.overallCoveragePercent}%` }}
                   />
                 </div>
 
                 {/* Category Breakdown Chips */}
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                  {coverageMetrics.categoryBreakdown.map(cat => (
-                    <div 
-                      key={cat.category}
-                      onClick={() => setSelectedCategory(selectedCategory === cat.category ? 'all' : cat.category)}
-                      className={`p-2 rounded-2xl transition-all cursor-pointer ${
-                        selectedCategory === cat.category 
-                          ? 'bg-white dark:bg-[#202434] shadow-elevated-xs' 
-                          : 'bg-white/60 dark:bg-white/5 hover:bg-white dark:hover:bg-[#202434]'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between text-[11px] font-semibold">
-                        <span className="truncate">{cat.label}</span>
-                        <span className="text-[10px] font-bold text-[#1a73e8] dark:text-[#8ab4f8]">{cat.percent}%</span>
+                  {coverageMetrics.categoryBreakdown.map(cat => {
+                    const isSelected = selectedCategory === cat.category;
+                    return (
+                      <div 
+                        key={cat.category}
+                        onClick={() => setSelectedCategory(isSelected ? 'all' : cat.category)}
+                        className={`p-2.5 rounded-2xl transition-all cursor-pointer ${
+                          isSelected 
+                            ? 'bg-white dark:bg-[#202438] text-slate-900 dark:text-white shadow-elevated-sm scale-[1.02]' 
+                            : 'bg-white/80 dark:bg-[#181a28]/80 hover:bg-white dark:hover:bg-[#202438] text-slate-700 dark:text-slate-300 shadow-xs'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between text-xs font-bold">
+                          <span className="truncate">{cat.label}</span>
+                          <span className="text-xs font-black text-[#1a73e8] dark:text-[#8ab4f8]">{cat.percent}%</span>
+                        </div>
+                        <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 font-medium">
+                          {cat.ready} / {cat.total} Ready
+                        </div>
                       </div>
-                      <div className="text-[10px] text-[#5f6368] dark:text-[#94a3b8] mt-0.5">
-                        {cat.ready} / {cat.total} Archetypes
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
 
               {/* Category Filter Pills */}
-              <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+              <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
                 {[
                   { id: 'all', label: 'All Patterns' },
                   { id: 'coding', label: '💻 Coding & Dev Loops' },
@@ -325,10 +332,10 @@ export const TopologyLibraryModal: React.FC<Props> = ({ isOpen, onClose }) => {
                     key={cat.id}
                     type="button"
                     onClick={() => setSelectedCategory(cat.id as any)}
-                    className={`text-xs px-3 py-1.5 rounded-xl font-medium whitespace-nowrap transition-all border-none cursor-pointer ${
+                    className={`text-xs px-3.5 py-1.5 rounded-xl font-semibold whitespace-nowrap transition-all border-none cursor-pointer ${
                       selectedCategory === cat.id
-                        ? 'bg-[#1a73e8] text-white shadow-xs font-semibold'
-                        : 'bg-black/4 dark:bg-white/5 hover:bg-black/8 dark:hover:bg-white/10 text-[#5f6368] dark:text-[#94a3b8]'
+                        ? 'bg-[#1a73e8] text-white shadow-elevated-xs'
+                        : 'bg-white dark:bg-[#181a28] hover:bg-slate-100 dark:hover:bg-[#202438] text-slate-700 dark:text-slate-300 shadow-xs'
                     }`}
                   >
                     {cat.label}
@@ -337,7 +344,7 @@ export const TopologyLibraryModal: React.FC<Props> = ({ isOpen, onClose }) => {
               </div>
 
               {/* Archetypes Grid */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {filteredCanonical.map(item => {
                   const isReady = item.status === 'ready';
                   const isLoaded = justLoadedId === item.id;
@@ -345,57 +352,58 @@ export const TopologyLibraryModal: React.FC<Props> = ({ isOpen, onClose }) => {
                   return (
                     <div 
                       key={item.id}
-                      className="flex flex-col justify-between p-4 rounded-3xl bg-white dark:bg-[#1f2230] shadow-elevated-xs hover:shadow-elevated-md transition-all border-none group"
+                      className="flex flex-col justify-between p-5 rounded-3xl bg-white dark:bg-[#181a28] shadow-elevated-sm hover:shadow-elevated-md hover:-translate-y-0.5 transition-all duration-200 border-none group"
                     >
                       <div>
                         {/* Top Ribbon */}
-                        <div className="flex items-center justify-between gap-2 mb-2">
-                          <div className="flex items-center gap-1.5">
+                        <div className="flex items-center justify-between gap-2 mb-2.5">
+                          <div className="flex items-center gap-2">
                             {item.popularity >= 90 ? (
-                              <span className="flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold bg-[#fce8e6] text-[#c5221f] dark:bg-[#d93025]/20 dark:text-[#f28b82]">
-                                <Flame size={11} />
+                              <span className="flex items-center gap-1 px-2.5 py-0.5 rounded-lg text-[10px] font-bold bg-[#fce8e6] text-[#c5221f] dark:bg-[#d93025]/25 dark:text-[#f28b82]">
+                                <Flame size={12} />
                                 <span>{item.popularity}% Popular</span>
                               </span>
                             ) : (
-                              <span className="flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold bg-black/5 dark:bg-white/10 text-[#5f6368] dark:text-[#94a3b8]">
+                              <span className="flex items-center gap-1 px-2.5 py-0.5 rounded-lg text-[10px] font-bold bg-slate-100 dark:bg-white/10 text-slate-700 dark:text-slate-300">
                                 <span>{item.popularity}% Usage</span>
                               </span>
                             )}
 
-                            <span className="text-[10px] font-medium px-2 py-0.5 rounded-lg bg-black/4 dark:bg-white/5 text-[#5f6368] dark:text-[#94a3b8]">
+                            <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-lg bg-slate-100 dark:bg-white/10 text-slate-700 dark:text-slate-300">
                               {item.complexity}
                             </span>
                           </div>
 
                           {isReady ? (
-                            <span className="text-[10px] font-semibold text-[#1e8e3e] dark:text-[#34a853] flex items-center gap-1">
-                              <CheckCircle2 size={12} />
+                            <span className="text-[11px] font-bold text-[#137333] dark:text-[#34a853] flex items-center gap-1 bg-[#e6f4ea] dark:bg-[#1e8e3e]/20 px-2 py-0.5 rounded-lg">
+                              <CheckCircle2 size={13} />
                               Ready
                             </span>
                           ) : (
-                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-lg bg-[#fef7e0] text-[#b06000] dark:bg-[#f9ab00]/20 dark:text-[#fbbc04]">
+                            <span className="text-[11px] font-bold px-2 py-0.5 rounded-lg bg-[#fef7e0] text-[#b06000] dark:bg-[#f9ab00]/20 dark:text-[#fbbc04]">
                               Roadmap
                             </span>
                           )}
                         </div>
 
                         {/* Title & Description */}
-                        <h3 className="text-sm font-bold tracking-tight text-[#202124] dark:text-[#f8fafc] group-hover:text-[#1a73e8] dark:group-hover:text-[#8ab4f8] transition-colors">
+                        <h3 className="text-sm sm:text-base font-bold tracking-tight text-slate-900 dark:text-white group-hover:text-[#1a73e8] dark:group-hover:text-[#8ab4f8] transition-colors">
                           {item.name}
                         </h3>
-                        <p className="text-xs text-[#5f6368] dark:text-[#94a3b8] mt-1 line-clamp-2 leading-relaxed">
+                        <p className="text-xs text-slate-600 dark:text-slate-300 mt-1.5 line-clamp-2 leading-relaxed font-normal">
                           {item.description}
                         </p>
 
                         {/* Why It Matters Callout */}
-                        <div className="mt-2.5 p-2 rounded-xl bg-black/2 dark:bg-white/3 text-[11px] text-[#5f6368] dark:text-[#94a3b8] italic">
+                        <div className="mt-3 p-2.5 rounded-2xl bg-slate-50 dark:bg-[#12141f] text-xs text-slate-700 dark:text-slate-300 font-medium leading-snug">
+                          <span className="text-[#1a73e8] dark:text-[#8ab4f8] font-bold not-italic mr-1">Why:</span>
                           "{item.whyItMatters}"
                         </div>
 
                         {/* Tags */}
-                        <div className="flex flex-wrap gap-1 mt-3">
+                        <div className="flex flex-wrap gap-1.5 mt-3.5">
                           {item.tags.map(t => (
-                            <span key={t} className="text-[10px] px-1.5 py-0.5 rounded-md bg-black/4 dark:bg-white/5 text-[#5f6368] dark:text-[#94a3b8]">
+                            <span key={t} className="text-[10px] px-2 py-0.5 rounded-md bg-slate-100 dark:bg-white/8 text-slate-700 dark:text-slate-300 font-medium">
                               #{t}
                             </span>
                           ))}
@@ -403,15 +411,15 @@ export const TopologyLibraryModal: React.FC<Props> = ({ isOpen, onClose }) => {
                       </div>
 
                       {/* Card Footer & Action */}
-                      <div className="flex items-center justify-between pt-3 mt-3 bg-black/2 dark:bg-white/2 -mx-4 -mb-4 px-4 py-3 rounded-b-3xl text-[11px] text-[#5f6368] dark:text-[#94a3b8]">
+                      <div className="flex items-center justify-between pt-3.5 mt-3.5 bg-slate-50/80 dark:bg-black/25 -mx-5 -mb-5 px-5 py-3 rounded-b-3xl text-xs text-slate-600 dark:text-slate-400 font-medium">
                         <div className="flex items-center gap-2">
-                          <span className="flex items-center gap-1">
-                            <Clock size={11} />
+                          <span className="flex items-center gap-1 font-semibold">
+                            <Clock size={12} />
                             {item.estimatedMinutes}m
                           </span>
                           <span>•</span>
-                          <span className="flex items-center gap-1">
-                            <Layers size={11} />
+                          <span className="flex items-center gap-1 font-semibold">
+                            <Layers size={12} />
                             {item.nodes.length} nodes
                           </span>
                         </div>
@@ -420,21 +428,21 @@ export const TopologyLibraryModal: React.FC<Props> = ({ isOpen, onClose }) => {
                           <button
                             type="button"
                             onClick={() => handleLoadArchetype(item)}
-                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all border-none cursor-pointer ${
+                            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all border-none cursor-pointer shadow-elevated-xs hover:scale-[1.02] active:scale-[0.98] ${
                               isLoaded
-                                ? 'bg-[#1e8e3e] text-white shadow-xs'
-                                : 'bg-[#1a73e8] hover:bg-[#1557b0] text-white shadow-xs'
+                                ? 'bg-[#1e8e3e] text-white shadow-elevated-sm'
+                                : 'bg-[#1a73e8] hover:bg-[#1557b0] text-white'
                             }`}
                           >
                             {isLoaded ? (
                               <>
-                                <Check size={13} />
-                                <span>Loaded!</span>
+                                <Check size={14} />
+                                <span>Instantiated!</span>
                               </>
                             ) : (
                               <>
-                                <Sparkles size={13} />
-                                <span>Load into Canvas</span>
+                                <Sparkles size={14} />
+                                <span>Instantiate</span>
                               </>
                             )}
                           </button>
@@ -442,9 +450,9 @@ export const TopologyLibraryModal: React.FC<Props> = ({ isOpen, onClose }) => {
                           <button
                             type="button"
                             onClick={() => handleLoadArchetype(item)}
-                            className="px-2.5 py-1.5 rounded-xl text-[11px] font-medium bg-black/5 dark:bg-white/10 hover:bg-black/10 text-[#5f6368] dark:text-[#94a3b8] transition-colors border-none cursor-pointer"
+                            className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-slate-200/80 dark:bg-white/10 hover:bg-slate-300/80 dark:hover:bg-white/15 text-slate-700 dark:text-slate-200 transition-colors border-none cursor-pointer"
                           >
-                            Upvote Archetype
+                            Upvote
                           </button>
                         )}
                       </div>
@@ -478,66 +486,66 @@ export const TopologyLibraryModal: React.FC<Props> = ({ isOpen, onClose }) => {
                   </button>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {filteredUser.map(item => (
                     <div 
                       key={item.id}
-                      className="flex flex-col justify-between p-4 rounded-3xl bg-white dark:bg-[#1f2230] shadow-elevated-xs hover:shadow-elevated-md transition-all border-none"
+                      className="flex flex-col justify-between p-5 rounded-3xl bg-white dark:bg-[#181a28] shadow-elevated-sm hover:shadow-elevated-md hover:-translate-y-0.5 transition-all duration-200 border-none"
                     >
                       <div>
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-[#1a73e8]/10 text-[#1a73e8] dark:bg-[#1a73e8]/20 dark:text-[#8ab4f8] capitalize">
+                        <div className="flex items-center justify-between mb-2.5">
+                          <span className="px-2.5 py-0.5 rounded-lg text-[10px] font-bold bg-[#1a73e8]/10 text-[#1a73e8] dark:bg-[#1a73e8]/20 dark:text-[#8ab4f8] capitalize">
                             {item.category}
                           </span>
                           <button
                             type="button"
                             onClick={() => deleteUserTopology(item.id)}
-                            className="p-1 rounded-lg text-[#5f6368] dark:text-[#94a3b8] hover:text-[#d93025] hover:bg-black/5 dark:hover:bg-white/10 transition-colors border-none cursor-pointer"
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-[#d93025] hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors border-none cursor-pointer"
                             title="Delete custom topology"
                           >
-                            <Trash2 size={13} />
+                            <Trash2 size={14} />
                           </button>
                         </div>
 
-                        <h3 className="text-sm font-bold tracking-tight text-[#202124] dark:text-[#f8fafc]">
+                        <h3 className="text-sm sm:text-base font-bold tracking-tight text-slate-900 dark:text-white">
                           {item.name}
                         </h3>
-                        <p className="text-xs text-[#5f6368] dark:text-[#94a3b8] mt-1 line-clamp-2">
+                        <p className="text-xs text-slate-600 dark:text-slate-300 mt-1.5 line-clamp-2 leading-relaxed font-normal">
                           {item.description}
                         </p>
 
-                        <div className="flex flex-wrap gap-1 mt-3">
+                        <div className="flex flex-wrap gap-1.5 mt-3.5">
                           {item.tags.map(t => (
-                            <span key={t} className="text-[10px] px-1.5 py-0.5 rounded-md bg-black/4 dark:bg-white/5 text-[#5f6368] dark:text-[#94a3b8]">
+                            <span key={t} className="text-[10px] px-2 py-0.5 rounded-md bg-slate-100 dark:bg-white/10 text-slate-700 dark:text-slate-300 font-medium">
                               #{t}
                             </span>
                           ))}
                         </div>
                       </div>
 
-                      <div className="flex items-center justify-between pt-3 mt-3 bg-black/2 dark:bg-white/2 -mx-4 -mb-4 px-4 py-3 rounded-b-3xl text-[11px] text-[#5f6368] dark:text-[#94a3b8]">
+                      <div className="flex items-center justify-between pt-3.5 mt-3.5 bg-slate-100/60 dark:bg-black/30 -mx-5 -mb-5 px-5 py-3 rounded-b-3xl text-xs text-slate-600 dark:text-slate-400 font-medium">
                         <div className="flex items-center gap-2">
-                          <span className="flex items-center gap-1">
-                            <User size={11} />
+                          <span className="flex items-center gap-1 font-semibold">
+                            <User size={12} />
                             {item.author}
                           </span>
                           <span>•</span>
-                          <span>{item.nodes.length} nodes</span>
+                          <span className="font-semibold">{item.nodes.length} nodes</span>
                         </div>
 
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex items-center gap-2">
                           <button
                             type="button"
                             onClick={() => handleExportSingleJson(item)}
-                            className="p-1.5 rounded-xl bg-black/5 dark:bg-white/5 hover:bg-black/10 text-[#5f6368] dark:text-[#94a3b8] hover:text-[#202124] transition-colors border-none cursor-pointer"
+                            className="p-1.5 rounded-xl bg-slate-200/70 dark:bg-white/10 hover:bg-slate-300/70 text-slate-700 dark:text-slate-200 transition-colors border-none cursor-pointer shadow-xs"
                             title="Export JSON file"
                           >
-                            <Download size={13} />
+                            <Download size={14} />
                           </button>
                           <button
                             type="button"
                             onClick={() => handleLoadArchetype(item)}
-                            className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-[#1a73e8] hover:bg-[#1557b0] text-white transition-all shadow-xs border-none cursor-pointer"
+                            className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-[#1a73e8] hover:bg-[#1557b0] text-white transition-all shadow-elevated-xs hover:scale-[1.02] active:scale-[0.98] border-none cursor-pointer"
                           >
                             Load
                           </button>
@@ -554,18 +562,18 @@ export const TopologyLibraryModal: React.FC<Props> = ({ isOpen, onClose }) => {
           {activeTab === 'publish' && (
             <div className="max-w-2xl mx-auto space-y-5">
               {/* Canvas Status Preview Banner */}
-              <div className="p-4 rounded-3xl bg-black/3 dark:bg-white/5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div className="p-4 sm:p-5 rounded-3xl bg-white dark:bg-[#181a28] shadow-elevated-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                 <div>
-                  <div className="text-xs font-bold text-[#1a73e8] dark:text-[#8ab4f8]">Active Workspace Canvas</div>
-                  <div className="text-xs text-[#5f6368] dark:text-[#94a3b8] mt-0.5">
+                  <div className="text-xs font-bold text-[#1a73e8] dark:text-[#8ab4f8] uppercase tracking-wider">Active Workspace Canvas</div>
+                  <div className="text-xs text-slate-600 dark:text-slate-300 mt-1 font-medium">
                     Ready to package {nodes.length} nodes and {edges.length} causal edges into the library.
                   </div>
                 </div>
-                <div className="flex items-center gap-1.5 shrink-0">
-                  <span className="px-2.5 py-1 rounded-xl text-xs font-bold bg-white dark:bg-[#202434] text-[#202124] dark:text-[#f8fafc] shadow-xs">
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="px-3 py-1 rounded-xl text-xs font-bold bg-slate-100 dark:bg-[#202438] text-slate-800 dark:text-white shadow-xs">
                     {nodes.length} Nodes
                   </span>
-                  <span className="px-2.5 py-1 rounded-xl text-xs font-bold bg-white dark:bg-[#202434] text-[#202124] dark:text-[#f8fafc] shadow-xs">
+                  <span className="px-3 py-1 rounded-xl text-xs font-bold bg-slate-100 dark:bg-[#202438] text-slate-800 dark:text-white shadow-xs">
                     {edges.length} Edges
                   </span>
                 </div>
@@ -574,7 +582,7 @@ export const TopologyLibraryModal: React.FC<Props> = ({ isOpen, onClose }) => {
               {/* Publish Metadata Form */}
               <form onSubmit={handlePublishSubmit} className="space-y-4">
                 <div>
-                  <label className="block text-xs font-semibold text-[#5f6368] dark:text-[#94a3b8] mb-1">
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
                     Topology Name *
                   </label>
                   <input
@@ -583,19 +591,19 @@ export const TopologyLibraryModal: React.FC<Props> = ({ isOpen, onClose }) => {
                     value={pubName}
                     onChange={(e) => setPubName(e.target.value)}
                     placeholder="e.g. Next.js Autonomous Migration Agent"
-                    className="w-full px-3.5 py-2 rounded-xl text-xs bg-black/4 dark:bg-white/5 text-[#202124] dark:text-[#f8fafc] focus:outline-none focus:ring-1 focus:ring-[#1a73e8] border-none transition-all"
+                    className="w-full px-3.5 py-2.5 rounded-xl text-xs bg-white dark:bg-[#181a28] text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-[#1a73e8] shadow-xs border-none transition-all"
                   />
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-semibold text-[#5f6368] dark:text-[#94a3b8] mb-1">
+                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
                       Domain Category
                     </label>
                     <select
                       value={pubCategory}
                       onChange={(e) => setPubCategory(e.target.value as any)}
-                      className="w-full px-3 py-2 rounded-xl text-xs bg-black/4 dark:bg-white/5 text-[#202124] dark:text-[#f8fafc] focus:outline-none border-none transition-all"
+                      className="w-full px-3.5 py-2.5 rounded-xl text-xs bg-white dark:bg-[#181a28] text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-[#1a73e8] shadow-xs border-none transition-all"
                     >
                       <option value="coding">Coding & Dev Loops</option>
                       <option value="knowledge">Knowledge & RAG</option>
@@ -605,7 +613,7 @@ export const TopologyLibraryModal: React.FC<Props> = ({ isOpen, onClose }) => {
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-[#5f6368] dark:text-[#94a3b8] mb-1">
+                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
                       Author / Agent Persona
                     </label>
                     <input
@@ -613,13 +621,13 @@ export const TopologyLibraryModal: React.FC<Props> = ({ isOpen, onClose }) => {
                       value={pubAuthor}
                       onChange={(e) => setPubAuthor(e.target.value)}
                       placeholder="e.g. Gemini CLI Lead / Logan"
-                      className="w-full px-3.5 py-2 rounded-xl text-xs bg-black/4 dark:bg-white/5 text-[#202124] dark:text-[#f8fafc] focus:outline-none focus:ring-1 focus:ring-[#1a73e8] border-none transition-all"
+                      className="w-full px-3.5 py-2.5 rounded-xl text-xs bg-white dark:bg-[#181a28] text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-[#1a73e8] shadow-xs border-none transition-all"
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-[#5f6368] dark:text-[#94a3b8] mb-1">
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
                     Tags (comma separated)
                   </label>
                   <input
@@ -627,12 +635,12 @@ export const TopologyLibraryModal: React.FC<Props> = ({ isOpen, onClose }) => {
                     value={pubTags}
                     onChange={(e) => setPubTags(e.target.value)}
                     placeholder="e.g. testing, vitest, autonomous, cicd"
-                    className="w-full px-3.5 py-2 rounded-xl text-xs bg-black/4 dark:bg-white/5 text-[#202124] dark:text-[#f8fafc] focus:outline-none focus:ring-1 focus:ring-[#1a73e8] border-none transition-all"
+                    className="w-full px-3.5 py-2.5 rounded-xl text-xs bg-white dark:bg-[#181a28] text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-[#1a73e8] shadow-xs border-none transition-all"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-[#5f6368] dark:text-[#94a3b8] mb-1">
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
                     Description & Purpose
                   </label>
                   <textarea
@@ -640,27 +648,27 @@ export const TopologyLibraryModal: React.FC<Props> = ({ isOpen, onClose }) => {
                     value={pubDesc}
                     onChange={(e) => setPubDesc(e.target.value)}
                     placeholder="Explain what this topology accomplishes, required inputs, and expected artifacts..."
-                    className="w-full px-3.5 py-2 rounded-xl text-xs bg-black/4 dark:bg-white/5 text-[#202124] dark:text-[#f8fafc] focus:outline-none focus:ring-1 focus:ring-[#1a73e8] border-none transition-all resize-none"
+                    className="w-full px-3.5 py-2.5 rounded-xl text-xs bg-white dark:bg-[#181a28] text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-[#1a73e8] shadow-xs border-none transition-all resize-none"
                   />
                 </div>
 
                 {/* Actions: Save locally, Export Pack, Copy GitHub JSON */}
-                <div className="flex flex-col sm:flex-row items-center gap-2 pt-2">
+                <div className="flex flex-col sm:flex-row items-center gap-2.5 pt-2">
                   <button
                     type="submit"
-                    className="w-full sm:flex-1 py-2.5 px-4 rounded-xl bg-[#1a73e8] hover:bg-[#1557b0] text-white text-xs font-semibold shadow-xs transition-all border-none cursor-pointer flex items-center justify-center gap-1.5"
+                    className="w-full sm:flex-1 py-3 px-4 rounded-xl bg-[#1a73e8] hover:bg-[#1557b0] text-white text-xs font-bold shadow-elevated-xs hover:scale-[1.01] active:scale-[0.99] transition-all border-none cursor-pointer flex items-center justify-center gap-1.5"
                   >
-                    <PlusCircle size={14} />
+                    <PlusCircle size={15} />
                     <span>Save to Local Registry</span>
                   </button>
 
                   <button
                     type="button"
                     onClick={handleCopyContributionJson}
-                    className="w-full sm:w-auto py-2.5 px-3 rounded-xl bg-black/5 dark:bg-white/5 hover:bg-black/10 text-[#202124] dark:text-[#f8fafc] text-xs font-medium transition-colors border-none cursor-pointer flex items-center justify-center gap-1.5"
+                    className="w-full sm:w-auto py-3 px-4 rounded-xl bg-slate-200/70 dark:bg-white/10 hover:bg-slate-300/70 text-slate-800 dark:text-white text-xs font-semibold transition-colors border-none cursor-pointer flex items-center justify-center gap-1.5 shadow-xs"
                     title="Copy JSON formatted for a GitHub PR to the community topology repository"
                   >
-                    {isCopied ? <Check size={14} className="text-green-500" /> : <Copy size={14} />}
+                    {isCopied ? <Check size={15} className="text-green-500" /> : <Copy size={15} />}
                     <span>{isCopied ? 'PR JSON Copied!' : 'Copy GitHub PR JSON'}</span>
                   </button>
                 </div>
@@ -669,13 +677,13 @@ export const TopologyLibraryModal: React.FC<Props> = ({ isOpen, onClose }) => {
           )}
         </div>
 
-        {/* Modal Footer */}
-        <div className="px-6 py-3 border-t border-black/5 dark:border-white/10 flex items-center justify-between text-[11px] text-[#5f6368] dark:text-[#94a3b8] bg-black/2 dark:bg-white/2">
-          <span>Global Archetype Standard v2.0 • Zero-Borders Elevated Design</span>
+        {/* Modal Footer (No borders, elevated paper) */}
+        <div className="px-6 py-3.5 flex items-center justify-between text-xs text-slate-600 dark:text-slate-400 bg-white/80 dark:bg-[#151724]/80 shrink-0 shadow-xs border-none">
+          <span className="font-medium">Global Archetype Standard v2.0 • Zero-Borders Elevated Design</span>
           <button
             type="button"
             onClick={onClose}
-            className="px-3 py-1 rounded-lg hover:bg-black/5 dark:hover:bg-white/10 text-[#5f6368] dark:text-[#94a3b8] hover:text-[#202124] dark:hover:text-[#f8fafc] transition-colors border-none cursor-pointer font-medium"
+            className="px-3.5 py-1.5 rounded-xl hover:bg-black/5 dark:hover:bg-white/10 text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white transition-colors border-none cursor-pointer font-bold"
           >
             Close Hub
           </button>

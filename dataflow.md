@@ -510,4 +510,30 @@ To prevent frame drops, garbage collection spikes, and WebGL shader re-compiles 
 - **Zero-Overflow Mobile Header**: Extra-wide buttons collapse on phone screens while primary studio switches (2D/3D, AI Plan, Swarm Agents, Theme) remain fully visible without horizontal scrollbar clipping.
 - **Smart Dock Spacing**: Bottom docks (`SimulationBar`, `MultiAgentCockpit`, `CanvasMiniMap`) automatically negotiate screen space and auto-hide when inspector sheets are open.
 
+---
+
+## 22. 3D Constellation Reliability, Sidebar Anchor Invariants & Topology Hub Visual Hierarchy
+
+### 1. 3D Constellation Rendering & Camera Viewport Invariant
+- **Failure Mode Addressed**: Premature `zoomToFit` executions while nodes were at `(0, 0, 0)` caused camera vectors to collapse to zero-length, producing `NaN` matrix projections in Three.js and rendering an empty WebGL scene. Additionally, aggressive `warmupTicks` and `cooldownTicks` halted physics before the initial frame.
+- **Reliable Solution**:
+  - **Self-Illuminating Luminous Materials**: Shifted to pooled `MeshLambertMaterial` with `emissive` color and high emissive intensity (0.45-0.95), guaranteeing vivid visibility across light and dark modes regardless of directional lighting delay.
+  - **Resilient Scene Light Injection**: Added a `requestAnimationFrame` loop that checks `fgRef.current.scene()` and injects ambient (`1.1` intensity) and dual directional lights once the canvas is initialized.
+  - **Safe Camera Auto-Fit Guard**: `zoomToFit` checks `getGraphBbox()`; if the bounding box has not dispersed beyond the origin, a safe perspective camera position `{ x: 0, y: 30, z: 280 }` is applied, preventing `NaN` camera matrices.
+  - **Natural Force Simulation**: Removed aggressive physics throttles, allowing `d3-force-3d` to animate smoothly to equilibrium with `onEngineStop` auto-fitting.
+
+### 2. Sidebar Filter Top-Anchored Positioning Invariant
+- **Failure Mode Addressed**: The sidebar previously jumped to the bottom on expand and back to the top when collapsed because the expanded state had `bottom-3 sm:bottom-6` and full-height stretching, altering its vertical anchor point.
+- **Reliable Solution**:
+  - **Unified Anchor Coordinates**: Both collapsed vertical rail and expanded filter card share the exact same `fixed top-16 sm:top-18 left-2.5 sm:left-4 z-30` anchor.
+  - **In-Place Vertical Expansion**: Capped at `max-h-[calc(100vh-5.5rem)]` with internal scrollable filters (`overflow-y-auto`), expanding downward cleanly without ever anchoring to the bottom edge.
+  - **Smooth Framer Motion Transition**: `AnimatePresence` with subtle scale (`0.94` to `1`) and fade morphs the rail into the panel in place.
+
+### 3. Topology Archetype Hub Contrast & Elevated Paper Hierarchy
+- **Visual Contrast Elevation**:
+  - **Modal Surface Contrast**: Modal frame uses `bg-[#f8fafc] dark:bg-[#0f111a]`, ensuring elevated cards (`bg-white dark:bg-[#181a28]`) float with crisp paper depth and distinct shadows (`shadow-elevated-sm hover:shadow-elevated-md`).
+  - **High-Legibility Typography**: Crisp, dark slate typography in light mode (`text-slate-900 font-bold`, `text-slate-600 font-normal`) and luminous text in dark mode (`text-white font-bold`, `text-slate-300`).
+  - **High-Contrast Badges**: Vivid `Ready` (`bg-[#e6f4ea] text-[#137333] dark:bg-[#1e8e3e]/30 dark:text-[#34a853]`), `Popular` (`bg-[#fce8e6] text-[#c5221f] dark:bg-[#d93025]/25`), and `Roadmap` (`bg-[#fef7e0] text-[#b06000]`).
+  - **Zero Borders**: Strictly border-free (`border-none`) throughout modal tabs, coverage map, archetype cards, and modal footer.
+
 

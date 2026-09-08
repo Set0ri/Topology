@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Search, 
   Filter, 
@@ -23,10 +24,10 @@ export const SidebarFilter: React.FC = () => {
   const setFilterExecutionType = useTopologyStore(s => s.setFilterExecutionType);
   const filterType = useTopologyStore(s => s.filterType);
   const setFilterType = useTopologyStore(s => s.setFilterType);
-  const getStats = useTopologyStore(s => s.getStats);
 
+  const getStats = useTopologyStore(s => s.getStats);
   const stats = getStats();
-  const hasActiveFilters = searchQuery.trim() !== '' || filterStatus !== 'all' || filterType !== 'all' || filterExecutionType !== 'all';
+  const hasActiveFilters = searchQuery !== '' || filterStatus !== 'all' || filterExecutionType !== 'all' || filterType !== 'all';
 
   const handleResetFilters = () => {
     setSearchQuery('');
@@ -35,55 +36,68 @@ export const SidebarFilter: React.FC = () => {
     setFilterExecutionType('all');
   };
 
-  // Collapsed State: Sleek Vertical Floating Rail
-  if (isCollapsed) {
-    return (
-      <aside className="fixed top-16 sm:top-18 left-2.5 sm:left-4 z-30 flex flex-col items-center gap-2 p-1.5 sm:p-2 rounded-2xl bg-white/90 dark:bg-[#181a24]/90 backdrop-blur-2xl shadow-elevated-md border-none select-none transition-all duration-200">
-        <button
-          type="button"
-          onClick={() => setIsCollapsed(false)}
-          className="p-2 rounded-xl text-[#5f6368] dark:text-[#94a3b8] hover:text-[#202124] dark:hover:text-[#f8fafc] hover:bg-black/5 dark:hover:bg-white/10 transition-colors border-none cursor-pointer"
-          title="Expand Filter Sidebar"
-        >
-          <ChevronRight size={16} />
-        </button>
-
-        <div className="w-6 h-px bg-black/5 dark:bg-white/10" />
-
-        <button
-          type="button"
-          onClick={() => setIsCollapsed(false)}
-          className="relative p-2 rounded-xl text-[#5f6368] dark:text-[#94a3b8] hover:text-[#202124] dark:hover:text-[#f8fafc] hover:bg-black/5 dark:hover:bg-white/10 transition-colors border-none cursor-pointer"
-          title="Search & Filters"
-        >
-          <Filter size={15} className={hasActiveFilters ? 'text-[#1a73e8]' : ''} />
-          {hasActiveFilters && (
-            <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-[#1a73e8] shadow-xs" />
-          )}
-        </button>
-
-        {/* Quick Node Count Badge */}
-        <div 
-          onClick={() => setIsCollapsed(false)}
-          className="cursor-pointer text-[10px] font-bold px-1.5 py-0.5 rounded-lg bg-black/5 dark:bg-white/10 text-[#5f6368] dark:text-[#94a3b8]"
-          title={`${stats.total} total nodes`}
-        >
-          {stats.total}
-        </div>
-      </aside>
-    );
-  }
-
-  // Expanded State: Elevated Floating Paper Panel with Mobile Backdrop
   return (
-    <>
-      {/* Mobile Backdrop Click-to-Dismiss */}
-      <div 
-        className="fixed inset-0 bg-black/25 backdrop-blur-xs z-30 sm:hidden" 
-        onClick={() => setIsCollapsed(true)} 
-      />
+    <AnimatePresence mode="wait">
+      {isCollapsed ? (
+        <motion.aside
+          key="sidebar-collapsed"
+          initial={{ opacity: 0, scale: 0.94 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: 0.94 }}
+          transition={{ duration: 0.16, ease: 'easeOut' }}
+          className="fixed top-16 sm:top-18 left-2.5 sm:left-4 z-30 flex flex-col items-center gap-2 p-1.5 sm:p-2 rounded-2xl bg-white/95 dark:bg-[#181a24]/95 text-[#202124] dark:text-[#f8fafc] backdrop-blur-2xl shadow-elevated-md border-none select-none"
+        >
+          <button
+            type="button"
+            onClick={() => setIsCollapsed(false)}
+            className="p-2 rounded-xl text-[#5f6368] dark:text-[#94a3b8] hover:text-[#202124] dark:hover:text-[#f8fafc] hover:bg-black/5 dark:hover:bg-white/10 transition-colors border-none cursor-pointer"
+            title="Expand Filter Sidebar"
+          >
+            <ChevronRight size={16} />
+          </button>
 
-      <aside className="fixed top-15 sm:top-18 left-2.5 sm:left-4 bottom-3 sm:bottom-6 w-[calc(100vw-1.25rem)] sm:w-72 max-w-full z-40 sm:z-30 rounded-3xl p-3.5 sm:p-4 bg-white/95 dark:bg-[#181a24]/95 text-[#202124] dark:text-[#f8fafc] backdrop-blur-2xl shadow-elevated-xl border-none flex flex-col overflow-hidden select-none transition-all duration-200">
+          <div className="w-6 h-px bg-black/5 dark:bg-white/10" />
+
+          <button
+            type="button"
+            onClick={() => setIsCollapsed(false)}
+            className="relative p-2 rounded-xl text-[#5f6368] dark:text-[#94a3b8] hover:text-[#202124] dark:hover:text-[#f8fafc] hover:bg-black/5 dark:hover:bg-white/10 transition-colors border-none cursor-pointer"
+            title="Search & Filters"
+          >
+            <Filter size={15} className={hasActiveFilters ? 'text-[#1a73e8]' : ''} />
+            {hasActiveFilters && (
+              <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-[#1a73e8] shadow-xs" />
+            )}
+          </button>
+
+          {/* Quick Node Count Badge */}
+          <div 
+            onClick={() => setIsCollapsed(false)}
+            className="cursor-pointer text-[10px] font-bold px-1.5 py-0.5 rounded-lg bg-black/5 dark:bg-white/10 text-[#5f6368] dark:text-[#94a3b8]"
+            title={`${stats.total} total nodes`}
+          >
+            {stats.total}
+          </div>
+        </motion.aside>
+      ) : (
+        <React.Fragment key="sidebar-expanded-container">
+          {/* Mobile Backdrop Click-to-Dismiss */}
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/25 backdrop-blur-xs z-30 sm:hidden" 
+            onClick={() => setIsCollapsed(true)} 
+          />
+
+          <motion.aside
+            key="sidebar-expanded"
+            initial={{ opacity: 0, scale: 0.95, y: -4 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: -4 }}
+            transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+            className="fixed top-16 sm:top-18 left-2.5 sm:left-4 w-72 sm:w-80 max-w-[calc(100vw-1.5rem)] max-h-[calc(100vh-5.5rem)] z-40 sm:z-30 rounded-3xl p-3.5 sm:p-4 bg-white/95 dark:bg-[#181a24]/95 text-[#202124] dark:text-[#f8fafc] backdrop-blur-2xl shadow-elevated-2xl border-none flex flex-col overflow-hidden select-none"
+          >
       {/* Panel Header */}
       <div className="flex items-center justify-between pb-3">
         <div className="flex items-center gap-2">
@@ -327,7 +341,9 @@ export const SidebarFilter: React.FC = () => {
           </div>
         </div>
       </div>
-    </aside>
-  </>
+    </motion.aside>
+  </React.Fragment>
+)}
+</AnimatePresence>
   );
 };
