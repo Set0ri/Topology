@@ -172,16 +172,20 @@ export function calculateDagreLayout(
   const dagreGraph = new dagre.graphlib.Graph();
   dagreGraph.setDefaultEdgeLabel(() => ({}));
   
+  const isVertical = direction === 'TB';
   dagreGraph.setGraph({
     rankdir: direction,
-    nodesep: 120,
-    ranksep: 180,
-    marginx: 50,
-    marginy: 50
+    nodesep: isVertical ? 65 : 120,
+    ranksep: isVertical ? 110 : 180,
+    marginx: isVertical ? 30 : 50,
+    marginy: isVertical ? 30 : 50
   });
 
+  const nodeWidth = isVertical ? 290 : 320;
+  const nodeHeight = isVertical ? 150 : 160;
+
   nodes.forEach(n => {
-    dagreGraph.setNode(n.id, { width: 320, height: 160 });
+    dagreGraph.setNode(n.id, { width: nodeWidth, height: nodeHeight });
   });
 
   edges.forEach(e => {
@@ -195,8 +199,8 @@ export function calculateDagreLayout(
     const nodeWithPos = dagreGraph.node(n.id);
     if (nodeWithPos) {
       positions[n.id] = {
-        x: nodeWithPos.x - 140,
-        y: nodeWithPos.y - 60
+        x: Math.round(nodeWithPos.x - nodeWidth / 2),
+        y: Math.round(nodeWithPos.y - nodeHeight / 2)
       };
     }
   });

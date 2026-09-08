@@ -536,4 +536,52 @@ To prevent frame drops, garbage collection spikes, and WebGL shader re-compiles 
   - **High-Contrast Badges**: Vivid `Ready` (`bg-[#e6f4ea] text-[#137333] dark:bg-[#1e8e3e]/30 dark:text-[#34a853]`), `Popular` (`bg-[#fce8e6] text-[#c5221f] dark:bg-[#d93025]/25`), and `Roadmap` (`bg-[#fef7e0] text-[#b06000]`).
   - **Zero Borders**: Strictly border-free (`border-none`) throughout modal tabs, coverage map, archetype cards, and modal footer.
 
+---
+
+## 23. Dynamic Vertical DAG Layout & Mobile Orientation Engine
+
+### 1. Viewport-Aware DAG Topology Orientation
+- **Problem**: Horizontal Left-to-Right (`'LR'`) graphs exceed mobile screen aspect ratios ($9:16$ portrait), resulting in heavy horizontal panning, tiny fit-to-screen scale factors, and degraded readability.
+- **Solution**:
+  - **Automatic Mobile Detection**: On initial render and dynamic window resize (`< 768px`), `layoutDirection` automatically sets to `'TB'` (Top-to-Bottom vertical flow).
+  - **Orientation State Machine**: `layoutDirection: 'LR' | 'TB'` is stored centrally in Zustand, with reactive controllers `setLayoutDirection(dir)` and `toggleLayoutDirection()`.
+  - **Interactive Orientation Switcher**: Quick action floating panel on the canvas includes a dedicated orientation toggle button with `ArrowDownUp` / `ArrowLeftRight` icons and instant smooth camera reframing (`fitView`).
+
+### 2. Dagre Hierarchical Layout Engine Adaptation
+- In `calculateDagreLayout(nodes, edges, direction)`:
+  - **Vertical Mode (`'TB'`) Parameters**:
+    - `rankdir: 'TB'`
+    - `nodesep: 65` (horizontal spacing between parallel sibling branches)
+    - `ranksep: 110` (vertical spacing between causal tiers)
+    - `marginx: 30`, `marginy: 30`
+    - Node dimension anchors: `width: 290`, `height: 150`
+    - Centered bounding coordinates: `x = Math.round(nodeWithPos.x - nodeWidth / 2)`, `y = Math.round(nodeWithPos.y - nodeHeight / 2)`
+  - **Horizontal Mode (`'LR'`) Parameters**:
+    - `rankdir: 'LR'`, `nodesep: 120`, `ranksep: 180`, `marginx: 50`, `marginy: 50`
+
+### 3. Handle Priority & React Flow Edge Routing Invariant
+- **React Flow Handle Binding Rule**: React Flow connects edges to the *first* declared `<Handle>` of a given type (`source` or `target`) when handle IDs are omitted.
+- **Orientation-Specific Handle Ordering**:
+  - **In Vertical Mode (`isVertical = true`)**:
+    - Primary `target` handle: `Position.Top`
+    - Primary `source` handle: `Position.Bottom`
+    - Secondary fallback handles: `Position.Left` / `Position.Right`
+    - Guarantees top-to-bottom bezier edge trajectories without horizontal S-curve loops.
+  - **In Horizontal Mode (`isVertical = false`)**:
+    - Primary `target` handle: `Position.Left`
+    - Primary `source` handle: `Position.Right`
+    - Secondary fallback handles: `Position.Top` / `Position.Bottom`
+  - **Nano LOD Mode**: Dynamically mounts `Position.Top` + `Position.Bottom` when vertical, and `Position.Left` + `Position.Right` when horizontal.
+
+### 4. Interactive Node Creation & Branching Offsets
+- **Child Branching (`branchChildNode`)**:
+  - Vertical: Offsets new child vertically downward (`y + 190`) with slight horizontal jitter (`x + random(-30, 30)`).
+  - Horizontal: Offsets new child rightward (`x + 340`).
+- **Parallel Siblings (`createSiblingNode`)**:
+  - Vertical: Places parallel sibling alongside horizontally (`x + 310, y`).
+  - Horizontal: Places parallel sibling below vertically (`x, y + 160`).
+- **Archetype Loading**: `loadTopologyDirect` and `loadSampleTopology` automatically compute vertical layouts if loaded while in `'TB'` mode.
+- **AI Plan Generator**: Synthesized workflows automatically layout according to the active viewport orientation.
+
+
 

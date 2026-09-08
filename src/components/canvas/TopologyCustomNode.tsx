@@ -71,6 +71,8 @@ const TopologyCustomNodeComponent: React.FC<NodeProps> = ({ id, data, selected }
 
   const theme = useTopologyStore(s => s.theme);
   const lod = useTopologyStore(s => s.lod);
+  const layoutDirection = useTopologyStore(s => s.layoutDirection);
+  const isVertical = layoutDirection === 'TB';
   const hoveredNodeId = useTopologyStore(s => s.hoveredNodeId);
   const selectedNodeIds = useTopologyStore(s => s.selectedNodeIds);
   const nodes = useTopologyStore(s => s.nodes);
@@ -206,8 +208,17 @@ const TopologyCustomNodeComponent: React.FC<NodeProps> = ({ id, data, selected }
         }}
         onClick={handleCardClick}
       >
-        <Handle type="target" position={Position.Left} style={{ backgroundColor: typeColor }} className={handleClasses} />
-        <Handle type="source" position={Position.Right} style={{ backgroundColor: typeColor }} className={handleClasses} />
+        {isVertical ? (
+          <>
+            <Handle type="target" position={Position.Top} style={{ backgroundColor: typeColor }} className={handleClasses} />
+            <Handle type="source" position={Position.Bottom} style={{ backgroundColor: typeColor }} className={handleClasses} />
+          </>
+        ) : (
+          <>
+            <Handle type="target" position={Position.Left} style={{ backgroundColor: typeColor }} className={handleClasses} />
+            <Handle type="source" position={Position.Right} style={{ backgroundColor: typeColor }} className={handleClasses} />
+          </>
+        )}
 
         <div
           className={`flex items-center gap-2 px-3 py-2 rounded-2xl backdrop-blur-xl border-none shadow-elevated-md transition-all duration-200 ${
@@ -252,10 +263,21 @@ const TopologyCustomNodeComponent: React.FC<NodeProps> = ({ id, data, selected }
       onClick={handleCardClick}
     >
       {/* Target & Source Handles */}
-      <Handle type="target" position={Position.Left} style={{ backgroundColor: typeColor }} className={handleClasses} />
-      <Handle type="source" position={Position.Right} style={{ backgroundColor: typeColor }} className={handleClasses} />
-      <Handle type="target" position={Position.Top} style={{ backgroundColor: typeColor }} className={handleClasses} />
-      <Handle type="source" position={Position.Bottom} style={{ backgroundColor: typeColor }} className={handleClasses} />
+      {isVertical ? (
+        <>
+          <Handle type="target" position={Position.Top} style={{ backgroundColor: typeColor }} className={handleClasses} />
+          <Handle type="source" position={Position.Bottom} style={{ backgroundColor: typeColor }} className={handleClasses} />
+          <Handle type="target" position={Position.Left} style={{ backgroundColor: typeColor }} className={handleClasses} />
+          <Handle type="source" position={Position.Right} style={{ backgroundColor: typeColor }} className={handleClasses} />
+        </>
+      ) : (
+        <>
+          <Handle type="target" position={Position.Left} style={{ backgroundColor: typeColor }} className={handleClasses} />
+          <Handle type="source" position={Position.Right} style={{ backgroundColor: typeColor }} className={handleClasses} />
+          <Handle type="target" position={Position.Top} style={{ backgroundColor: typeColor }} className={handleClasses} />
+          <Handle type="source" position={Position.Bottom} style={{ backgroundColor: typeColor }} className={handleClasses} />
+        </>
+      )}
 
       {/* Main Card */}
       <motion.div

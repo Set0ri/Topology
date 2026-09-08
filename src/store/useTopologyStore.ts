@@ -114,10 +114,13 @@ interface TopologyStore {
   exitSubgraph: () => void;
   navigateToBreadcrumb: (index: number) => void;
 
-  // View & Theme & LOD
+  // View & Theme & LOD & Orientation
   theme: ThemeMode;
   viewMode: ViewMode;
   lod: LevelOfDetail;
+  layoutDirection: 'LR' | 'TB';
+  setLayoutDirection: (dir: 'LR' | 'TB') => void;
+  toggleLayoutDirection: () => void;
 
   // Filters & Search
   searchQuery: string;
@@ -229,6 +232,22 @@ interface TopologyStore {
 
 const defaultSample = SAMPLE_TOPOLOGIES[0];
 
+const getInitialGraph = () => {
+  const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+  const layoutDirection: 'LR' | 'TB' = isMobile ? 'TB' : 'LR';
+  if (isMobile) {
+    const positions = calculateDagreLayout(defaultSample.nodes, defaultSample.edges, 'TB');
+    const nodes = defaultSample.nodes.map(n => ({
+      ...n,
+      position: positions[n.id] || n.position,
+    }));
+    return { nodes, edges: defaultSample.edges, layoutDirection };
+  }
+  return { nodes: defaultSample.nodes, edges: defaultSample.edges, layoutDirection };
+};
+
+const initialGraph = getInitialGraph();
+
 const getInitialUserTopologies = (): CanonicalArchetype[] => {
   if (typeof window === 'undefined') return [];
   try {
@@ -249,8 +268,9 @@ export const useTopologyStore = create<TopologyStore>((set, get) => {
 
   return {
     userTopologies: getInitialUserTopologies(),
-    nodes: defaultSample.nodes,
-    edges: defaultSample.edges,
+    nodes: initialGraph.nodes,
+    edges: initialGraph.edges,
+    layoutDirection: initialGraph.layoutDirection,
     selectedNodeId: null,
     selectedNodeIds: [],
     hoveredNodeId: null,
@@ -1333,13 +1353,16 @@ export const useTopologyStore = create<TopologyStore>((set, get) => {
     branchChildNode: (parentId) => {
       const parent = get().nodes.find(n => n.id === parentId);
       const parentPos = parent ? parent.position : { x: 100, y: 100 };
+      const isVertical = get().layoutDirection === 'TB';
       
       const child = get().addNode({
         type: 'task',
         label: `Subtask of ${parent ? parent.label.slice(0, 18) : 'Task'}`,
         description: `Decomposed action step following ${parent ? parent.label : 'prerequisite'}.`,
         status: 'pending',
-        position: { x: parentPos.x + 340, y: parentPos.y + (Math.random() * 80 - 40) },
+        position: isVertical
+          ? { x: parentPos.x + (Math.random() * 60 - 30), y: parentPos.y + 190 }
+          : { x: parentPos.x + 340, y: parentPos.y + (Math.random() * 80 - 40) },
       });
 
       get().connectNodes(parentId, child.id, 'depends_on', 'prerequisite');
@@ -1349,29 +1372,45 @@ export const useTopologyStore = create<TopologyStore>((set, get) => {
     createSiblingNode: (referenceId) => {
       const ref = get().nodes.find(n => n.id === referenceId);
       const refPos = ref ? ref.position : { x: 100, y: 100 };
+      const isVertical = get().layoutDirection === 'TB';
 
       const sibling = get().addNode({
         type: ref ? ref.type : 'task',
         label: `Parallel ${ref ? ref.type : 'Task'}`,
         description: 'Parallel stream of execution for the agent.',
         status: 'ready',
-        position: { x: refPos.x, y: refPos.y + 160 },
+        position: isVertical
+          ? { x: refPos.x + 310, y: refPos.y }
+          : { x: refPos.x, y: refPos.y + 160 },
       });
 
       return sibling;
     },
 
-    applyDagreLayout: (direction = 'LR') => {
+    applyDagreLayout: (direction) => {
       saveSnapshot();
-      const { nodes, edges } = get();
-      const positions = calculateDagreLayout(nodes, edges, direction);
+      const { nodes, edges, layoutDirection } = get();
+      const targetDir = direction || layoutDirection || 'LR';
+      const positions = calculateDagreLayout(nodes, edges, targetDir);
 
       set({
+        layoutDirection: targetDir,
         nodes: nodes.map(n => ({
           ...n,
           position: positions[n.id] || n.position,
         })),
       });
+    },
+
+    setLayoutDirection: (dir: 'LR' | 'TB') => {
+      const current = get().layoutDirection;
+      if (current === dir) return;
+      get().applyDagreLayout(dir);
+    },
+
+    toggleLayoutDirection: () => {
+      const next = get().layoutDirection === 'LR' ? 'TB' : 'LR';
+      get().applyDagreLayout(next);
     },
 
     startSimulation: () => {
@@ -1913,8 +1952,19 @@ export const useTopologyStore = create<TopologyStore>((set, get) => {
 
     loadTopologyDirect: (nodes, edges) => {
       saveSnapshot();
+      const isVertical = get().layoutDirection === 'TB';
+      const finalNodes = isVertical
+        ? (() => {
+            const positions = calculateDagreLayout(nodes, edges, 'TB');
+            return nodes.map(n => ({
+              ...n,
+              position: positions[n.id] || n.position,
+            }));
+          })()
+        : JSON.parse(JSON.stringify(nodes));
+
       set({
-        nodes: JSON.parse(JSON.stringify(nodes)),
+        nodes: finalNodes,
         edges: JSON.parse(JSON.stringify(edges)),
         selectedNodeId: null,
         selectedNodeIds: [],
@@ -1922,15 +1972,26 @@ export const useTopologyStore = create<TopologyStore>((set, get) => {
     },
 
     loadSampleTopology: (sampleId) => {
-      const { userTopologies } = get();
+      const { userTopologies, layoutDirection } = get();
       const canonical = CANONICAL_ARCHETYPES.find(a => a.id === sampleId);
       const userTop = userTopologies.find(u => u.id === sampleId);
       const sample = SAMPLE_TOPOLOGIES.find(s => s.id === sampleId);
       const found = (canonical && canonical.nodes.length > 0 ? canonical : null) || userTop || sample || SAMPLE_TOPOLOGIES[0];
 
       saveSnapshot();
+      const isVertical = layoutDirection === 'TB';
+      const finalNodes = isVertical
+        ? (() => {
+            const positions = calculateDagreLayout(found.nodes, found.edges, 'TB');
+            return found.nodes.map(n => ({
+              ...n,
+              position: positions[n.id] || n.position,
+            }));
+          })()
+        : JSON.parse(JSON.stringify(found.nodes));
+
       set({
-        nodes: JSON.parse(JSON.stringify(found.nodes)),
+        nodes: finalNodes,
         edges: JSON.parse(JSON.stringify(found.edges)),
         selectedNodeId: null,
         selectedNodeIds: [],

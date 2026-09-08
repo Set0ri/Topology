@@ -26,7 +26,7 @@ import { SpotlightQuickAdd } from './SpotlightQuickAdd';
 import { SubgraphBreadcrumbs } from '../subgraph/SubgraphBreadcrumbs';
 import { MultiSelectionDock } from './MultiSelectionDock';
 import { CanvasMiniMap } from './CanvasMiniMap';
-import { LayoutGrid, Plus, Eye, ZoomIn, ZoomOut } from 'lucide-react';
+import { LayoutGrid, Plus, Eye, ZoomIn, ZoomOut, ArrowDownUp, ArrowLeftRight } from 'lucide-react';
 
 const nodeTypes = {
   custom: TopologyCustomNode,
@@ -37,7 +37,7 @@ const edgeTypes = {
 };
 
 const TopologyCanvasInner: React.FC = () => {
-  const { screenToFlowPosition } = useReactFlow();
+  const { screenToFlowPosition, fitView } = useReactFlow();
   const { zoom } = useViewport();
 
   const nodes = useTopologyStore(s => s.nodes);
@@ -48,6 +48,9 @@ const TopologyCanvasInner: React.FC = () => {
   const theme = useTopologyStore(s => s.theme);
   const lod = useTopologyStore(s => s.lod);
   const setLod = useTopologyStore(s => s.setLod);
+  const layoutDirection = useTopologyStore(s => s.layoutDirection);
+  const setLayoutDirection = useTopologyStore(s => s.setLayoutDirection);
+  const toggleLayoutDirection = useTopologyStore(s => s.toggleLayoutDirection);
   const updateNode = useTopologyStore(s => s.updateNode);
   const connectNodes = useTopologyStore(s => s.connectNodes);
   const selectNode = useTopologyStore(s => s.selectNode);
@@ -56,6 +59,28 @@ const TopologyCanvasInner: React.FC = () => {
   const createSiblingNode = useTopologyStore(s => s.createSiblingNode);
   const applyDagreLayout = useTopologyStore(s => s.applyDagreLayout);
   const addNode = useTopologyStore(s => s.addNode);
+
+  // Responsive layout: auto-switch to vertical ('TB') when resizing to mobile (< 768px), or horizontal ('LR') on desktop
+  useEffect(() => {
+    let lastWidth = typeof window !== 'undefined' ? window.innerWidth : 1200;
+    const handleResize = () => {
+      const currentWidth = window.innerWidth;
+      const wasMobile = lastWidth < 768;
+      const isNowMobile = currentWidth < 768;
+      lastWidth = currentWidth;
+
+      if (!wasMobile && isNowMobile) {
+        setLayoutDirection('TB');
+        setTimeout(() => fitView({ duration: 350, padding: 0.2 }), 50);
+      } else if (wasMobile && !isNowMobile) {
+        setLayoutDirection('LR');
+        setTimeout(() => fitView({ duration: 350, padding: 0.2 }), 50);
+      }
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [setLayoutDirection, fitView]);
 
   // Dynamic Semantic Level-of-Detail (LOD) tracking based on viewport zoom
   useEffect(() => {
@@ -275,13 +300,39 @@ const TopologyCanvasInner: React.FC = () => {
             <span className="sm:hidden">Add</span>
           </button>
           <button
-            onClick={() => applyDagreLayout('LR')}
+            onClick={() => {
+              applyDagreLayout();
+              setTimeout(() => fitView({ duration: 350, padding: 0.2 }), 40);
+            }}
             title="Auto-organize DAG Hierarchical Layout"
             className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-medium bg-white/90 dark:bg-[#1f2230]/90 hover:bg-slate-100 dark:hover:bg-white/10 text-[#202124] dark:text-[#f8fafc] shadow-elevated-md backdrop-blur-xl transition-all duration-150 border-none cursor-pointer"
           >
             <LayoutGrid size={14} className="text-[#9334e6]" />
             <span className="hidden sm:inline">Auto Layout</span>
             <span className="sm:hidden">Layout</span>
+          </button>
+
+          <button
+            onClick={() => {
+              toggleLayoutDirection();
+              setTimeout(() => fitView({ duration: 350, padding: 0.2 }), 40);
+            }}
+            title={`Toggle orientation: currently ${layoutDirection === 'TB' ? 'Vertical (Top-to-Bottom)' : 'Horizontal (Left-to-Right)'}`}
+            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-medium bg-white/90 dark:bg-[#1f2230]/90 hover:bg-slate-100 dark:hover:bg-white/10 text-[#202124] dark:text-[#f8fafc] shadow-elevated-md backdrop-blur-xl transition-all duration-150 border-none cursor-pointer"
+          >
+            {layoutDirection === 'TB' ? (
+              <>
+                <ArrowDownUp size={14} className="text-[#007b83] dark:text-[#26a69a]" />
+                <span className="hidden sm:inline">Vertical (TB)</span>
+                <span className="sm:hidden">Vert</span>
+              </>
+            ) : (
+              <>
+                <ArrowLeftRight size={14} className="text-[#1a73e8]" />
+                <span className="hidden sm:inline">Horizontal (LR)</span>
+                <span className="sm:hidden">Horiz</span>
+              </>
+            )}
           </button>
         </Panel>
 

@@ -183,8 +183,9 @@ export const PlanGeneratorModal: React.FC<PlanGeneratorModalProps> = ({ isOpen, 
         { id: 'ge6', source: 'gen-tests', target: 'gen-milestone', type: 'depends_on', label: 'ship' },
       ];
 
-      // Auto-layout
-      const layoutPositions = calculateDagreLayout(nodes, edges, 'LR');
+      // Auto-layout with current layout direction
+      const currentDir = useTopologyStore.getState().layoutDirection || 'LR';
+      const layoutPositions = calculateDagreLayout(nodes, edges, currentDir);
       const alignedNodes = nodes.map(n => ({
         ...n,
         position: layoutPositions[n.id] || n.position,
