@@ -583,5 +583,52 @@ To prevent frame drops, garbage collection spikes, and WebGL shader re-compiles 
 - **Archetype Loading**: `loadTopologyDirect` and `loadSampleTopology` automatically compute vertical layouts if loaded while in `'TB'` mode.
 - **AI Plan Generator**: Synthesized workflows automatically layout according to the active viewport orientation.
 
+---
+
+## 24. Antigravity External Agent Integration, Live SSE Bridge & Model Context Protocol (MCP)
+
+### 1. Zero-Dependency Model Context Protocol (MCP) Server (`mcp-server/index.js`)
+- **Protocol**: JSON-RPC 2.0 over standard input/output (`stdio`) following the open Model Context Protocol specification.
+- **Global Discovery**: Configured in `~/.gemini/config/mcp_config.json` and `.agents/mcp_config.json`. Any Antigravity agent or subagent running in any IDE workspace or CLI session automatically discovers the tools without extra installation.
+- **Exposed Agent Tools**:
+  1. `topology_create_plan({ title, description, nodes, edges })`: Ingests decomposed task DAGs and causal dependencies.
+  2. `topology_update_node({ nodeId, status, thought, toolName, terminalLog, outputArtifacts })`: Updates real-time node state and telemetry.
+  3. `topology_emit_thought({ nodeId, thought, toolName })`: Streams the agent's live reasoning thoughts and active tools to the canvas card.
+  4. `topology_request_approval({ nodeId, notes, proposedArtifacts })`: Pauses workflow at a Human Review Gate for supervisor sign-off.
+  5. `topology_get_plan({ includeApprovals })`: Queries current DAG state, completion progress, and human decisions.
+
+### 2. High-Performance Server-Sent Events (SSE) Live Bridge (`plugins/topologyBridgePlugin.js`)
+- **Unified Port Architecture**: Mounts directly into the Vite development server (`http://localhost:5173/api/topology/*`) via custom Vite middleware. No secondary daemon process or port is required.
+- **Reactive Endpoints**:
+  - `GET /api/topology/stream`: Long-lived SSE stream pushing `plan_updated`, `node_updated`, `thought_stream`, `agent_event`, and `node_approved` events to all connected browser tabs.
+  - `POST /api/topology/plan`, `POST /api/topology/node`, `POST /api/topology/thought`, `POST /api/topology/event`: Ingests payloads from MCP or CLI scripts and broadcasts immediately.
+  - `POST /api/topology/approve`: Ingests supervisor approval from the web canvas and stores in `.topology/approvals.json`.
+  - `GET /api/topology/approval-status?nodeId=...`: Allows waiting agents to query whether a review gate has been signed off.
+- **Resilient Offline Disk Fallback**: If the web UI is closed, the MCP server automatically writes updates to `.topology/plan.json`. Upon launching the UI, the bridge loads and renders the latest state immediately.
+
+### 3. Native Desktop Alerts & Web Audio Chime Synthesis (`src/services/liveAgentSync.ts`)
+- **Desktop Push Notifications**: Uses the HTML5 `Notification API` to deliver native OS desktop notifications for task dispatch, milestone completion, and human review gates, keeping the user informed even when the browser is backgrounded.
+- **Synthesized Web Audio Chimes**: Generates crystal-clear sine and triangle wave chimes via `AudioContext` (C5-E5 tech chirp for task starts, C5-E5-G5-C6 triumphant chord for completions, and dual-tone alert for review gates). Requires zero external sound assets.
+- **Live Canvas Card Reactivity**: Node cards update live with pulsing beacons, typing thought streams, and terminal logs without re-rendering the entire canvas.
+
+### 4. Bidirectional Human-in-the-Loop (HITL) Execution Cycle
+```
+[Antigravity Agent]
+       │
+       ▼
+calls topology_request_approval({ nodeId, notes })
+       │
+       ├──────────────────────────────────────────────┐
+       ▼                                              ▼
+MCP Server saves pending gate             Broadcasts to SSE Bridge
+       │                                              │
+       ▼                                              ▼
+Waits / polls / checks approval           Topology UI shows Review Alert & Desktop Notification
+       ▲                                              │
+       │                                              ▼
+       └────────────── Human clicks "Approve" ────────┘
+```
+
+
 
 

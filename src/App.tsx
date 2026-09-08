@@ -10,12 +10,17 @@ import { CoherenceModal } from './components/validation/CoherenceModal';
 import { OnboardingTutorialModal } from './components/tutorial/OnboardingTutorialModal';
 import { TopologyLibraryModal } from './components/library/TopologyLibraryModal';
 import { MultiAgentCockpit } from './components/swarm/MultiAgentCockpit';
+import { AgentSyncModal } from './components/modals/AgentSyncModal';
+import { useLiveAgentSync } from './services/liveAgentSync';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { Sparkles } from 'lucide-react';
 
 const TopologyGraph3D = lazy(() => import('./components/graph3d/TopologyGraph3D').then(m => ({ default: m.TopologyGraph3D })));
 
 export const App: React.FC = () => {
+  // Initialize real-time SSE listener, chimes, and notifications
+  useLiveAgentSync();
+
   const viewMode = useTopologyStore(s => s.viewMode);
   const theme = useTopologyStore(s => s.theme);
   const setTheme = useTopologyStore(s => s.setTheme);
@@ -24,6 +29,7 @@ export const App: React.FC = () => {
   const [isCoherenceOpen, setIsCoherenceOpen] = useState(false);
   const [isTutorialOpen, setIsTutorialOpen] = useState(false);
   const [isLibraryOpen, setIsLibraryOpen] = useState(false);
+  const [isAgentSyncOpen, setIsAgentSyncOpen] = useState(false);
 
   // Initialize theme class on document element & check first-time tutorial
   useEffect(() => {
@@ -51,6 +57,7 @@ export const App: React.FC = () => {
         onOpenCoherence={() => setIsCoherenceOpen(true)}
         onOpenTutorial={() => setIsTutorialOpen(true)}
         onOpenLibrary={() => setIsLibraryOpen(true)}
+        onOpenAgentSync={() => setIsAgentSyncOpen(true)}
       />
 
       {/* Main Viewport wrapped in ErrorBoundary */}
@@ -105,6 +112,12 @@ export const App: React.FC = () => {
       <OnboardingTutorialModal
         isOpen={isTutorialOpen}
         onClose={() => setIsTutorialOpen(false)}
+      />
+
+      {/* Antigravity Live Agent Sync & Notifications Modal */}
+      <AgentSyncModal
+        isOpen={isAgentSyncOpen}
+        onClose={() => setIsAgentSyncOpen(false)}
       />
     </div>
   );

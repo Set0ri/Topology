@@ -16,7 +16,8 @@ import {
   HelpCircle,
   Terminal,
   Compass,
-  Users
+  Users,
+  Radio
 } from 'lucide-react';
 import { useTopologyStore } from '../../store/useTopologyStore';
 import { exportToObsidianCanvas, exportToMermaid, exportToUniversalAgentManifest } from '../../utils/obsidianCanvas';
@@ -29,9 +30,16 @@ interface HeaderProps {
   onOpenCoherence: () => void;
   onOpenTutorial: () => void;
   onOpenLibrary: () => void;
+  onOpenAgentSync: () => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({ onOpenGenerator, onOpenCoherence, onOpenTutorial, onOpenLibrary }) => {
+export const Header: React.FC<HeaderProps> = ({ 
+  onOpenGenerator, 
+  onOpenCoherence, 
+  onOpenTutorial, 
+  onOpenLibrary,
+  onOpenAgentSync
+}) => {
   const viewMode = useTopologyStore(s => s.viewMode);
   const setViewMode = useTopologyStore(s => s.setViewMode);
   const theme = useTopologyStore(s => s.theme);
@@ -47,6 +55,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenGenerator, onOpenCoherence
   const isCockpitOpen = useTopologyStore(s => s.isCockpitOpen);
   const setCockpitOpen = useTopologyStore(s => s.setCockpitOpen);
   const globalSquad = useTopologyStore(s => s.globalSquad);
+  const liveSyncStatus = useTopologyStore(s => s.liveSyncStatus);
 
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [isSamplesOpen, setIsSamplesOpen] = useState(false);
@@ -230,6 +239,29 @@ export const Header: React.FC<HeaderProps> = ({ onOpenGenerator, onOpenCoherence
           }`}>
             {globalSquad.length}
           </span>
+        </button>
+
+        {/* Antigravity Live Agent Sync Status Pill */}
+        <button
+          type="button"
+          onClick={onOpenAgentSync}
+          title={liveSyncStatus.connected ? "Agent Live Sync Active (Click for Setup & Notifications)" : "Agent Live Sync Offline (Click to Connect)"}
+          className={`h-8 px-2 sm:px-2.5 rounded-xl text-xs font-medium flex items-center gap-1 sm:gap-1.5 transition-all border-none cursor-pointer shadow-xs shrink-0 ${
+            liveSyncStatus.connected
+              ? 'bg-emerald-500/10 hover:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 font-semibold'
+              : 'bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 text-[#5f6368] dark:text-[#94a3b8]'
+          }`}
+        >
+          <span className="relative flex h-2 w-2">
+            {liveSyncStatus.connected && (
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+            )}
+            <span className={`relative inline-flex rounded-full h-2 w-2 ${
+              liveSyncStatus.connected ? 'bg-emerald-500' : 'bg-slate-400'
+            }`}></span>
+          </span>
+          <Radio size={13} className={liveSyncStatus.connected ? 'text-emerald-500' : 'opacity-60'} />
+          <span className="font-semibold hidden lg:inline">Live Agent</span>
         </button>
 
         {/* Topology Hub & Archetype Library Button with Coverage Badge */}

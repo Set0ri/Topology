@@ -228,6 +228,19 @@ interface TopologyStore {
 
   // Computed Stats
   getStats: () => TopologyStats;
+
+  // Live External Agent Sync
+  liveSyncStatus: {
+    connected: boolean;
+    lastHeartbeat: number | null;
+    activeAgents: number;
+    desktopNotificationsEnabled: boolean;
+    audioChimesEnabled: boolean;
+  };
+  setLiveSyncConnected: (connected: boolean) => void;
+  setLiveSyncHeartbeat: (timestamp: number) => void;
+  setDesktopNotificationsEnabled: (enabled: boolean) => void;
+  setAudioChimesEnabled: (enabled: boolean) => void;
 }
 
 const defaultSample = SAMPLE_TOPOLOGIES[0];
@@ -279,6 +292,13 @@ export const useTopologyStore = create<TopologyStore>((set, get) => {
     viewMode: '2d',
     lod: 'normal',
     searchQuery: '',
+    liveSyncStatus: {
+      connected: false,
+      lastHeartbeat: null,
+      activeAgents: 1,
+      desktopNotificationsEnabled: typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted',
+      audioChimesEnabled: true,
+    },
     filterExecutionType: 'all',
     filterRole: 'all',
     filterStatus: 'all',
@@ -2031,6 +2051,30 @@ export const useTopologyStore = create<TopologyStore>((set, get) => {
         ready: nodes.filter(n => n.status === 'ready').length,
         pending: nodes.filter(n => n.status === 'pending').length,
       };
+    },
+
+    setLiveSyncConnected: (connected) => {
+      set(s => ({
+        liveSyncStatus: { ...s.liveSyncStatus, connected }
+      }));
+    },
+
+    setLiveSyncHeartbeat: (timestamp) => {
+      set(s => ({
+        liveSyncStatus: { ...s.liveSyncStatus, lastHeartbeat: timestamp }
+      }));
+    },
+
+    setDesktopNotificationsEnabled: (enabled) => {
+      set(s => ({
+        liveSyncStatus: { ...s.liveSyncStatus, desktopNotificationsEnabled: enabled }
+      }));
+    },
+
+    setAudioChimesEnabled: (enabled) => {
+      set(s => ({
+        liveSyncStatus: { ...s.liveSyncStatus, audioChimesEnabled: enabled }
+      }));
     },
   };
 });
