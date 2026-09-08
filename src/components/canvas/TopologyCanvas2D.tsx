@@ -163,11 +163,14 @@ const TopologyCanvasInner: React.FC = () => {
     [connectNodes]
   );
 
-  // Canvas empty space click -> Trigger Spotlight / ComfyUI Quick-Add
-  const handlePaneClick = useCallback(
-    (e: React.MouseEvent) => {
-      selectNode(null);
+  // Canvas empty space click -> Deselect node cleanly
+  const handlePaneClick = useCallback(() => {
+    selectNode(null);
+  }, [selectNode]);
 
+  // Canvas double click -> Trigger Spotlight / Quick-Add at cursor
+  const handlePaneDoubleClick = useCallback(
+    (e: React.MouseEvent) => {
       const flowPos = screenToFlowPosition({
         x: e.clientX,
         y: e.clientY,
@@ -179,7 +182,7 @@ const TopologyCanvasInner: React.FC = () => {
         flowPos,
       });
     },
-    [screenToFlowPosition, selectNode]
+    [screenToFlowPosition]
   );
 
   // Keyboard navigation & rapid authoring
@@ -236,6 +239,7 @@ const TopologyCanvasInner: React.FC = () => {
         onNodesChange={handleNodesChange}
         onConnect={handleConnect}
         onPaneClick={handlePaneClick}
+        onDoubleClick={handlePaneDoubleClick}
         onSelectionChange={handleSelectionChange}
         selectionMode={SelectionMode.Partial}
         selectionOnDrag={false}

@@ -148,10 +148,11 @@ export const SpotlightQuickAdd: React.FC<SpotlightQuickAddProps> = ({
 
   return (
     <AnimatePresence>
-      <div 
-        className="fixed inset-0 z-50 bg-black/20 backdrop-blur-[2px]"
-        onClick={onClose}
-      >
+      {isOpen && (
+        <div 
+          className="fixed inset-0 z-50 bg-black/20 backdrop-blur-[2px]"
+          onClick={onClose}
+        >
         <motion.div
           initial={{ opacity: 0, scale: 0.96, y: -6 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -251,6 +252,7 @@ export const SpotlightQuickAdd: React.FC<SpotlightQuickAddProps> = ({
           </div>
         </motion.div>
       </div>
+      )}
     </AnimatePresence>
   );
 };
