@@ -156,23 +156,23 @@ export const TopologyLibraryModal: React.FC<Props> = ({ isOpen, onClose }) => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-black/40 dark:bg-black/60 backdrop-blur-md transition-all">
-      <div className="relative w-full max-w-4xl max-h-[90vh] flex flex-col rounded-3xl bg-white/95 dark:bg-[#181a24]/95 text-[#202124] dark:text-[#f8fafc] backdrop-blur-2xl shadow-elevated-2xl border-none overflow-hidden select-none animate-in fade-in zoom-in-95 duration-200">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-6 bg-black/40 dark:bg-black/60 backdrop-blur-md transition-all">
+      <div className="relative w-full max-w-4xl max-h-[92vh] flex flex-col rounded-3xl bg-white/95 dark:bg-[#181a24]/95 text-[#202124] dark:text-[#f8fafc] backdrop-blur-2xl shadow-elevated-2xl border-none overflow-hidden select-none animate-in fade-in zoom-in-95 duration-200">
         
         {/* Header Section */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-black/5 dark:border-white/10">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-2xl bg-gradient-to-br from-[#1a73e8] to-[#9334e6] flex items-center justify-center text-white shadow-xs">
+        <div className="flex items-center justify-between px-4 py-3 sm:px-6 sm:py-4 bg-slate-50/50 dark:bg-white/2">
+          <div className="flex items-center gap-2.5 sm:gap-3">
+            <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-2xl bg-gradient-to-br from-[#1a73e8] to-[#9334e6] flex items-center justify-center text-white shadow-xs shrink-0">
               <Compass size={18} />
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-base font-bold tracking-tight">Topology Archetype Hub</h2>
+              <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                <h2 className="text-sm sm:text-base font-bold tracking-tight">Topology Archetype Hub</h2>
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[#e6f4ea] text-[#137333] dark:bg-[#1e8e3e]/20 dark:text-[#34a853]">
-                  {coverageMetrics.overallCoveragePercent}% Architecture Coverage
+                  {coverageMetrics.overallCoveragePercent}% Coverage
                 </span>
               </div>
-              <p className="text-xs text-[#5f6368] dark:text-[#94a3b8]">
+              <p className="text-[11px] sm:text-xs text-[#5f6368] dark:text-[#94a3b8] line-clamp-1">
                 Reusable software & agent DAG archetypes — never reinvent standard patterns.
               </p>
             </div>
@@ -181,19 +181,19 @@ export const TopologyLibraryModal: React.FC<Props> = ({ isOpen, onClose }) => {
           <button
             type="button"
             onClick={onClose}
-            className="p-1.5 rounded-xl hover:bg-black/5 dark:hover:bg-white/10 text-[#5f6368] dark:text-[#94a3b8] hover:text-[#202124] dark:hover:text-[#f8fafc] transition-colors border-none cursor-pointer"
+            className="p-1.5 rounded-xl hover:bg-black/5 dark:hover:bg-white/10 text-[#5f6368] dark:text-[#94a3b8] hover:text-[#202124] dark:hover:text-[#f8fafc] transition-colors border-none cursor-pointer shrink-0"
           >
             <X size={18} />
           </button>
         </div>
 
-        {/* Tab Navigation */}
-        <div className="flex items-center justify-between px-6 pt-3 pb-2 border-b border-black/5 dark:border-white/10 bg-black/2 dark:bg-white/2">
-          <div className="flex items-center gap-1.5">
+        {/* Tab Navigation & Search */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-4 sm:px-6 pt-2.5 pb-2 bg-slate-100/40 dark:bg-white/2">
+          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
             <button
               type="button"
               onClick={() => setActiveTab('canonical')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition-all border-none cursor-pointer ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap transition-all border-none cursor-pointer ${
                 activeTab === 'canonical'
                   ? 'bg-white dark:bg-[#222536] text-[#1a73e8] dark:text-[#8ab4f8] shadow-xs font-semibold'
                   : 'text-[#5f6368] dark:text-[#94a3b8] hover:text-[#202124] dark:hover:text-[#f8fafc] bg-transparent'
@@ -209,7 +209,7 @@ export const TopologyLibraryModal: React.FC<Props> = ({ isOpen, onClose }) => {
             <button
               type="button"
               onClick={() => setActiveTab('user')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition-all border-none cursor-pointer ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap transition-all border-none cursor-pointer ${
                 activeTab === 'user'
                   ? 'bg-white dark:bg-[#222536] text-[#1a73e8] dark:text-[#8ab4f8] shadow-xs font-semibold'
                   : 'text-[#5f6368] dark:text-[#94a3b8] hover:text-[#202124] dark:hover:text-[#f8fafc] bg-transparent'
@@ -225,7 +225,7 @@ export const TopologyLibraryModal: React.FC<Props> = ({ isOpen, onClose }) => {
             <button
               type="button"
               onClick={() => setActiveTab('publish')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition-all border-none cursor-pointer ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap transition-all border-none cursor-pointer ${
                 activeTab === 'publish'
                   ? 'bg-white dark:bg-[#222536] text-[#1a73e8] dark:text-[#8ab4f8] shadow-xs font-semibold'
                   : 'text-[#5f6368] dark:text-[#94a3b8] hover:text-[#202124] dark:hover:text-[#f8fafc] bg-transparent'
@@ -234,28 +234,28 @@ export const TopologyLibraryModal: React.FC<Props> = ({ isOpen, onClose }) => {
               <PlusCircle size={14} />
               <span>Publish Canvas</span>
               <span className="px-1.5 py-0.2 rounded-md text-[10px] bg-[#1a73e8]/10 text-[#1a73e8] font-bold">
-                {nodes.length} nodes
+                {nodes.length}
               </span>
             </button>
           </div>
 
           {/* Search Box (for canonical and user tabs) */}
           {activeTab !== 'publish' && (
-            <div className="relative w-48 sm:w-64">
-              <Search size={13} className="absolute left-2.5 top-2 text-[#5f6368] dark:text-[#94a3b8]" />
+            <div className="relative w-full sm:w-60 shrink-0">
+              <Search size={13} className="absolute left-2.5 top-2.5 text-[#5f6368] dark:text-[#94a3b8]" />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search topologies, tags..."
-                className="w-full pl-7 pr-3 py-1 text-xs rounded-xl bg-black/4 dark:bg-white/5 text-[#202124] dark:text-[#f8fafc] placeholder-[#5f6368]/60 focus:outline-none focus:bg-black/6 dark:focus:bg-white/10 transition-all border-none"
+                className="w-full pl-7 pr-3 py-1.5 text-xs rounded-xl bg-black/4 dark:bg-white/5 text-[#202124] dark:text-[#f8fafc] placeholder-[#5f6368]/60 focus:outline-none focus:bg-black/6 dark:focus:bg-white/10 transition-all border-none"
               />
             </div>
           )}
         </div>
 
         {/* Modal Body Container */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 sm:space-y-6 custom-scrollbar">
 
           {/* TAB 1: CANONICAL ARCHETYPES & % COVERAGE MAP */}
           {activeTab === 'canonical' && (
@@ -403,7 +403,7 @@ export const TopologyLibraryModal: React.FC<Props> = ({ isOpen, onClose }) => {
                       </div>
 
                       {/* Card Footer & Action */}
-                      <div className="flex items-center justify-between pt-3 mt-3 border-t border-black/5 dark:border-white/5 text-[11px] text-[#5f6368] dark:text-[#94a3b8]">
+                      <div className="flex items-center justify-between pt-3 mt-3 bg-black/2 dark:bg-white/2 -mx-4 -mb-4 px-4 py-3 rounded-b-3xl text-[11px] text-[#5f6368] dark:text-[#94a3b8]">
                         <div className="flex items-center gap-2">
                           <span className="flex items-center gap-1">
                             <Clock size={11} />
@@ -515,7 +515,7 @@ export const TopologyLibraryModal: React.FC<Props> = ({ isOpen, onClose }) => {
                         </div>
                       </div>
 
-                      <div className="flex items-center justify-between pt-3 mt-3 border-t border-black/5 dark:border-white/5 text-[11px] text-[#5f6368] dark:text-[#94a3b8]">
+                      <div className="flex items-center justify-between pt-3 mt-3 bg-black/2 dark:bg-white/2 -mx-4 -mb-4 px-4 py-3 rounded-b-3xl text-[11px] text-[#5f6368] dark:text-[#94a3b8]">
                         <div className="flex items-center gap-2">
                           <span className="flex items-center gap-1">
                             <User size={11} />
@@ -554,14 +554,14 @@ export const TopologyLibraryModal: React.FC<Props> = ({ isOpen, onClose }) => {
           {activeTab === 'publish' && (
             <div className="max-w-2xl mx-auto space-y-5">
               {/* Canvas Status Preview Banner */}
-              <div className="p-4 rounded-3xl bg-black/3 dark:bg-white/5 flex items-center justify-between">
+              <div className="p-4 rounded-3xl bg-black/3 dark:bg-white/5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                 <div>
                   <div className="text-xs font-bold text-[#1a73e8] dark:text-[#8ab4f8]">Active Workspace Canvas</div>
                   <div className="text-xs text-[#5f6368] dark:text-[#94a3b8] mt-0.5">
                     Ready to package {nodes.length} nodes and {edges.length} causal edges into the library.
                   </div>
                 </div>
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-1.5 shrink-0">
                   <span className="px-2.5 py-1 rounded-xl text-xs font-bold bg-white dark:bg-[#202434] text-[#202124] dark:text-[#f8fafc] shadow-xs">
                     {nodes.length} Nodes
                   </span>

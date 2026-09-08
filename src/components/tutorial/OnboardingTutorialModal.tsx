@@ -38,7 +38,7 @@ interface OnboardingTutorialModalProps {
 export const OnboardingTutorialModal: React.FC<OnboardingTutorialModalProps> = ({ isOpen, onClose }) => {
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
   const theme = useTopologyStore(s => s.theme);
-  const isLight = theme === 'light' || theme === 'latte';
+  const isLight = theme === 'default' || theme === 'light' || theme === 'latte';
 
   const steps: TutorialStep[] = [
     {
@@ -136,11 +136,11 @@ export const OnboardingTutorialModal: React.FC<OnboardingTutorialModalProps> = (
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.95, y: 15 }}
           transition={{ duration: 0.22, ease: 'easeOut' }}
-          className={`relative w-full max-w-xl rounded-3xl p-6 shadow-elevated-xl overflow-hidden border-none ${
+          className={`relative w-full max-w-xl max-h-[92vh] overflow-y-auto rounded-3xl p-4 sm:p-6 shadow-elevated-xl border-none ${
             isLight 
               ? 'bg-white/95 text-cat-latte-text' 
               : 'bg-[#12141c]/95 text-[#f8fafc]'
-          } backdrop-blur-2xl`}
+          } backdrop-blur-2xl custom-scrollbar`}
         >
           {/* Top Bar: Step Indicator & Close Button */}
           <div className="flex items-center justify-between pb-4">

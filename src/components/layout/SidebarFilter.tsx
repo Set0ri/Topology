@@ -14,7 +14,7 @@ import { useTopologyStore } from '../../store/useTopologyStore';
 import { NodeStatus, NodeType, ExecutionType } from '../../types/topology';
 
 export const SidebarFilter: React.FC = () => {
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(() => typeof window !== 'undefined' ? window.innerWidth < 768 : false);
   const searchQuery = useTopologyStore(s => s.searchQuery);
   const setSearchQuery = useTopologyStore(s => s.setSearchQuery);
   const filterStatus = useTopologyStore(s => s.filterStatus);
@@ -38,7 +38,7 @@ export const SidebarFilter: React.FC = () => {
   // Collapsed State: Sleek Vertical Floating Rail
   if (isCollapsed) {
     return (
-      <aside className="fixed top-18 left-4 z-30 flex flex-col items-center gap-2 p-2 rounded-2xl bg-white/90 dark:bg-[#181a24]/90 backdrop-blur-2xl shadow-elevated-md border-none select-none transition-all duration-200">
+      <aside className="fixed top-16 sm:top-18 left-2.5 sm:left-4 z-30 flex flex-col items-center gap-2 p-1.5 sm:p-2 rounded-2xl bg-white/90 dark:bg-[#181a24]/90 backdrop-blur-2xl shadow-elevated-md border-none select-none transition-all duration-200">
         <button
           type="button"
           onClick={() => setIsCollapsed(false)}
@@ -74,9 +74,16 @@ export const SidebarFilter: React.FC = () => {
     );
   }
 
-  // Expanded State: Elevated Floating Paper Panel
+  // Expanded State: Elevated Floating Paper Panel with Mobile Backdrop
   return (
-    <aside className="fixed top-18 left-4 bottom-6 w-72 max-w-[calc(100vw-2rem)] z-30 rounded-3xl p-4 bg-white/90 dark:bg-[#181a24]/90 text-[#202124] dark:text-[#f8fafc] backdrop-blur-2xl shadow-elevated-lg border-none flex flex-col overflow-hidden select-none transition-all duration-200">
+    <>
+      {/* Mobile Backdrop Click-to-Dismiss */}
+      <div 
+        className="fixed inset-0 bg-black/25 backdrop-blur-xs z-30 sm:hidden" 
+        onClick={() => setIsCollapsed(true)} 
+      />
+
+      <aside className="fixed top-15 sm:top-18 left-2.5 sm:left-4 bottom-3 sm:bottom-6 w-[calc(100vw-1.25rem)] sm:w-72 max-w-full z-40 sm:z-30 rounded-3xl p-3.5 sm:p-4 bg-white/95 dark:bg-[#181a24]/95 text-[#202124] dark:text-[#f8fafc] backdrop-blur-2xl shadow-elevated-xl border-none flex flex-col overflow-hidden select-none transition-all duration-200">
       {/* Panel Header */}
       <div className="flex items-center justify-between pb-3">
         <div className="flex items-center gap-2">
@@ -321,5 +328,6 @@ export const SidebarFilter: React.FC = () => {
         </div>
       </div>
     </aside>
+  </>
   );
 };

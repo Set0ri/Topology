@@ -14,7 +14,7 @@ import { TopologyNode } from '../../types/topology';
 import { getNodeTypeColor } from '../../utils/catppuccin';
 
 export const CanvasMiniMap: React.FC = () => {
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(() => typeof window !== 'undefined' ? window.innerWidth < 768 : false);
   const theme = useTopologyStore(s => s.theme);
   const selectedNodeId = useTopologyStore(s => s.selectedNodeId);
   const { fitView, zoomIn, zoomOut } = useReactFlow();
@@ -36,14 +36,16 @@ export const CanvasMiniMap: React.FC = () => {
     zoomOut({ duration: 250 });
   }, [zoomOut]);
 
-  // If a node is selected, the inspector drawer is open on the right (420px width).
-  // Shift the minimap to the left so it is never occluded!
   const hasInspectorOpen = Boolean(selectedNodeId);
+  const isMobile = typeof window !== 'undefined' && window.innerWidth < 640;
+
+  // On mobile when inspector is open, hide minimap to prevent clutter
+  if (isMobile && hasInspectorOpen) return null;
 
   return (
     <motion.div
       animate={{
-        right: hasInspectorOpen ? 444 : 16,
+        right: isMobile ? 12 : (hasInspectorOpen ? 444 : 16),
       }}
       transition={{ duration: 0.24, ease: 'easeOut' }}
       className="fixed bottom-4 z-20 select-none flex flex-col items-end pointer-events-none"

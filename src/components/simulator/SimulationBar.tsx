@@ -41,11 +41,11 @@ export const SimulationBar: React.FC = () => {
   }, [isSimulating]);
 
   return (
-    <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-30 flex items-center gap-3 px-4 py-2.5 rounded-2xl bg-white/90 dark:bg-cat-mocha-base/85 text-cat-latte-text dark:text-cat-mocha-text backdrop-blur-2xl shadow-elevated-lg border-none transition-colors duration-200">
+    <div className="fixed bottom-4 sm:bottom-6 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2 sm:py-2.5 rounded-2xl bg-white/95 dark:bg-[#181a24]/95 text-[#202124] dark:text-[#f8fafc] backdrop-blur-2xl shadow-elevated-xl border-none max-w-[calc(100vw-2rem)] transition-colors duration-200">
       {/* Simulation Status Icon */}
-      <div className="flex items-center gap-2 pr-2 border-r border-transparent">
-        <Activity size={16} className={`text-cat-mocha-yellow dark:text-cat-mocha-yellow ${isSimulating ? 'animate-pulse' : ''}`} />
-        <span className="text-xs font-semibold tracking-wide">
+      <div className="flex items-center gap-1.5 sm:gap-2 pr-1.5 sm:pr-2 border-r border-black/5 dark:border-white/10 shrink-0">
+        <Activity size={15} className={`text-[#f9ab00] ${isSimulating ? 'animate-pulse' : ''}`} />
+        <span className="text-xs font-semibold tracking-wide hidden sm:inline">
           {isSimulating ? 'Simulating Run...' : 'Simulation Engine'}
         </span>
       </div>
@@ -63,47 +63,41 @@ export const SimulationBar: React.FC = () => {
             }
           }
         }}
-        className="p-2 rounded-xl bg-cat-latte-surface0/80 dark:bg-cat-mocha-surface0/80 hover:bg-cat-latte-surface1 dark:hover:bg-cat-mocha-surface1 text-cat-mocha-yellow dark:text-cat-mocha-yellow transition-all border-none cursor-pointer"
+        className="p-1.5 sm:p-2 rounded-xl bg-black/5 dark:bg-white/10 hover:bg-black/10 text-[#f9ab00] transition-all border-none cursor-pointer shrink-0"
         title={isSimulating ? 'Pause Execution' : 'Start Simulation'}
       >
-        {isSimulating ? <Pause size={15} /> : <Play size={15} />}
+        {isSimulating ? <Pause size={14} /> : <Play size={14} />}
       </button>
 
       {/* Step Forward */}
       <button
         onClick={() => stepSimulation()}
-        className="p-2 rounded-xl bg-cat-latte-surface0/80 dark:bg-cat-mocha-surface0/80 hover:bg-cat-latte-surface1 dark:hover:bg-cat-mocha-surface1 text-cat-mocha-sapphire dark:text-cat-mocha-sapphire transition-all border-none cursor-pointer"
+        className="p-1.5 sm:p-2 rounded-xl bg-black/5 dark:bg-white/10 hover:bg-black/10 text-[#1a73e8] dark:text-[#8ab4f8] transition-all border-none cursor-pointer shrink-0"
         title="Step Forward Single Execution Tier"
       >
-        <SkipForward size={15} />
+        <SkipForward size={14} />
       </button>
 
-      {/* Reset */}
+      {/* Reset Simulation */}
       <button
         onClick={() => resetSimulation()}
-        className="p-2 rounded-xl bg-cat-latte-surface0/80 dark:bg-cat-mocha-surface0/80 hover:bg-cat-latte-surface1 dark:hover:bg-cat-mocha-surface1 text-cat-latte-subtext0 dark:text-cat-mocha-subtext0 transition-all border-none cursor-pointer"
-        title="Reset Topology to Initial Plan"
+        className="p-1.5 sm:p-2 rounded-xl bg-black/5 dark:bg-white/10 hover:bg-black/10 text-[#5f6368] dark:text-[#94a3b8] transition-all border-none cursor-pointer shrink-0"
+        title="Reset Simulation State"
       >
-        <RotateCcw size={15} />
+        <RotateCcw size={14} />
       </button>
 
-      {/* Progress & Batch Information */}
-      <div className="flex items-center gap-3 pl-2">
-        <div className="w-28 h-2 rounded-full bg-cat-latte-surface1/70 dark:bg-cat-mocha-surface0 overflow-hidden relative">
-          <div
-            className="h-full bg-gradient-to-r from-cat-mocha-sapphire to-cat-mocha-green transition-all duration-500 rounded-full"
+      {/* Progress Bar & Counter */}
+      <div className="flex items-center gap-2 pl-1 sm:pl-2 border-l border-black/5 dark:border-white/10 shrink-0">
+        <div className="w-12 sm:w-20 h-1.5 rounded-full bg-black/5 dark:bg-white/10 overflow-hidden">
+          <div 
+            className="h-full bg-gradient-to-r from-[#1a73e8] to-[#1e8e3e] transition-all duration-300"
             style={{ width: `${progressPercent}%` }}
           />
         </div>
-        <span className="text-xs font-mono text-cat-latte-subtext0 dark:text-cat-mocha-subtext0 min-w-10">
+        <span className="text-[11px] font-mono font-medium text-[#5f6368] dark:text-[#94a3b8]">
           {progressPercent}%
         </span>
-
-        {inProgressCount > 0 && (
-          <span className="text-[11px] px-2 py-0.5 rounded-full bg-cat-mocha-yellow/15 text-cat-mocha-yellow font-medium">
-            {inProgressCount} active
-          </span>
-        )}
       </div>
     </div>
   );

@@ -104,7 +104,7 @@ export const ThemePalettePicker: React.FC = () => {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 6, scale: 0.96 }}
             transition={{ duration: 0.15, ease: 'easeOut' }}
-            className={`absolute right-0 top-full mt-2 w-72 rounded-3xl p-3 shadow-elevated-xl z-50 border-none backdrop-blur-2xl ${
+            className={`absolute right-0 top-full mt-2 w-72 max-w-[calc(100vw-1rem)] rounded-3xl p-3 shadow-elevated-xl z-50 border-none backdrop-blur-2xl ${
               isLight
                 ? 'bg-white/95 text-[#202124]'
                 : 'bg-[#181a24]/95 text-[#f8fafc]'

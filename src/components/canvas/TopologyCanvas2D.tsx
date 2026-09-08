@@ -231,28 +231,30 @@ const TopologyCanvasInner: React.FC = () => {
         />
 
         {/* Floating Quick Action Panel & LOD Indicator */}
-        <Panel position="top-right" className="m-4 flex items-center gap-2">
-          {/* LOD Badge */}
-          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-mono font-medium bg-white/90 dark:bg-cat-mocha-base/80 text-cat-latte-subtext0 dark:text-cat-mocha-subtext0 shadow-elevated-md backdrop-blur-xl border-none">
-            <Eye size={13} className="text-cat-latte-teal dark:text-cat-mocha-teal" />
+        <Panel position="top-right" className="m-2 sm:m-4 flex items-center gap-1.5 sm:gap-2">
+          {/* LOD Badge - Hidden on small mobile screens */}
+          <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-mono font-medium bg-white/90 dark:bg-[#1f2230]/90 text-[#5f6368] dark:text-[#94a3b8] shadow-elevated-md backdrop-blur-xl border-none">
+            <Eye size={13} className="text-[#007b83] dark:text-[#26a69a]" />
             <span className="uppercase font-bold tracking-wider">{lod}</span>
             <span className="opacity-60 text-[10px]">({Math.round(zoom * 100)}%)</span>
           </div>
 
           <button
             onClick={() => addNode()}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium bg-white/90 dark:bg-cat-mocha-base/80 hover:bg-cat-latte-surface0 dark:hover:bg-cat-mocha-surface0 text-cat-latte-text dark:text-cat-mocha-text shadow-elevated-md backdrop-blur-xl transition-all duration-150 border-none cursor-pointer"
+            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-medium bg-white/90 dark:bg-[#1f2230]/90 hover:bg-slate-100 dark:hover:bg-white/10 text-[#202124] dark:text-[#f8fafc] shadow-elevated-md backdrop-blur-xl transition-all duration-150 border-none cursor-pointer"
           >
-            <Plus size={14} className="text-cat-mocha-mauve dark:text-cat-mocha-mauve" />
-            <span>Add Task</span>
+            <Plus size={14} className="text-[#1a73e8]" />
+            <span className="hidden sm:inline">Add Task</span>
+            <span className="sm:hidden">Add</span>
           </button>
           <button
             onClick={() => applyDagreLayout('LR')}
             title="Auto-organize DAG Hierarchical Layout"
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium bg-white/90 dark:bg-cat-mocha-base/80 hover:bg-cat-latte-surface0 dark:hover:bg-cat-mocha-surface0 text-cat-latte-text dark:text-cat-mocha-text shadow-elevated-md backdrop-blur-xl transition-all duration-150 border-none cursor-pointer"
+            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-medium bg-white/90 dark:bg-[#1f2230]/90 hover:bg-slate-100 dark:hover:bg-white/10 text-[#202124] dark:text-[#f8fafc] shadow-elevated-md backdrop-blur-xl transition-all duration-150 border-none cursor-pointer"
           >
-            <LayoutGrid size={14} className="text-cat-mocha-sapphire dark:text-cat-mocha-sapphire" />
-            <span>Auto Layout</span>
+            <LayoutGrid size={14} className="text-[#9334e6]" />
+            <span className="hidden sm:inline">Auto Layout</span>
+            <span className="sm:hidden">Layout</span>
           </button>
         </Panel>
 

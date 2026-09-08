@@ -198,31 +198,31 @@ export const PlanGeneratorModal: React.FC<PlanGeneratorModalProps> = ({ isOpen, 
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-cat-mocha-crust/70 backdrop-blur-md">
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/40 dark:bg-black/60 backdrop-blur-md">
         <motion.div
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
           exit={{ opacity: 0, scale: 0.95 }}
-          className="w-full max-w-xl rounded-3xl p-6 bg-white/95 dark:bg-cat-mocha-base/90 text-cat-latte-text dark:text-cat-mocha-text shadow-elevated-lg border-none transition-colors duration-200"
+          className="w-full max-w-xl max-h-[92vh] flex flex-col rounded-3xl p-4 sm:p-6 bg-white/95 dark:bg-[#181a24]/95 text-[#202124] dark:text-[#f8fafc] shadow-elevated-2xl border-none overflow-y-auto custom-scrollbar transition-colors duration-200 select-none"
         >
           {/* Header */}
-          <div className="flex items-center justify-between pb-4 border-none">
-            <div className="flex items-center gap-2">
-              <div className="p-2 rounded-xl bg-cat-mocha-mauve/15 text-cat-mocha-mauve">
+          <div className="flex items-center justify-between pb-3 sm:pb-4 border-none">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 rounded-2xl bg-[#1a73e8]/10 text-[#1a73e8] dark:bg-[#1a73e8]/20 dark:text-[#8ab4f8]">
                 <Wand2 size={18} />
               </div>
               <div>
-                <h3 className="text-base font-semibold text-cat-latte-text dark:text-cat-mocha-text">
+                <h3 className="text-sm sm:text-base font-bold text-[#202124] dark:text-[#f8fafc]">
                   Agent Plan Synthesizer
                 </h3>
-                <p className="text-xs text-cat-latte-subtext0 dark:text-cat-mocha-subtext0">
+                <p className="text-[11px] sm:text-xs text-[#5f6368] dark:text-[#94a3b8]">
                   Compile high-level goals into dependency-ordered topology graphs
                 </p>
               </div>
             </div>
             <button
               onClick={onClose}
-              className="p-1.5 rounded-full hover:bg-cat-latte-surface0 dark:hover:bg-cat-mocha-surface0 text-cat-latte-overlay1 dark:text-cat-mocha-overlay2 hover:text-cat-latte-text dark:hover:text-cat-mocha-text transition-colors border-none cursor-pointer"
+              className="p-1.5 rounded-xl hover:bg-black/5 dark:hover:bg-white/10 text-[#5f6368] dark:text-[#94a3b8] hover:text-[#202124] dark:hover:text-[#f8fafc] transition-colors border-none cursor-pointer"
             >
               <X size={18} />
             </button>
@@ -235,13 +235,13 @@ export const PlanGeneratorModal: React.FC<PlanGeneratorModalProps> = ({ isOpen, 
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
               placeholder="What project, workflow, or agent task do you want to plan? (e.g. 'Build an automated code review bot with GitHub API integration and Discord notifications')"
-              className="w-full p-4 rounded-2xl text-xs leading-relaxed bg-cat-latte-surface0/60 dark:bg-cat-mocha-surface0/60 text-cat-latte-text dark:text-cat-mocha-text placeholder-cat-latte-overlay0 dark:placeholder-cat-mocha-overlay1 focus:outline-none focus:ring-1 focus:ring-cat-mocha-mauve/50 border-none resize-none transition-all"
+              className="w-full p-3.5 sm:p-4 rounded-2xl text-xs leading-relaxed bg-slate-100/70 dark:bg-white/5 text-[#202124] dark:text-[#f8fafc] placeholder-[#5f6368]/60 focus:outline-none focus:ring-2 focus:ring-[#1a73e8]/40 border-none resize-none transition-all"
             />
 
             {/* Presets */}
             <div>
-              <div className="flex items-center gap-1.5 text-[11px] font-medium text-cat-latte-overlay1 dark:text-cat-mocha-overlay2 mb-2">
-                <Lightbulb size={12} className="text-cat-mocha-yellow" />
+              <div className="flex items-center gap-1.5 text-[11px] font-medium text-[#5f6368] dark:text-[#94a3b8] mb-2">
+                <Lightbulb size={12} className="text-[#f9ab00]" />
                 <span>Quick Inspiration:</span>
               </div>
               <div className="flex flex-wrap gap-1.5">
@@ -250,7 +250,7 @@ export const PlanGeneratorModal: React.FC<PlanGeneratorModalProps> = ({ isOpen, 
                     key={idea}
                     type="button"
                     onClick={() => setPrompt(idea)}
-                    className="text-left text-[11px] px-3 py-1.5 rounded-xl bg-cat-latte-surface0/60 dark:bg-cat-mocha-surface0/50 hover:bg-cat-latte-surface1 dark:hover:bg-cat-mocha-surface1 text-cat-latte-subtext0 dark:text-cat-mocha-subtext0 hover:text-cat-latte-text dark:hover:text-cat-mocha-text transition-colors border-none cursor-pointer"
+                    className="text-left text-[11px] px-3 py-1.5 rounded-xl bg-slate-100/70 dark:bg-white/5 hover:bg-slate-200/70 dark:hover:bg-white/10 text-[#5f6368] dark:text-[#94a3b8] hover:text-[#202124] dark:hover:text-[#f8fafc] transition-colors border-none cursor-pointer leading-tight"
                   >
                     {idea}
                   </button>
@@ -260,11 +260,11 @@ export const PlanGeneratorModal: React.FC<PlanGeneratorModalProps> = ({ isOpen, 
           </div>
 
           {/* Bottom Action */}
-          <div className="mt-6 flex items-center justify-end gap-2 border-none">
+          <div className="mt-5 sm:mt-6 flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2 border-none">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 rounded-xl text-xs font-medium text-cat-latte-subtext0 dark:text-cat-mocha-subtext0 hover:bg-cat-latte-surface0 dark:hover:bg-cat-mocha-surface0 transition-colors border-none cursor-pointer"
+              className="px-4 py-2.5 rounded-xl text-xs font-medium text-[#5f6368] dark:text-[#94a3b8] hover:bg-black/5 dark:hover:bg-white/5 transition-colors border-none cursor-pointer text-center"
             >
               Cancel
             </button>
@@ -272,7 +272,7 @@ export const PlanGeneratorModal: React.FC<PlanGeneratorModalProps> = ({ isOpen, 
               type="button"
               disabled={isGenerating || !prompt.trim()}
               onClick={handleGenerate}
-              className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-semibold bg-cat-latte-mauve text-white dark:bg-cat-mocha-mauve dark:text-cat-mocha-base hover:opacity-90 transition-all duration-150 disabled:opacity-50 border-none cursor-pointer shadow-elevated-md"
+              className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-xs font-semibold bg-[#1a73e8] hover:bg-[#1557b0] text-white transition-all duration-150 disabled:opacity-50 border-none cursor-pointer shadow-elevated-md"
             >
               {isGenerating ? (
                 <>

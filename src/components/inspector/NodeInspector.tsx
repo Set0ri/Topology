@@ -176,20 +176,23 @@ export const NodeInspector: React.FC = () => {
         animate={{ x: 0, opacity: 1 }}
         exit={{ x: 420, opacity: 0 }}
         transition={{ duration: 0.22, ease: 'easeOut' }}
-        className="fixed top-16 right-4 bottom-4 w-[420px] z-40 rounded-3xl p-5 bg-white/95 dark:bg-cat-mocha-mantle/95 text-cat-latte-text dark:text-cat-mocha-text backdrop-blur-2xl shadow-elevated-lg border-none flex flex-col overflow-hidden transition-colors duration-200"
+        className="fixed top-14 sm:top-16 right-0 sm:right-4 bottom-0 sm:bottom-4 w-full sm:w-[420px] max-w-full z-40 rounded-t-3xl sm:rounded-3xl p-4 sm:p-5 bg-white/95 dark:bg-[#181a24]/95 text-[#202124] dark:text-[#f8fafc] backdrop-blur-2xl shadow-elevated-2xl border-none flex flex-col overflow-hidden transition-colors duration-200"
       >
+        {/* Mobile Drag Indicator */}
+        <div className="w-10 h-1 rounded-full bg-black/15 dark:bg-white/20 mx-auto mb-2.5 sm:hidden shrink-0" />
+
         {/* Top Header */}
         <div className="flex items-center justify-between pb-3 border-none">
           <div className="flex items-center gap-2">
             <span 
-              className="w-3 h-3 rounded-full shadow-sm" 
+              className="w-3 h-3 rounded-full shadow-sm shrink-0" 
               style={{ backgroundColor: statusColor }} 
             />
             <span className="text-xs font-mono font-bold tracking-wider uppercase opacity-85" style={{ color: typeColor }}>
               {node.type}
             </span>
             {node.context.requiresHumanApproval && (
-              <span className="flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-cat-mocha-peach/15 text-cat-latte-peach dark:text-cat-mocha-peach">
+              <span className="flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-[#feefe3] text-[#c25100] dark:bg-[#e8710a]/20 dark:text-[#fa903e]">
                 <ShieldAlert size={10} />
                 <span>HITL</span>
               </span>
@@ -197,14 +200,14 @@ export const NodeInspector: React.FC = () => {
           </div>
           <button
             onClick={() => selectNode(null)}
-            className="p-1.5 rounded-full hover:bg-cat-latte-surface0 dark:hover:bg-cat-mocha-surface0 text-cat-latte-overlay1 dark:text-cat-mocha-overlay2 hover:text-cat-latte-text dark:hover:text-cat-mocha-text transition-colors border-none cursor-pointer"
+            className="p-1.5 rounded-full hover:bg-black/5 dark:hover:bg-white/10 text-[#5f6368] dark:text-[#94a3b8] hover:text-[#202124] dark:hover:text-[#f8fafc] transition-colors border-none cursor-pointer"
           >
             <X size={16} />
           </button>
         </div>
 
         {/* Tab Switcher */}
-        <div className="flex items-center gap-1 p-1 mb-4 rounded-2xl bg-cat-latte-surface0/70 dark:bg-cat-mocha-surface0/50">
+        <div className="flex items-center gap-1 p-1 mb-4 rounded-2xl bg-black/4 dark:bg-white/5">
           <button
             type="button"
             onClick={() => setActiveTab('overview')}

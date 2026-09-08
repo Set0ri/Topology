@@ -376,8 +376,40 @@ The 3D WebGL engine (`react-force-graph-3d`) has been fully elevated to support 
 - **Floating 3D Camera Controls**:
   - Zoom In (`+`), Zoom Out (`-`)
   - Reset / Auto-Fit View (`Maximize2`)
-  - Fast Return to 2D Studio (`Layers`)
+---
 
+## 19. Mobile Responsive Layout & Touch Interaction Architecture
 
+Topology provides a seamless, touch-first experience across small mobile phones (320px+), tablets, and widescreen displays:
 
+```mermaid
+flowchart TD
+    subgraph Viewport_Detection ["Viewport & Layout Engine"]
+        V1["ResizeObserver & Tailwind Breakpoints (sm:640px, md:768px)"]
+        V2["Screen Width < 768px (Mobile Mode)"]
+        V3["Screen Width >= 768px (Desktop Mode)"]
+    end
 
+    subgraph Mobile_Adaptations ["Touch Ergonomics & Responsive Adjustments"]
+        M1["Header: Brand & Compact Swatch Dock; Undo/Redo Hidden; 80% Badge Pill"]
+        M2["Sidebar: Auto-Collapsed Floating Button; Bottom Sheet / Backdrop Drawer"]
+        M3["Node Inspector: Slide-Up Bottom Sheet with Drag Handle (100% Mobile Width)"]
+        M4["Radar Minimap: Collapsed on Mobile; Auto-Hidden when Inspector is Active"]
+        M5["Spotlight Quick-Add: Centered Dialog with Safe Insets (100vw - 2rem)"]
+        M6["Multi-Selection Dock: Compact Overflow Scroll at Bottom (100vw - 1.5rem)"]
+        M7["Modals: 92vh Max Height with Internal Touch Scrollbar & Responsive Padding"]
+    end
+
+    V2 --> Mobile_Adaptations
+```
+
+### Key Responsive Specifications:
+1. **Zero Borders Invariant**: Every component maintains elevated drop shadows (`shadow-elevated-*`) and border-free surfaces.
+2. **Touch Gestures in Canvas**:
+   - Single-finger pan: Drag background canvas.
+   - Pinch-to-zoom: Natural viewport scaling.
+   - Tap node: Opens full-featured slide-up Node Inspector.
+3. **Screen Real Estate Optimization**:
+   - Radar minimap automatically suppresses itself on mobile when the Node Inspector is active to prevent overlapping controls.
+   - Simulation bar and Multi-Selection dock are horizontally scrollable without clipping or horizontal page bounce.
+   - Modals automatically scale padding (`p-3 sm:p-6`) and enforce `max-h-[92vh]` scrollable bounds.

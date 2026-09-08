@@ -141,11 +141,10 @@ export const SpotlightQuickAdd: React.FC<SpotlightQuickAddProps> = ({
     }
   };
 
-  if (!isOpen) return null;
-
-  // Position nicely within viewport
-  const posX = Math.min(Math.max(screenPos.x - 160, 20), window.innerWidth - 360);
-  const posY = Math.min(Math.max(screenPos.y - 40, 70), window.innerHeight - 440);
+  const isMobile = typeof window !== 'undefined' && window.innerWidth < 640;
+  // Position nicely within viewport (desktop) or center (mobile)
+  const posX = isMobile ? undefined : Math.min(Math.max(screenPos.x - 160, 20), window.innerWidth - 360);
+  const posY = isMobile ? undefined : Math.min(Math.max(screenPos.y - 40, 70), window.innerHeight - 440);
 
   return (
     <AnimatePresence>
@@ -158,12 +157,14 @@ export const SpotlightQuickAdd: React.FC<SpotlightQuickAddProps> = ({
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.96, y: -6 }}
           transition={{ duration: 0.14, ease: 'easeOut' }}
-          style={{ left: posX, top: posY }}
+          style={isMobile ? undefined : { left: posX, top: posY }}
           onClick={(e) => e.stopPropagation()}
-          className="absolute w-84 rounded-3xl p-3 bg-white/95 dark:bg-cat-mocha-mantle/95 text-cat-latte-text dark:text-cat-mocha-text shadow-elevated-lg backdrop-blur-2xl border-none overflow-hidden select-none transition-colors duration-200"
+          className={`rounded-3xl p-3 bg-white/95 dark:bg-[#181a24]/95 text-[#202124] dark:text-[#f8fafc] shadow-elevated-2xl backdrop-blur-2xl border-none overflow-hidden select-none transition-colors duration-200 ${
+            isMobile ? 'fixed top-20 left-4 right-4 w-[calc(100vw-2rem)] max-w-sm mx-auto' : 'absolute w-84'
+          }`}
         >
           {/* Top Search Bar */}
-          <div className="relative flex items-center px-3 py-2 rounded-2xl bg-cat-latte-surface0/80 dark:bg-cat-mocha-surface0/60 mb-2">
+          <div className="relative flex items-center px-3 py-2 rounded-2xl bg-black/4 dark:bg-white/5 mb-2">
             <Search size={14} className="text-cat-latte-overlay1 dark:text-cat-mocha-overlay2 mr-2" />
             <input
               ref={inputRef}

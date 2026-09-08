@@ -113,24 +113,24 @@ export const Header: React.FC<HeaderProps> = ({ onOpenGenerator, onOpenCoherence
   };
 
   return (
-    <header className="h-13 px-4 flex items-center justify-between bg-white/90 dark:bg-[#10121a]/90 backdrop-blur-2xl select-none z-30 border-none transition-colors duration-200 shadow-xs">
+    <header className="h-13 px-2.5 sm:px-4 flex items-center justify-between bg-white/90 dark:bg-[#10121a]/90 backdrop-blur-2xl select-none z-30 border-none transition-colors duration-200 shadow-xs">
       {/* Left: Clean Brand Logo & Compact 2D/3D Switcher */}
-      <div className="flex items-center gap-4">
-        <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-xl bg-gradient-to-br from-[#1a73e8] to-[#4285f4] flex items-center justify-center shadow-xs">
+      <div className="flex items-center gap-2 sm:gap-4">
+        <div className="flex items-center gap-1.5 sm:gap-2">
+          <div className="w-7 h-7 rounded-xl bg-gradient-to-br from-[#1a73e8] to-[#4285f4] flex items-center justify-center shadow-xs shrink-0">
             <GitFork size={15} className="text-white rotate-90" />
           </div>
-          <span className="font-semibold text-sm tracking-tight text-[#202124] dark:text-[#f8fafc]">
+          <span className="font-semibold text-sm tracking-tight text-[#202124] dark:text-[#f8fafc] hidden sm:inline">
             Topology
           </span>
         </div>
 
         {/* Compact View Switcher: 2D / 3D */}
-        <div className="flex items-center p-0.5 rounded-xl bg-black/5 dark:bg-white/5 shadow-inner">
+        <div className="flex items-center p-0.5 rounded-xl bg-black/5 dark:bg-white/5 shadow-inner shrink-0">
           <button
             type="button"
             onClick={() => setViewMode('2d')}
-            className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium transition-all duration-150 border-none cursor-pointer ${
+            className={`flex items-center gap-1 px-2 sm:px-2.5 py-1 rounded-lg text-xs font-medium transition-all duration-150 border-none cursor-pointer ${
               viewMode === '2d'
                 ? 'bg-white dark:bg-[#1e2230] text-[#202124] dark:text-[#f8fafc] shadow-elevated-xs font-semibold'
                 : 'text-[#5f6368] dark:text-[#94a3b8] hover:text-[#202124] dark:hover:text-[#f8fafc] bg-transparent'
@@ -142,7 +142,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenGenerator, onOpenCoherence
           <button
             type="button"
             onClick={() => setViewMode('3d')}
-            className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium transition-all duration-150 border-none cursor-pointer ${
+            className={`flex items-center gap-1 px-2 sm:px-2.5 py-1 rounded-lg text-xs font-medium transition-all duration-150 border-none cursor-pointer ${
               viewMode === '3d'
                 ? 'bg-white dark:bg-[#1e2230] text-[#202124] dark:text-[#f8fafc] shadow-elevated-xs font-semibold'
                 : 'text-[#5f6368] dark:text-[#94a3b8] hover:text-[#202124] dark:hover:text-[#f8fafc] bg-transparent'
@@ -155,13 +155,13 @@ export const Header: React.FC<HeaderProps> = ({ onOpenGenerator, onOpenCoherence
       </div>
 
       {/* Center: Essential Synthesizer & Coherence Diagnostic */}
-      <div className="flex items-center gap-2">
-        {/* Coherence Health Pill */}
+      <div className="flex items-center gap-1.5 sm:gap-2">
+        {/* Coherence Health Pill (Tablet & Desktop) */}
         <button
           type="button"
           onClick={onOpenCoherence}
           title="Open Graph Coherence Diagnostic"
-          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-medium transition-all duration-150 border-none cursor-pointer shadow-xs ${
+          className={`hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-medium transition-all duration-150 border-none cursor-pointer shadow-xs ${
             coherenceReport.score >= 90
               ? 'bg-[#e6f4ea] text-[#137333] dark:bg-cat-mocha-green/15 dark:text-cat-mocha-green'
               : coherenceReport.score >= 70
@@ -177,17 +177,17 @@ export const Header: React.FC<HeaderProps> = ({ onOpenGenerator, onOpenCoherence
         <button
           type="button"
           onClick={onOpenGenerator}
-          className="flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-medium bg-[#1a73e8] hover:bg-[#1557b0] text-white shadow-xs transition-all duration-150 border-none cursor-pointer"
+          className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-xl text-xs font-medium bg-[#1a73e8] hover:bg-[#1557b0] text-white shadow-xs transition-all duration-150 border-none cursor-pointer shrink-0"
         >
           <Sparkles size={13} />
-          <span>AI Plan</span>
+          <span className="hidden sm:inline">AI Plan</span>
         </button>
       </div>
 
       {/* Right: Actions, History, Guide & Compact Theme Picker */}
-      <div className="flex items-center gap-1.5">
-        {/* Undo / Redo */}
-        <div className="flex items-center gap-0.5 mr-1 bg-black/5 dark:bg-white/5 p-0.5 rounded-xl">
+      <div className="flex items-center gap-1 sm:gap-1.5">
+        {/* Undo / Redo (Hidden on mobile phones to conserve space) */}
+        <div className="hidden sm:flex items-center gap-0.5 mr-0.5 sm:mr-1 bg-black/5 dark:bg-white/5 p-0.5 rounded-xl">
           <button
             type="button"
             disabled={history.length === 0}
@@ -212,11 +212,11 @@ export const Header: React.FC<HeaderProps> = ({ onOpenGenerator, onOpenCoherence
         <button
           type="button"
           onClick={onOpenLibrary}
-          className="h-8 px-2.5 rounded-xl text-xs font-medium bg-gradient-to-r from-[#1a73e8]/10 to-[#9334e6]/10 hover:from-[#1a73e8]/15 hover:to-[#9334e6]/15 text-[#1a73e8] dark:text-[#8ab4f8] flex items-center gap-1.5 transition-all border-none cursor-pointer shadow-xs"
+          className="h-8 px-2 sm:px-2.5 rounded-xl text-xs font-medium bg-gradient-to-r from-[#1a73e8]/10 to-[#9334e6]/10 hover:from-[#1a73e8]/15 hover:to-[#9334e6]/15 text-[#1a73e8] dark:text-[#8ab4f8] flex items-center gap-1 sm:gap-1.5 transition-all border-none cursor-pointer shadow-xs shrink-0"
           title="Browse 10 Canonical Archetypes, % Coverage Map & Community Topologies"
         >
           <Compass size={13} className="text-[#1a73e8] dark:text-[#8ab4f8]" />
-          <span className="font-semibold">Topology Hub</span>
+          <span className="font-semibold hidden md:inline">Topology Hub</span>
           <span className="px-1.5 py-0.2 rounded-md text-[10px] bg-[#1a73e8]/15 text-[#1a73e8] dark:text-[#8ab4f8] font-bold">
             80%
           </span>
@@ -237,17 +237,16 @@ export const Header: React.FC<HeaderProps> = ({ onOpenGenerator, onOpenCoherence
             type="button"
             onClick={() => {
               setIsExportOpen(!isExportOpen);
-              setIsSamplesOpen(false);
             }}
-            className="h-8 px-2.5 rounded-xl text-xs font-medium bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 text-[#202124] dark:text-[#f8fafc] flex items-center gap-1.5 transition-colors border-none cursor-pointer"
+            className="h-8 px-2 sm:px-2.5 rounded-xl text-xs font-medium bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 text-[#202124] dark:text-[#f8fafc] flex items-center gap-1 sm:gap-1.5 transition-colors border-none cursor-pointer"
           >
             <Download size={13} className="text-[#1e8e3e]" />
-            <span>Export</span>
+            <span className="hidden sm:inline">Export</span>
             <ChevronDown size={11} className="opacity-50" />
           </button>
 
           {isExportOpen && (
-            <div className="absolute top-full mt-2 right-0 w-64 rounded-2xl p-2 bg-white dark:bg-[#181a24] backdrop-blur-xl shadow-elevated-lg z-50 border-none space-y-1">
+            <div className="absolute top-full mt-2 right-0 w-64 max-w-[calc(100vw-1rem)] rounded-2xl p-2 bg-white dark:bg-[#181a24] backdrop-blur-xl shadow-elevated-lg z-50 border-none space-y-1">
               {/* Import Action inside menu */}
               <button
                 type="button"

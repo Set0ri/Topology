@@ -39,19 +39,19 @@ export const MultiSelectionDock: React.FC = () => {
         animate={{ y: 0, opacity: 1, scale: 1 }}
         exit={{ y: 60, opacity: 0, scale: 0.95 }}
         transition={{ duration: 0.2, ease: 'easeOut' }}
-        className="fixed bottom-8 left-1/2 -translate-x-1/2 z-40 px-3 py-2 rounded-2xl bg-white/95 dark:bg-cat-mocha-mantle/95 text-cat-latte-text dark:text-cat-mocha-text backdrop-blur-2xl shadow-elevated-xl border-none flex items-center gap-2 select-none"
+        className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 max-w-[calc(100vw-1.5rem)] px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-2xl bg-white/95 dark:bg-[#181a24]/95 text-[#202124] dark:text-[#f8fafc] backdrop-blur-2xl shadow-elevated-xl border-none flex items-center gap-1.5 sm:gap-2 select-none overflow-x-auto no-scrollbar"
       >
         {/* Selection Count Pill */}
-        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-cat-latte-surface0 dark:bg-cat-mocha-surface0 text-xs font-semibold">
-          <Layers size={13} className="text-cat-latte-sapphire dark:text-cat-mocha-sapphire" />
-          <span>{selectedNodeIds.length} Nodes</span>
+        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-100 dark:bg-white/5 text-xs font-semibold shrink-0">
+          <Layers size={13} className="text-[#1a73e8]" />
+          <span>{selectedNodeIds.length} <span className="hidden sm:inline">Nodes</span></span>
         </div>
 
-        <div className="h-4 w-[1px] bg-cat-latte-surface1 dark:bg-cat-mocha-surface1 mx-0.5" />
+        <div className="h-4 w-[1px] bg-black/5 dark:bg-white/10 mx-0.5 shrink-0" />
 
         {/* Bundle into Subgraph */}
         {isNamingBundle ? (
-          <div className="flex items-center gap-1.5 animate-fadeIn">
+          <div className="flex items-center gap-1.5 animate-fadeIn shrink-0">
             <input
               type="text"
               autoFocus
@@ -59,19 +59,19 @@ export const MultiSelectionDock: React.FC = () => {
               onChange={(e) => setBundleLabel(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleBundle()}
               placeholder="Subgraph Name..."
-              className="px-2.5 py-1 rounded-xl text-xs bg-cat-latte-surface0 dark:bg-cat-mocha-surface0 text-cat-latte-text dark:text-cat-mocha-text border-none focus:outline-none w-36"
+              className="px-2.5 py-1 rounded-xl text-xs bg-slate-100 dark:bg-white/5 text-[#202124] dark:text-[#f8fafc] border-none focus:outline-none w-28 sm:w-36"
             />
             <button
               type="button"
               onClick={handleBundle}
-              className="px-2.5 py-1 rounded-xl text-xs font-semibold bg-cat-latte-mauve text-white dark:bg-cat-mocha-mauve dark:text-cat-mocha-base border-none cursor-pointer hover:opacity-90"
+              className="px-2.5 py-1 rounded-xl text-xs font-semibold bg-[#9334e6] text-white border-none cursor-pointer hover:opacity-90"
             >
               Bundle
             </button>
             <button
               type="button"
               onClick={() => setIsNamingBundle(false)}
-              className="p-1 rounded-xl text-xs hover:bg-cat-latte-surface0 dark:hover:bg-cat-mocha-surface0 text-cat-latte-overlay1 dark:text-cat-mocha-overlay2 border-none cursor-pointer"
+              className="p-1 rounded-xl text-xs hover:bg-black/5 dark:hover:bg-white/10 text-[#5f6368] dark:text-[#94a3b8] border-none cursor-pointer"
             >
               <X size={13} />
             </button>
@@ -80,11 +80,12 @@ export const MultiSelectionDock: React.FC = () => {
           <button
             type="button"
             onClick={() => setIsNamingBundle(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-cat-latte-mauve/15 hover:bg-cat-latte-mauve/25 dark:bg-cat-mocha-mauve/20 dark:hover:bg-cat-mocha-mauve/30 text-cat-latte-mauve dark:text-cat-mocha-mauve transition-all border-none cursor-pointer"
+            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-semibold bg-[#9334e6]/10 hover:bg-[#9334e6]/20 text-[#9334e6] dark:text-[#c084fc] transition-all border-none cursor-pointer shrink-0"
             title="Bundle selected nodes into a nested sub-graph"
           >
             <FolderTree size={13} />
-            <span>Bundle into Subgraph</span>
+            <span className="hidden sm:inline">Bundle Subgraph</span>
+            <span className="sm:hidden">Bundle</span>
           </button>
         )}
 
@@ -92,30 +93,30 @@ export const MultiSelectionDock: React.FC = () => {
         <button
           type="button"
           onClick={() => alignSelectedNodes('horizontal')}
-          className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-medium hover:bg-cat-latte-surface0 dark:hover:bg-cat-mocha-surface0 text-cat-latte-subtext0 dark:text-cat-mocha-subtext0 hover:text-cat-latte-text dark:hover:text-cat-mocha-text transition-colors border-none cursor-pointer"
+          className="flex items-center gap-1 px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-medium hover:bg-black/5 dark:hover:bg-white/10 text-[#5f6368] dark:text-[#94a3b8] hover:text-[#202124] dark:hover:text-[#f8fafc] transition-colors border-none cursor-pointer shrink-0"
           title="Distribute and align horizontally"
         >
           <AlignHorizontalJustifyCenter size={13} />
-          <span>Align X</span>
+          <span className="hidden sm:inline">Align </span><span>X</span>
         </button>
 
         <button
           type="button"
           onClick={() => alignSelectedNodes('vertical')}
-          className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-medium hover:bg-cat-latte-surface0 dark:hover:bg-cat-mocha-surface0 text-cat-latte-subtext0 dark:text-cat-mocha-subtext0 hover:text-cat-latte-text dark:hover:text-cat-mocha-text transition-colors border-none cursor-pointer"
+          className="flex items-center gap-1 px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-medium hover:bg-black/5 dark:hover:bg-white/10 text-[#5f6368] dark:text-[#94a3b8] hover:text-[#202124] dark:hover:text-[#f8fafc] transition-colors border-none cursor-pointer shrink-0"
           title="Distribute and align vertically"
         >
           <AlignVerticalJustifyCenter size={13} />
-          <span>Align Y</span>
+          <span className="hidden sm:inline">Align </span><span>Y</span>
         </button>
 
-        <div className="h-4 w-[1px] bg-cat-latte-surface1 dark:bg-cat-mocha-surface1 mx-0.5" />
+        <div className="h-4 w-[1px] bg-black/5 dark:bg-white/10 mx-0.5 shrink-0" />
 
         {/* Batch Status */}
         <button
           type="button"
           onClick={() => batchSetStatus('ready')}
-          className="flex items-center gap-1 px-2 py-1 rounded-xl text-[11px] font-medium hover:bg-cat-latte-surface0 dark:hover:bg-cat-mocha-surface0 text-cat-latte-sapphire dark:text-cat-mocha-sapphire transition-colors border-none cursor-pointer"
+          className="flex items-center gap-1 px-2 py-1 rounded-xl text-[11px] font-medium hover:bg-[#1a73e8]/10 text-[#1a73e8] dark:text-[#8ab4f8] transition-colors border-none cursor-pointer shrink-0"
           title="Set all selected to Ready"
         >
           <Play size={11} />
@@ -125,20 +126,20 @@ export const MultiSelectionDock: React.FC = () => {
         <button
           type="button"
           onClick={() => batchSetStatus('completed')}
-          className="flex items-center gap-1 px-2 py-1 rounded-xl text-[11px] font-medium hover:bg-cat-latte-surface0 dark:hover:bg-cat-mocha-surface0 text-cat-latte-green dark:text-cat-mocha-green transition-colors border-none cursor-pointer"
+          className="flex items-center gap-1 px-2 py-1 rounded-xl text-[11px] font-medium hover:bg-[#1e8e3e]/10 text-[#1e8e3e] dark:text-[#34a853] transition-colors border-none cursor-pointer shrink-0"
           title="Set all selected to Completed"
         >
           <CheckCircle2 size={11} />
           <span>Done</span>
         </button>
 
-        <div className="h-4 w-[1px] bg-cat-latte-surface1 dark:bg-cat-mocha-surface1 mx-0.5" />
+        <div className="h-4 w-[1px] bg-black/5 dark:bg-white/10 mx-0.5 shrink-0" />
 
         {/* Batch Delete */}
         <button
           type="button"
           onClick={batchDeleteNodes}
-          className="p-1.5 rounded-xl text-cat-latte-red dark:text-cat-mocha-red hover:bg-cat-latte-red/10 dark:hover:bg-cat-mocha-red/15 transition-colors border-none cursor-pointer"
+          className="p-1.5 rounded-xl text-[#ea4335] hover:bg-[#ea4335]/10 transition-colors border-none cursor-pointer shrink-0"
           title="Delete all selected nodes"
         >
           <Trash2 size={13} />
@@ -148,7 +149,7 @@ export const MultiSelectionDock: React.FC = () => {
         <button
           type="button"
           onClick={clearNodeSelection}
-          className="p-1.5 rounded-xl hover:bg-cat-latte-surface0 dark:hover:bg-cat-mocha-surface0 text-cat-latte-overlay1 dark:text-cat-mocha-overlay2 transition-colors border-none cursor-pointer"
+          className="p-1.5 rounded-xl hover:bg-black/5 dark:hover:bg-white/10 text-[#5f6368] dark:text-[#94a3b8] transition-colors border-none cursor-pointer shrink-0"
           title="Clear selection (Esc)"
         >
           <X size={13} />
