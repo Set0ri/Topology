@@ -4,7 +4,20 @@ import * as THREE from 'three';
 import SpriteText from 'three-spritetext';
 import { useTopologyStore } from '../../store/useTopologyStore';
 import { getNodeTypeColor } from '../../utils/catppuccin';
-import { Plus, Minus, Maximize2, Layers, Compass } from 'lucide-react';
+import { Plus, Minus, Maximize2, Layers, AlertCircle } from 'lucide-react';
+
+function checkWebGLSupport(): boolean {
+  if (typeof window === 'undefined') return true;
+  try {
+    const canvas = document.createElement('canvas');
+    return Boolean(
+      window.WebGLRenderingContext &&
+      (canvas.getContext('webgl') || canvas.getContext('experimental-webgl'))
+    );
+  } catch {
+    return false;
+  }
+}
 
 export const TopologyGraph3D: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -18,6 +31,7 @@ export const TopologyGraph3D: React.FC = () => {
   const setViewMode = useTopologyStore(s => s.setViewMode);
 
   const isLight = theme === 'default' || theme === 'light' || theme === 'latte';
+  const [isWebGLSupported] = useState<boolean>(() => checkWebGLSupport());
 
   // Dynamic container dimensions with ResizeObserver
   const [dimensions, setDimensions] = useState<{ width: number; height: number }>({
@@ -40,46 +54,51 @@ export const TopologyGraph3D: React.FC = () => {
     const observer = new ResizeObserver(updateDimensions);
     observer.observe(containerRef.current);
 
-    // Initial camera auto-fit
+    // Initial camera auto-fit once simulation warms up
     const timer = setTimeout(() => {
-      if (fgRef.current) {
+      if (fgRef.current && nodes.length > 0) {
         fgRef.current.zoomToFit(1200, 60);
       }
-    }, 600);
+    }, 700);
 
     return () => {
       observer.disconnect();
       clearTimeout(timer);
     };
-  }, []);
+  }, [nodes.length]);
 
-  // Format graph data for react-force-graph-3d
+  // Format graph data with strict orphan/dangling link validation
   const graphData = useMemo(() => {
+    const nodeIds = new Set(nodes.map(n => n.id));
     return {
       nodes: nodes.map(n => ({
         id: n.id,
-        label: n.label,
+        label: n.label || 'Node',
         type: n.type,
         status: n.status,
         priority: n.priority,
         context: n.context,
       })),
-      links: edges.map(e => ({
-        id: e.id,
-        source: e.source,
-        target: e.target,
-        type: e.type,
-        label: e.label,
-      })),
+      links: edges
+        .filter(e => nodeIds.has(e.source) && nodeIds.has(e.target))
+        .map(e => ({
+          id: e.id,
+          source: e.source,
+          target: e.target,
+          type: e.type,
+          label: e.label,
+        })),
     };
   }, [nodes, edges]);
 
   // Handle node selection with camera fly-to
   const handleNodeClick = useCallback((node: any) => {
+    if (!node || !node.id) return;
     selectNode(node.id);
 
-    const distance = 80;
-    const distRatio = 1 + distance / (Math.hypot(node.x || 1, node.y || 1, node.z || 1) || 1);
+    const distance = 90;
+    const hyp = Math.hypot(node.x || 0, node.y || 0, node.z || 0) || 1;
+    const distRatio = 1 + distance / hyp;
 
     if (fgRef.current) {
       fgRef.current.cameraPosition(
@@ -92,7 +111,7 @@ export const TopologyGraph3D: React.FC = () => {
 
   // Camera Control Actions
   const handleResetCamera = () => {
-    if (fgRef.current) {
+    if (fgRef.current && nodes.length > 0) {
       fgRef.current.zoomToFit(1000, 60);
     }
   };
@@ -158,7 +177,7 @@ export const TopologyGraph3D: React.FC = () => {
     }
 
     // Floating Text Sprite Label
-    const sprite = new SpriteText(node.label);
+    const sprite = new SpriteText(node.label || 'Node');
     sprite.color = isLight ? '#202124' : '#cdd6f4';
     sprite.textHeight = 4.2;
     sprite.position.set(0, -10, 0);
@@ -169,6 +188,29 @@ export const TopologyGraph3D: React.FC = () => {
 
     return group;
   }, [theme, isLight, selectedNodeId]);
+
+  if (!isWebGLSupported) {
+    return (
+      <div className="w-full h-full flex flex-col items-center justify-center p-6 bg-[#f8fafd] dark:bg-[#11111b] text-[#202124] dark:text-[#f8fafc] select-none">
+        <div className="p-8 rounded-3xl bg-white dark:bg-[#181a24] shadow-elevated-xl text-center max-w-md border-none">
+          <div className="w-12 h-12 rounded-2xl bg-[#f9ab00]/10 text-[#f9ab00] flex items-center justify-center mx-auto mb-3">
+            <AlertCircle size={24} />
+          </div>
+          <h3 className="text-base font-bold">WebGL Hardware Acceleration Unavailable</h3>
+          <p className="text-xs text-[#5f6368] dark:text-[#94a3b8] mt-1.5 mb-4 leading-relaxed">
+            Your current browser or hardware environment has WebGL disabled. The 2D Spatial Precision Studio remains fully operational.
+          </p>
+          <button
+            type="button"
+            onClick={() => setViewMode('2d')}
+            className="px-4 py-2 rounded-xl text-xs font-semibold bg-[#1a73e8] hover:bg-[#1557b0] text-white shadow-xs border-none cursor-pointer transition-all"
+          >
+            Switch to 2D Studio
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   const bgColor = isLight ? '#f8fafd' : '#11111b';
   const linkColor = isLight ? 'rgba(148, 163, 184, 0.5)' : 'rgba(166, 173, 200, 0.35)';
@@ -197,6 +239,7 @@ export const TopologyGraph3D: React.FC = () => {
             font-family: system-ui, -apple-system, sans-serif;
             font-size: 12px;
             border: none;
+            pointer-events: none;
           ">
             <div style="font-weight: 700; color: ${getNodeTypeColor(node.type, theme)}">${node.label}</div>
             <div style="font-size: 10px; color: ${isLight ? '#5f6368' : '#a6adc8'}; margin-top: 2px;">
