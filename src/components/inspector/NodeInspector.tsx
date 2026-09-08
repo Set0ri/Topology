@@ -26,14 +26,15 @@ import {
   Code2,
   GitBranch,
   ShieldAlert,
-  Play
+  Play,
+  Users
 } from 'lucide-react';
 import { useTopologyStore, createSyntheticArtifactPayload } from '../../store/useTopologyStore';
-import { NodeStatus, Priority, AgentRole, ArtifactPayload, ExecutionType, ModelEngine } from '../../types/topology';
+import { NodeStatus, Priority, AgentRole, ArtifactPayload, ExecutionType, ModelEngine, MultiAgentCollaborationMode, AgentWorker } from '../../types/topology';
 import { getNodeTypeColor, getStatusColor } from '../../utils/catppuccin';
 import { generateAgentPromptPayload } from '../../utils/agentHandoff';
 
-type InspectorTab = 'overview' | 'artifacts' | 'telemetry' | 'hitl';
+type InspectorTab = 'overview' | 'squad' | 'artifacts' | 'telemetry' | 'hitl';
 
 export const NodeInspector: React.FC = () => {
   const selectedNodeId = useTopologyStore(s => s.selectedNodeId);
@@ -49,6 +50,10 @@ export const NodeInspector: React.FC = () => {
   const rejectNode = useTopologyStore(s => s.rejectNode);
   const toggleApprovalRequired = useTopologyStore(s => s.toggleApprovalRequired);
   const evaluateDecisionBranch = useTopologyStore(s => s.evaluateDecisionBranch);
+  const globalSquad = useTopologyStore(s => s.globalSquad);
+  const assignAgentToNode = useTopologyStore(s => s.assignAgentToNode);
+  const removeAgentFromNode = useTopologyStore(s => s.removeAgentFromNode);
+  const setNodeCollaborationMode = useTopologyStore(s => s.setNodeCollaborationMode);
 
   const [activeTab, setActiveTab] = useState<InspectorTab>('overview');
   const [selectedArtifactName, setSelectedArtifactName] = useState<string | null>(null);
@@ -219,6 +224,24 @@ export const NodeInspector: React.FC = () => {
           >
             <Layers size={13} />
             <span>Overview</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('squad')}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-xl text-xs font-medium transition-all border-none cursor-pointer ${
+              activeTab === 'squad'
+                ? 'bg-white dark:bg-cat-mocha-mantle text-cat-latte-mauve dark:text-cat-mocha-mauve shadow-elevated-sm font-semibold'
+                : 'text-cat-latte-subtext0 dark:text-cat-mocha-subtext0 hover:text-cat-latte-text dark:hover:text-cat-mocha-text'
+            }`}
+          >
+            <Users size={13} />
+            <span>Squad</span>
+            {(node.context?.assignedAgents?.length || 0) > 0 && (
+              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-cat-latte-mauve/15 dark:bg-cat-mocha-mauve/20 text-cat-latte-mauve dark:text-cat-mocha-mauve font-mono font-bold">
+                {node.context?.assignedAgents?.length}
+              </span>
+            )}
           </button>
 
           <button
@@ -504,6 +527,197 @@ export const NodeInspector: React.FC = () => {
                 />
               )}
             </div>
+          </div>
+        )}
+
+        {/* Tab: Multi-Agent Squad & Asynchronous Collaboration */}
+        {activeTab === 'squad' && (
+          <div className="flex-1 overflow-y-auto pr-1 space-y-4 custom-scrollbar">
+            {/* Collaboration Mode Selector */}
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-[11px] font-medium uppercase tracking-wider text-cat-latte-mauve dark:text-cat-mocha-mauve flex items-center gap-1.5">
+                  <Users size={13} />
+                  Collaboration Strategy
+                </label>
+              </div>
+
+              <div className="space-y-1.5">
+                {[
+                  {
+                    id: 'solo',
+                    label: 'Single Agent',
+                    icon: '🤖',
+                    desc: 'Isolated execution by primary assigned agent.',
+                  },
+                  {
+                    id: 'debate_consensus',
+                    label: 'Consensus Debate',
+                    icon: '⚖️',
+                    desc: 'Multiple agents debate proposals and vote before advancing.',
+                  },
+                  {
+                    id: 'pair_programming',
+                    label: 'Pair Execution',
+                    icon: '👥',
+                    desc: 'Driver agent produces code while Observer audits in lockstep.',
+                  },
+                  {
+                    id: 'parallel_subtasks',
+                    label: 'Parallel Subtasks',
+                    icon: '⚡',
+                    desc: 'Agents decompose node into concurrent asynchronous work units.',
+                  },
+                  {
+                    id: 'critique_refine',
+                    label: 'Critique & Refine',
+                    icon: '🔍',
+                    desc: 'Generator outputs artifact, Critic flags issues, Generator refines.',
+                  },
+                ].map((mode) => {
+                  const isSelected = (node.context?.collaborationMode || 'solo') === mode.id;
+                  return (
+                    <div
+                      key={mode.id}
+                      onClick={() => setNodeCollaborationMode(node.id, mode.id as MultiAgentCollaborationMode)}
+                      className={`p-2.5 rounded-2xl cursor-pointer transition-all ${
+                        isSelected
+                          ? 'bg-cat-latte-mauve/15 dark:bg-cat-mocha-mauve/20 shadow-xs'
+                          : 'bg-black/3 dark:bg-white/5 hover:bg-black/5 dark:hover:bg-white/10'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm">{mode.icon}</span>
+                          <span className="text-xs font-semibold text-cat-latte-text dark:text-cat-mocha-text">
+                            {mode.label}
+                          </span>
+                        </div>
+                        {isSelected && (
+                          <CheckCircle2 size={14} className="text-cat-latte-mauve dark:text-cat-mocha-mauve" />
+                        )}
+                      </div>
+                      <p className="text-[10.5px] text-cat-latte-subtext0 dark:text-cat-mocha-subtext0 mt-1 pl-6 leading-tight">
+                        {mode.desc}
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Currently Assigned Agents on this Node */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-[11px] font-medium uppercase tracking-wider text-cat-latte-overlay1 dark:text-cat-mocha-overlay2 flex items-center gap-1.5">
+                  <Bot size={13} />
+                  Assigned Agents ({node.context?.assignedAgents?.length || 0})
+                </label>
+              </div>
+
+              {(!node.context?.assignedAgents || node.context.assignedAgents.length === 0) ? (
+                <div className="p-4 rounded-2xl bg-black/3 dark:bg-white/5 text-center text-cat-latte-subtext0 dark:text-cat-mocha-subtext0 text-xs">
+                  No specialized agents assigned yet.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {node.context.assignedAgents.map((worker: AgentWorker) => (
+                    <div
+                      key={worker.id}
+                      className="p-3 rounded-2xl bg-black/3 dark:bg-white/5 flex items-center justify-between gap-3"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="w-8 h-8 rounded-xl bg-white dark:bg-cat-mocha-mantle shadow-xs flex items-center justify-center text-base shrink-0">
+                          {worker.avatar}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-xs text-cat-latte-text dark:text-cat-mocha-text truncate">
+                              {worker.name}
+                            </span>
+                            <span
+                              className={`px-1.5 py-0.2 rounded-full text-[9px] font-bold uppercase tracking-wider ${
+                                worker.status === 'thinking' || worker.status === 'executing_tool'
+                                  ? 'bg-[#1a73e8]/20 text-[#1a73e8] dark:text-[#8ab4f8] animate-pulse'
+                                  : worker.status === 'debating'
+                                  ? 'bg-yellow-500/20 text-yellow-600 dark:text-yellow-400'
+                                  : worker.status === 'completed'
+                                  ? 'bg-green-500/20 text-green-600 dark:text-green-400'
+                                  : 'bg-black/5 dark:bg-white/10 text-cat-latte-subtext0 dark:text-cat-mocha-subtext0'
+                              }`}
+                            >
+                              {worker.status.replace('_', ' ')}
+                            </span>
+                          </div>
+                          <div className="text-[10px] text-cat-latte-subtext0 dark:text-cat-mocha-subtext0 truncate">
+                            {worker.role} &bull; <span className="font-mono">{worker.modelEngine}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => removeAgentFromNode(node.id, worker.id)}
+                        className="p-1.5 rounded-xl hover:bg-red-500/15 text-cat-latte-subtext0 dark:text-cat-mocha-subtext0 hover:text-red-500 transition-colors border-none bg-transparent cursor-pointer shrink-0"
+                        title={`Remove ${worker.name} from this node`}
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Quick Add Available Fleet Agents */}
+            {(() => {
+              const assignedIds = new Set((node.context?.assignedAgents || []).map(a => a.id));
+              const availableSquad = globalSquad.filter(a => !assignedIds.has(a.id));
+
+              if (availableSquad.length === 0) return null;
+
+              return (
+                <div>
+                  <label className="text-[11px] font-medium uppercase tracking-wider text-cat-latte-overlay1 dark:text-cat-mocha-overlay2 mb-1.5 block">
+                    Available Squad Agents to Assign
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {availableSquad.map(agent => (
+                      <button
+                        key={agent.id}
+                        type="button"
+                        onClick={() => assignAgentToNode(node.id, agent)}
+                        className="flex items-center gap-2 p-2 rounded-xl bg-black/3 dark:bg-white/5 hover:bg-[#1a73e8]/10 text-left transition-all border-none cursor-pointer group"
+                      >
+                        <span className="text-base">{agent.avatar}</span>
+                        <div className="min-w-0 flex-1">
+                          <div className="text-xs font-semibold group-hover:text-[#1a73e8] dark:group-hover:text-[#8ab4f8] truncate">
+                            {agent.name}
+                          </div>
+                          <div className="text-[9.5px] text-cat-latte-subtext0 dark:text-cat-mocha-subtext0 truncate">
+                            {agent.role}
+                          </div>
+                        </div>
+                        <Plus size={12} className="opacity-40 group-hover:opacity-100 text-[#1a73e8] dark:text-[#8ab4f8] shrink-0" />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Live Thought Stream Preview for this Node */}
+            {node.context?.activeThought && (
+              <div>
+                <label className="text-[11px] font-medium uppercase tracking-wider text-cat-latte-sapphire dark:text-cat-mocha-sapphire mb-1.5 flex items-center gap-1.5">
+                  <Terminal size={12} />
+                  Live Asynchronous Thought Stream
+                </label>
+                <div className="p-3 rounded-2xl bg-black/5 dark:bg-white/5 font-mono text-[11px] leading-relaxed text-cat-latte-text dark:text-cat-mocha-text break-words">
+                  {node.context.activeThought}
+                </div>
+              </div>
+            )}
           </div>
         )}
 

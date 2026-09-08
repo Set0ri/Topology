@@ -413,3 +413,71 @@ flowchart TD
    - Radar minimap automatically suppresses itself on mobile when the Node Inspector is active to prevent overlapping controls.
    - Simulation bar and Multi-Selection dock are horizontally scrollable without clipping or horizontal page bounce.
    - Modals automatically scale padding (`p-3 sm:p-6`) and enforce `max-h-[92vh]` scrollable bounds.
+
+---
+
+## 20. Multi-Agent Asynchronous Swarm & Collaborative Execution Architecture
+
+Topology enables multi-agent orchestration where teams of specialized AI workers operate asynchronously across parallel DAG nodes or collaborate simultaneously on shared bottleneck tasks:
+
+```mermaid
+flowchart TD
+    subgraph Squad_Fleet ["Global Agent Squad Fleet"]
+        AG1["🧠 Sage (Architect / Gemini 2.5 Pro)"]
+        AG2["🤖 Apex (CodeGenerator / Gemini 2.5 Pro)"]
+        AG3["🎨 Pixel (FrontendArchitect / Claude 3.7 Sonnet)"]
+        AG4["🛡️ Sentinel (SecurityAnalyst / Gemini 2.5 Flash)"]
+        AG5["🔬 Auditor (TestAuditor / Script Runner)"]
+        AG6["⚡ Orbit (DevOpsEngineer / Claude 3.7 Sonnet)"]
+    end
+
+    subgraph Execution_Scenarios ["Asynchronous Graph Execution Patterns"]
+        subgraph Pattern1 ["1. Parallel Antichain Dispatch (Different Nodes)"]
+            N1["Backend Implementation (Apex)"]
+            N2["Frontend Interface (Pixel)"]
+            N3["Cloud Infrastructure (Orbit)"]
+            N1 -.->|Parallel Async| N2
+            N2 -.->|Parallel Async| N3
+        end
+
+        subgraph Pattern2 ["2. Shared Node Collaboration Strategies"]
+            S_Debate["⚖️ debate_consensus: Spec Proposal & Cross-Agent Voting"]
+            S_Pair["👥 pair_programming: Driver (Apex) + Observer (Auditor)"]
+            S_Subtasks["⚡ parallel_subtasks: Concurrent Sub-problem Decomposition"]
+            S_Critique["🔍 critique_refine: Generator Draft + Critic Refinement"]
+        end
+    end
+
+    subgraph Observability_Engine ["Observability & Telemetry Pipeline"]
+        TEL1["AgentActivityEvent Stream (Chronological Log)"]
+        TEL2["Live Node Avatars & Glowing Activity Rings"]
+        TEL3["Canvas Node Thought Stream (Live Reasoning Ticker)"]
+        TEL4["Multi-Agent Swarm Cockpit Drawer (Live Stream, Fleet Roster, Matrix)"]
+    end
+
+    Squad_Fleet -->|Dispatch Workers| Execution_Scenarios
+    Execution_Scenarios -->|Emit Telemetry| Observability_Engine
+```
+
+### Collaboration Strategies:
+1. **`debate_consensus` (Consensus Debate ⚖️)**:
+   - 2+ agents formulate proposals, cross-examine arguments, and vote before marking the node completed.
+   - Example: Architecture specification debate between Sage (Architect) and Sentinel (Security Analyst).
+2. **`pair_programming` (Pair Execution 👥)**:
+   - Driver agent executes code generation while Observer agent continuously audits tests and invariants in lockstep.
+   - Example: Automated test suite creation between Auditor (Test Auditor) and Sentinel (Security Analyst).
+3. **`parallel_subtasks` (Parallel Swarm ⚡)**:
+   - Multiple agents split a dense task into sub-components and work simultaneously on the same logical node.
+4. **`critique_refine` (Critique & Refine 🔍)**:
+   - Primary agent generates draft; secondary critic reviews and generates actionable improvements.
+5. **`solo` (Single Agent 🤖)**:
+   - Standard isolated agent execution.
+
+### Observability Features:
+- **Canvas Multi-Agent Badges**: Cards render overlapping color-coded avatars with pulsing active status rings and strategy badges (`⚖️ Consensus Debate`, `👥 Pair Execution`, etc.).
+- **Live Active Thought Stream**: Real-time ticker on node cards and inspector drawer displaying what each agent is reasoning or which tool is being invoked.
+- **Observability Cockpit**: Dedicated drawer with 3 tabs:
+  1. *Live Stream*: Filterable chronological event stream with agent avatars and direct canvas node links.
+  2. *Squad Fleet*: Roster with live statuses, model engines, assigned tools, and node counts.
+  3. *Collab Nodes*: Real-time matrix of all nodes utilizing collaborative multi-agent execution.
+

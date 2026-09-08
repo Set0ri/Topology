@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import confetti from 'canvas-confetti';
-import { Play, Pause, SkipForward, RotateCcw, Activity } from 'lucide-react';
+import { Play, Pause, SkipForward, RotateCcw, Activity, Users, Sparkles } from 'lucide-react';
 import { useTopologyStore } from '../../store/useTopologyStore';
 
 export const SimulationBar: React.FC = () => {
@@ -11,6 +11,8 @@ export const SimulationBar: React.FC = () => {
   const stepSimulation = useTopologyStore(s => s.stepSimulation);
   const pauseSimulation = useTopologyStore(s => s.pauseSimulation);
   const resetSimulation = useTopologyStore(s => s.resetSimulation);
+  const isCockpitOpen = useTopologyStore(s => s.isCockpitOpen);
+  const setCockpitOpen = useTopologyStore(s => s.setCockpitOpen);
   const nodes = useTopologyStore(s => s.nodes);
 
   const completedCount = nodes.filter(n => n.status === 'completed').length;
@@ -85,6 +87,20 @@ export const SimulationBar: React.FC = () => {
         title="Reset Simulation State"
       >
         <RotateCcw size={14} />
+      </button>
+
+      {/* Swarm Observability Cockpit Drawer Toggle */}
+      <button
+        onClick={() => setCockpitOpen(!isCockpitOpen)}
+        className={`p-1.5 sm:p-2 rounded-xl transition-all border-none cursor-pointer shrink-0 flex items-center gap-1.5 ${
+          isCockpitOpen
+            ? 'bg-[#1a73e8] text-white shadow-xs'
+            : 'bg-black/5 dark:bg-white/10 hover:bg-black/10 text-[#1a73e8] dark:text-[#8ab4f8]'
+        }`}
+        title="Toggle Multi-Agent Swarm Observability Cockpit"
+      >
+        <Users size={14} />
+        <span className="text-xs font-semibold hidden md:inline">Swarm</span>
       </button>
 
       {/* Progress Bar & Counter */}

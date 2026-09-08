@@ -15,7 +15,8 @@ import {
   Bot,
   HelpCircle,
   Terminal,
-  Compass
+  Compass,
+  Users
 } from 'lucide-react';
 import { useTopologyStore } from '../../store/useTopologyStore';
 import { exportToObsidianCanvas, exportToMermaid, exportToUniversalAgentManifest } from '../../utils/obsidianCanvas';
@@ -43,6 +44,9 @@ export const Header: React.FC<HeaderProps> = ({ onOpenGenerator, onOpenCoherence
   const loadSampleTopology = useTopologyStore(s => s.loadSampleTopology);
   const importCanvasData = useTopologyStore(s => s.importCanvasData);
   const getCoherenceReport = useTopologyStore(s => s.getCoherenceReport);
+  const isCockpitOpen = useTopologyStore(s => s.isCockpitOpen);
+  const setCockpitOpen = useTopologyStore(s => s.setCockpitOpen);
+  const globalSquad = useTopologyStore(s => s.globalSquad);
 
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [isSamplesOpen, setIsSamplesOpen] = useState(false);
@@ -207,6 +211,26 @@ export const Header: React.FC<HeaderProps> = ({ onOpenGenerator, onOpenCoherence
             <Redo2 size={13} />
           </button>
         </div>
+
+        {/* Multi-Agent Swarm Observability Trigger */}
+        <button
+          type="button"
+          onClick={() => setCockpitOpen(!isCockpitOpen)}
+          title="Open Multi-Agent Swarm Observability Cockpit"
+          className={`h-8 px-2 sm:px-2.5 rounded-xl text-xs font-medium flex items-center gap-1 sm:gap-1.5 transition-all border-none cursor-pointer shadow-xs shrink-0 ${
+            isCockpitOpen
+              ? 'bg-[#1a73e8] text-white font-semibold'
+              : 'bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 text-[#202124] dark:text-[#f8fafc]'
+          }`}
+        >
+          <Users size={13} className={isCockpitOpen ? 'text-white' : 'text-[#1a73e8] dark:text-[#8ab4f8]'} />
+          <span className="font-semibold hidden md:inline">Agents</span>
+          <span className={`px-1.5 py-0.2 rounded-md text-[10px] font-bold ${
+            isCockpitOpen ? 'bg-white/20 text-white' : 'bg-[#1a73e8]/10 text-[#1a73e8] dark:text-[#8ab4f8]'
+          }`}>
+            {globalSquad.length}
+          </span>
+        </button>
 
         {/* Topology Hub & Archetype Library Button with Coverage Badge */}
         <button

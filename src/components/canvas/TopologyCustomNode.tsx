@@ -119,6 +119,9 @@ export const TopologyCustomNode: React.FC<NodeProps> = ({ id, data, selected }) 
   const isHitlPending = node.context?.requiresHumanApproval && node.context?.approvalStatus === 'pending';
   const artifactPayloads = node.context?.artifactPayloads || {};
   const artifactList = Object.keys(artifactPayloads);
+  const assignedAgents = node.context?.assignedAgents || [];
+  const collaborationMode = node.context?.collaborationMode || (assignedAgents.length > 1 ? 'parallel_subtasks' : 'solo');
+  const isMultiAgent = assignedAgents.length > 1;
 
   const handleCardClick = (e: React.MouseEvent) => {
     if (e.shiftKey || e.ctrlKey || e.metaKey) {
@@ -263,17 +266,45 @@ export const TopologyCustomNode: React.FC<NodeProps> = ({ id, data, selected }) 
         } ${isHovered ? '-translate-y-1' : ''}`}
         style={{ background, boxShadow }}
       >
-        {/* Top Header: Minimal Type Badge, Status Beacon, Priority */}
+        {/* Top Header: Minimal Type Badge, Status Beacon, Priority & Multi-Agent Avatars */}
         <div className="flex items-center justify-between gap-2 mb-2 relative z-10">
-          <div 
-            className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg font-medium text-[11px] tracking-wide"
-            style={{ backgroundColor: typeBadgeBg, color: typeBadgeText }}
-          >
-            <NodeTypeIcon type={node.type} color={typeColor} size={11} />
-            <span>{typeLabel}</span>
+          <div className="flex items-center gap-1.5 min-w-0">
+            <div 
+              className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg font-medium text-[11px] tracking-wide shrink-0"
+              style={{ backgroundColor: typeBadgeBg, color: typeBadgeText }}
+            >
+              <NodeTypeIcon type={node.type} color={typeColor} size={11} />
+              <span>{typeLabel}</span>
+            </div>
+
+            {/* Overlapping Multi-Agent Avatar Cluster */}
+            {assignedAgents.length > 0 && (
+              <div 
+                className="flex items-center -space-x-1.5 ml-0.5 shrink-0" 
+                title={`Assigned Squad: ${assignedAgents.map(a => `${a.name} (${a.role})`).join(', ')}`}
+              >
+                {assignedAgents.map((agent) => {
+                  const isActiveWorker = (node.status === 'in_progress' || isAgentActive) && (agent.status === 'thinking' || agent.status === 'executing_tool' || agent.status === 'debating');
+                  return (
+                    <div
+                      key={agent.id}
+                      className={`relative w-5 h-5 rounded-full flex items-center justify-center text-[10px] bg-white/95 dark:bg-[#202434] shadow-xs transition-transform hover:scale-125 hover:z-20 ${
+                        isActiveWorker ? 'animate-pulse' : ''
+                      }`}
+                      style={{
+                        boxShadow: isActiveWorker ? `0 0 0 1.5px ${agent.color}` : `0 0 0 1px ${agent.color}80`,
+                      }}
+                      title={`${agent.name} (${agent.role}) - ${agent.status}: ${agent.currentThought || 'Ready'}`}
+                    >
+                      <span>{agent.avatar}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             {/* Status Beacon dot */}
             <span 
               className="relative flex h-2 w-2" 
@@ -304,12 +335,34 @@ export const TopologyCustomNode: React.FC<NodeProps> = ({ id, data, selected }) 
           </div>
         </div>
 
-        {/* Node Title */}
-        <h3 className={`font-semibold text-xs leading-snug tracking-tight line-clamp-2 mb-1.5 relative z-10 ${
-          isDark ? 'text-cat-mocha-text' : 'text-cat-latte-text'
-        }`}>
-          {node.label}
-        </h3>
+        {/* Node Title & Collaboration Pill */}
+        <div>
+          <h3 className={`font-semibold text-xs leading-snug tracking-tight line-clamp-2 mb-1 relative z-10 ${
+            isDark ? 'text-cat-mocha-text' : 'text-cat-latte-text'
+          }`}>
+            {node.label}
+          </h3>
+
+          {/* Collaboration Mode Pill if multi-agent */}
+          {isMultiAgent && (
+            <div className="flex items-center gap-1.5 mb-1.5">
+              <span className={`px-2 py-0.5 rounded-lg text-[10px] font-semibold flex items-center gap-1 ${
+                collaborationMode === 'debate_consensus'
+                  ? 'bg-purple-100/80 text-purple-700 dark:bg-purple-950/40 dark:text-purple-300'
+                  : collaborationMode === 'pair_programming'
+                  ? 'bg-blue-100/80 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300'
+                  : 'bg-emerald-100/80 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'
+              }`}>
+                {collaborationMode === 'debate_consensus' ? '⚖️ Consensus Debate' :
+                 collaborationMode === 'pair_programming' ? '👥 Pair Execution' :
+                 '⚡ Parallel Swarm'}
+              </span>
+              <span className="text-[10px] opacity-60 font-mono">
+                {assignedAgents.length} agents
+              </span>
+            </div>
+          )}
+        </div>
 
         {/* HITL Pending Review Checkpoint Alert */}
         {isHitlPending && (
@@ -425,15 +478,36 @@ export const TopologyCustomNode: React.FC<NodeProps> = ({ id, data, selected }) 
           )}
         </div>
 
-        {/* Autonomous agent active thought telemetry */}
-        {isAgentActive && (
-          <div className={`my-1.5 p-2 rounded-xl flex items-center gap-2 text-[11px] backdrop-blur-md ${
-            isDark ? 'bg-cat-mocha-surface0/80 text-cat-mocha-yellow' : 'bg-cat-latte-surface0 text-cat-latte-yellow'
-          }`}>
-            <Zap size={12} className="animate-bounce shrink-0" />
-            <span className="font-mono text-[10px] truncate">
-              {telemetry?.liveThought || 'Agent reasoning...'}
-            </span>
+        {/* Multi-Agent & Autonomous Active Thought Telemetry */}
+        {(node.status === 'in_progress' || isAgentActive) && (
+          <div className="my-1.5 space-y-1">
+            {assignedAgents.length > 0 ? (
+              assignedAgents.map((agent) => (
+                <div
+                  key={agent.id}
+                  className={`p-1.5 rounded-xl flex items-center gap-1.5 text-[10px] backdrop-blur-md transition-all shadow-xs ${
+                    isDark ? 'bg-[#181a24]/90 text-[#f8fafc]' : 'bg-slate-100/90 text-[#202124]'
+                  }`}
+                >
+                  <span className="shrink-0 text-xs">{agent.avatar}</span>
+                  <span className="font-semibold shrink-0" style={{ color: agent.color }}>
+                    {agent.name}:
+                  </span>
+                  <span className="font-mono truncate opacity-85">
+                    {agent.currentThought || (agent.status === 'thinking' ? 'Synthesizing...' : 'Executing...')}
+                  </span>
+                </div>
+              ))
+            ) : (
+              <div className={`p-2 rounded-xl flex items-center gap-2 text-[11px] backdrop-blur-md ${
+                isDark ? 'bg-cat-mocha-surface0/80 text-cat-mocha-yellow' : 'bg-cat-latte-surface0 text-cat-latte-yellow'
+              }`}>
+                <Zap size={12} className="animate-bounce shrink-0" />
+                <span className="font-mono text-[10px] truncate">
+                  {telemetry?.liveThought || 'Agent reasoning...'}
+                </span>
+              </div>
+            )}
           </div>
         )}
 

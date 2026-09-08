@@ -9,6 +9,7 @@ import { PlanGeneratorModal } from './components/generator/PlanGeneratorModal';
 import { CoherenceModal } from './components/validation/CoherenceModal';
 import { OnboardingTutorialModal } from './components/tutorial/OnboardingTutorialModal';
 import { TopologyLibraryModal } from './components/library/TopologyLibraryModal';
+import { MultiAgentCockpit } from './components/swarm/MultiAgentCockpit';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { Sparkles } from 'lucide-react';
 
@@ -76,6 +77,9 @@ export const App: React.FC = () => {
 
           {/* Live Simulation Playback Dock */}
           <SimulationBar />
+
+          {/* Multi-Agent Swarm Observability Cockpit Drawer */}
+          <MultiAgentCockpit />
         </main>
       </ErrorBoundary>
 

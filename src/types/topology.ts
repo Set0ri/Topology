@@ -53,6 +53,56 @@ export type AgentExecutionState =
   | 'completed'
   | 'error';
 
+export type AgentWorkStatus = 
+  | 'idle'
+  | 'queued'
+  | 'ready'
+  | 'thinking'
+  | 'executing_tool'
+  | 'reviewing'
+  | 'debating'
+  | 'completed'
+  | 'blocked';
+
+export type MultiAgentCollaborationMode = 
+  | 'solo'              // Single assigned agent
+  | 'parallel_subtasks' // Concurrently dividing sub-components
+  | 'pair_programming' // Primary coder + auditor/linting
+  | 'debate_consensus'  // Cross-agent debate and consensus
+  | 'critique_refine';  // Generator + Critic feedback loop
+
+export interface AgentWorker {
+  id: string;
+  name: string;
+  role: AgentRole | string;
+  avatar: string; // Emoji or short symbol, e.g. '🤖', '🛡️', '🎨', '🔬', '🧠', '⚡'
+  color: string;  // Hex accent color, e.g. #1a73e8, #f9ab00, #9334e6, #1e8e3e, #ea4335, #007b83
+  modelEngine: ModelEngine | string;
+  status: AgentWorkStatus;
+  currentThought?: string;
+  activeTool?: string;
+  progress?: number; // 0 to 100
+  contributionRole?: 'primary' | 'reviewer' | 'critic' | 'debater' | 'auditor';
+  assignedNodeId?: string;
+  tools?: string[];
+}
+
+export interface AgentActivityEvent {
+  id: string;
+  timestamp: number;
+  agentId: string;
+  agentName: string;
+  agentRole: string;
+  agentColor: string;
+  agentAvatar: string;
+  nodeId: string;
+  nodeLabel: string;
+  actionType: 'claimed_node' | 'started_work' | 'thought' | 'tool_call' | 'handoff' | 'collaborated' | 'completed' | 'blocked';
+  detail: string;
+  tool?: string;
+  artifactName?: string;
+}
+
 export interface AgentTelemetry {
   state: AgentExecutionState;
   activeTool?: string;
@@ -96,6 +146,10 @@ export interface AgentActionContext {
   estimatedMinutes?: number;
   executionLogs?: string[];
   telemetry?: AgentTelemetry;
+  // Multi-Agent Collaboration
+  collaborationMode?: MultiAgentCollaborationMode;
+  assignedAgents?: AgentWorker[];
+  activeThought?: string;
   stoppingCondition?: StoppingCondition;
   artifactPayloads?: Record<string, ArtifactPayload>;
   requiresHumanApproval?: boolean;

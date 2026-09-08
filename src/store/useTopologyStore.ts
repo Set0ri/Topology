@@ -16,9 +16,12 @@ import {
   CoherenceReport,
   AgentTelemetry,
   LevelOfDetail,
-  ArtifactPayload
+  ArtifactPayload,
+  AgentWorker,
+  AgentActivityEvent,
+  MultiAgentCollaborationMode
 } from '../types/topology';
-import { SAMPLE_TOPOLOGIES } from '../data/sampleTopologies';
+import { SAMPLE_TOPOLOGIES, DEFAULT_AGENT_SQUAD } from '../data/sampleTopologies';
 import { CANONICAL_ARCHETYPES, CanonicalArchetype } from '../data/topologyRegistry';
 import { calculateDagreLayout, detectCycles, getTopologicalBatches } from '../utils/graphAlgorithms';
 import { importFromObsidianCanvas } from '../utils/obsidianCanvas';
@@ -178,6 +181,22 @@ interface TopologyStore {
   pauseSimulation: () => void;
   resetSimulation: () => void;
 
+  // Multi-Agent Swarm State & Observability
+  globalSquad: AgentWorker[];
+  activityStream: AgentActivityEvent[];
+  isCockpitOpen: boolean;
+  activeFilterAgentId: string | null;
+
+  // Multi-Agent Swarm Actions
+  setCockpitOpen: (isOpen: boolean) => void;
+  setActiveFilterAgentId: (agentId: string | null) => void;
+  addActivityEvent: (event: Omit<AgentActivityEvent, 'id' | 'timestamp'>) => void;
+  clearActivityStream: () => void;
+  loadMultiAgentDemo: () => void;
+  assignAgentToNode: (nodeId: string, agent: AgentWorker) => void;
+  removeAgentFromNode: (nodeId: string, agentId: string) => void;
+  setNodeCollaborationMode: (nodeId: string, mode: MultiAgentCollaborationMode) => void;
+
   // View & Theme Controls
   setTheme: (theme: ThemeMode) => void;
   toggleTheme: () => void;
@@ -248,6 +267,65 @@ export const useTopologyStore = create<TopologyStore>((set, get) => {
     isSimulating: false,
     simulationStep: 0,
     simulationBatches: [],
+
+    // Multi-Agent Swarm State & Observability
+    globalSquad: DEFAULT_AGENT_SQUAD,
+    activityStream: [
+      {
+        id: 'init-1',
+        timestamp: Date.now() - 12000,
+        agentId: 'agent-sage',
+        agentName: 'Sage',
+        agentRole: 'Architect',
+        agentColor: '#9334e6',
+        agentAvatar: '🧠',
+        nodeId: 'swarm-spec',
+        nodeLabel: 'API Architecture & Security Contract',
+        actionType: 'claimed_node',
+        detail: 'Sage claimed lead role on API Architecture & Security Contract.',
+      },
+      {
+        id: 'init-2',
+        timestamp: Date.now() - 10000,
+        agentId: 'agent-sentinel',
+        agentName: 'Sentinel',
+        agentRole: 'SecurityAnalyst',
+        agentColor: '#ea4335',
+        agentAvatar: '🛡️',
+        nodeId: 'swarm-spec',
+        nodeLabel: 'API Architecture & Security Contract',
+        actionType: 'collaborated',
+        detail: 'Sentinel joined in Debate & Consensus mode for auth boundary review.',
+      },
+      {
+        id: 'init-3',
+        timestamp: Date.now() - 8000,
+        agentId: 'agent-apex',
+        agentName: 'Apex',
+        agentRole: 'CodeGenerator',
+        agentColor: '#1a73e8',
+        agentAvatar: '🤖',
+        nodeId: 'swarm-backend',
+        nodeLabel: 'Distributed Engine & Event Bus Core',
+        actionType: 'claimed_node',
+        detail: 'Apex standing by for async backend execution thread.',
+      },
+      {
+        id: 'init-4',
+        timestamp: Date.now() - 6000,
+        agentId: 'agent-pixel',
+        agentName: 'Pixel',
+        agentRole: 'FrontendArchitect',
+        agentColor: '#007b83',
+        agentAvatar: '🎨',
+        nodeId: 'swarm-frontend',
+        nodeLabel: 'Elevated Fluid Workspace UI',
+        actionType: 'claimed_node',
+        detail: 'Pixel standing by for parallel async client UI thread.',
+      },
+    ],
+    isCockpitOpen: false,
+    activeFilterAgentId: null,
 
     history: [],
     future: [],
@@ -1304,9 +1382,28 @@ export const useTopologyStore = create<TopologyStore>((set, get) => {
       // Reset nodes to pending except batch 0 which becomes in_progress
       const updatedNodes = nodes.map(n => {
         if (batches[0].includes(n.id)) {
-          return { ...n, status: 'in_progress' as NodeStatus };
+          const updatedAssigned = (n.context.assignedAgents || []).map(a => ({
+            ...a,
+            status: 'thinking' as const,
+            currentThought: a.currentThought || `Analyzing contracts and execution plan for ${n.label}...`,
+          }));
+          return {
+            ...n,
+            status: 'in_progress' as NodeStatus,
+            context: {
+              ...n.context,
+              assignedAgents: updatedAssigned,
+            },
+          };
         }
-        return { ...n, status: 'pending' as NodeStatus };
+        return {
+          ...n,
+          status: 'pending' as NodeStatus,
+          context: {
+            ...n.context,
+            assignedAgents: (n.context.assignedAgents || []).map(a => ({ ...a, status: 'queued' as const })),
+          },
+        };
       });
 
       set({
@@ -1314,6 +1411,52 @@ export const useTopologyStore = create<TopologyStore>((set, get) => {
         simulationStep: 0,
         simulationBatches: batches,
         nodes: updatedNodes,
+      });
+
+      // Log start events
+      batches[0].forEach(nodeId => {
+        const n = nodes.find(x => x.id === nodeId);
+        if (!n) return;
+        const agents = n.context.assignedAgents || [];
+        if (agents.length === 0) {
+          get().addActivityEvent({
+            agentId: 'agent-auto',
+            agentName: n.context.role || 'Agent',
+            agentRole: n.context.role || 'Worker',
+            agentColor: '#1a73e8',
+            agentAvatar: '🤖',
+            nodeId: n.id,
+            nodeLabel: n.label,
+            actionType: 'started_work',
+            detail: `Started execution on "${n.label}".`,
+          });
+        } else if (agents.length === 1) {
+          get().addActivityEvent({
+            agentId: agents[0].id,
+            agentName: agents[0].name,
+            agentRole: agents[0].role,
+            agentColor: agents[0].color,
+            agentAvatar: agents[0].avatar,
+            nodeId: n.id,
+            nodeLabel: n.label,
+            actionType: 'started_work',
+            detail: `${agents[0].name} (${agents[0].role}) dispatched on "${n.label}".`,
+          });
+        } else {
+          const mode = n.context.collaborationMode || 'parallel_subtasks';
+          const modeLabel = mode === 'debate_consensus' ? 'Debate & Consensus' : mode === 'pair_programming' ? 'Pair Execution' : 'Parallel Collaboration';
+          get().addActivityEvent({
+            agentId: agents[0].id,
+            agentName: agents.map(a => a.name).join(' & '),
+            agentRole: modeLabel,
+            agentColor: '#9334e6',
+            agentAvatar: '👥',
+            nodeId: n.id,
+            nodeLabel: n.label,
+            actionType: 'collaborated',
+            detail: `${agents.map(a => `${a.avatar} ${a.name}`).join(' and ')} collaborating on "${n.label}" (${modeLabel}).`,
+          });
+        }
       });
     },
 
@@ -1347,6 +1490,17 @@ export const useTopologyStore = create<TopologyStore>((set, get) => {
           selectedNodeId: needsApprovalNode.id,
           selectedNodeIds: [needsApprovalNode.id],
         });
+        get().addActivityEvent({
+          agentId: 'agent-council',
+          agentName: 'Council Gate',
+          agentRole: 'Supervisor Gate',
+          agentColor: '#ea4335',
+          agentAvatar: '🛡️',
+          nodeId: needsApprovalNode.id,
+          nodeLabel: needsApprovalNode.label,
+          actionType: 'blocked',
+          detail: `Execution paused at Human Review Gate: Awaiting supervisor sign-off on "${needsApprovalNode.label}".`,
+        });
         return;
       }
 
@@ -1369,6 +1523,23 @@ export const useTopologyStore = create<TopologyStore>((set, get) => {
           });
         }
         newPayloadsMap[nodeId] = payloads;
+
+        // Log completion to activityStream
+        const agents = n.context.assignedAgents || [];
+        const agentName = agents.length > 0 ? agents.map(a => a.name).join(' & ') : (n.context.role || 'Agent');
+        const avatar = agents.length > 0 ? agents[0].avatar : '🤖';
+        const color = agents.length > 0 ? agents[0].color : '#1e8e3e';
+        get().addActivityEvent({
+          agentId: agents.length > 0 ? agents[0].id : 'agent-auto',
+          agentName,
+          agentRole: n.context.role || 'Worker',
+          agentColor: color,
+          agentAvatar: avatar,
+          nodeId: n.id,
+          nodeLabel: n.label,
+          actionType: 'completed',
+          detail: `Completed "${n.label}". Emitted artifacts: ${Object.keys(payloads).join(', ')}.`,
+        });
       });
 
       // Pass payloads downstream
@@ -1386,11 +1557,17 @@ export const useTopologyStore = create<TopologyStore>((set, get) => {
 
       const updatedNodes = nodes.map(n => {
         if (currentBatch.includes(n.id)) {
+          const updatedAssigned = (n.context.assignedAgents || []).map(a => ({
+            ...a,
+            status: 'completed' as const,
+            progress: 100,
+          }));
           return {
             ...n,
             status: 'completed' as NodeStatus,
             context: {
               ...n.context,
+              assignedAgents: updatedAssigned,
               artifactPayloads: {
                 ...(n.context.artifactPayloads || {}),
                 ...(newPayloadsMap[n.id] || {}),
@@ -1408,17 +1585,86 @@ export const useTopologyStore = create<TopologyStore>((set, get) => {
             }
           });
 
+          const updatedAssigned = (n.context.assignedAgents || []).map(a => ({
+            ...a,
+            status: 'thinking' as const,
+            progress: 30,
+          }));
+
           return {
             ...n,
             status: 'in_progress' as NodeStatus,
             context: {
               ...n.context,
+              assignedAgents: updatedAssigned,
               artifactPayloads: combinedPayloads,
             },
           };
         }
         return n;
       });
+
+      // If next batch is starting, log parallel asynchronous events
+      if (nextBatch.length > 1) {
+        get().addActivityEvent({
+          agentId: 'swarm-fanout',
+          agentName: 'Parallel Mesh',
+          agentRole: 'Async Fan-Out',
+          agentColor: '#1a73e8',
+          agentAvatar: '⚡',
+          nodeId: nextBatch[0],
+          nodeLabel: `${nextBatch.length} Parallel Nodes`,
+          actionType: 'started_work',
+          detail: `Parallel Asynchronous Fan-Out: ${nextBatch.length} nodes running concurrently on separate agent worker threads.`,
+        });
+      }
+
+      nextBatch.forEach(nodeId => {
+        const n = nodes.find(x => x.id === nodeId);
+        if (!n) return;
+        const agents = n.context.assignedAgents || [];
+        if (agents.length > 1) {
+          const mode = n.context.collaborationMode || 'parallel_subtasks';
+          const modeLabel = mode === 'debate_consensus' ? 'Debate & Consensus' : mode === 'pair_programming' ? 'Pair Execution' : 'Parallel Collaboration';
+          get().addActivityEvent({
+            agentId: agents[0].id,
+            agentName: agents.map(a => a.name).join(' & '),
+            agentRole: modeLabel,
+            agentColor: '#9334e6',
+            agentAvatar: '👥',
+            nodeId: n.id,
+            nodeLabel: n.label,
+            actionType: 'collaborated',
+            detail: `${agents.map(a => `${a.avatar} ${a.name}`).join(' and ')} collaborating on "${n.label}" (${modeLabel}).`,
+          });
+        } else if (agents.length === 1) {
+          get().addActivityEvent({
+            agentId: agents[0].id,
+            agentName: agents[0].name,
+            agentRole: agents[0].role,
+            agentColor: agents[0].color,
+            agentAvatar: agents[0].avatar,
+            nodeId: n.id,
+            nodeLabel: n.label,
+            actionType: 'started_work',
+            detail: `${agents[0].name} started async work on "${n.label}".`,
+          });
+        }
+      });
+
+      if (nextStep >= simulationBatches.length) {
+        get().addActivityEvent({
+          agentId: 'swarm-success',
+          agentName: 'Swarm Coordinator',
+          agentRole: 'Autonomous Orchestrator',
+          agentColor: '#1e8e3e',
+          agentAvatar: '🏆',
+          nodeId: 'swarm-ship',
+          nodeLabel: 'Topology Complete',
+          actionType: 'completed',
+          detail: `All autonomous work units and consensus gates verified successfully!`,
+        });
+      }
 
       set({
         simulationStep: nextStep,
@@ -1438,8 +1684,135 @@ export const useTopologyStore = create<TopologyStore>((set, get) => {
         isSimulating: false,
         simulationStep: 0,
         simulationBatches: [],
-        nodes: sample.nodes,
+        nodes: JSON.parse(JSON.stringify(sample.nodes)),
       });
+    },
+
+    // Multi-Agent Swarm Actions
+    setCockpitOpen: (isOpen) => set({ isCockpitOpen: isOpen }),
+    setActiveFilterAgentId: (agentId) => set({ activeFilterAgentId: agentId }),
+
+    addActivityEvent: (event) => {
+      const newEvent: AgentActivityEvent = {
+        ...event,
+        id: `act-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        timestamp: Date.now(),
+      };
+      set(state => ({
+        activityStream: [newEvent, ...state.activityStream].slice(0, 100),
+      }));
+    },
+
+    clearActivityStream: () => set({ activityStream: [] }),
+
+    loadMultiAgentDemo: () => {
+      const demo = SAMPLE_TOPOLOGIES.find(s => s.id === 'multi-agent-async-squad') || SAMPLE_TOPOLOGIES[0];
+      saveSnapshot();
+      set({
+        nodes: JSON.parse(JSON.stringify(demo.nodes)),
+        edges: JSON.parse(JSON.stringify(demo.edges)),
+        selectedNodeId: 'swarm-spec',
+        selectedNodeIds: ['swarm-spec'],
+        isCockpitOpen: true,
+        activityStream: [
+          {
+            id: `act-${Date.now()}-1`,
+            timestamp: Date.now(),
+            agentId: 'agent-sage',
+            agentName: 'Sage',
+            agentRole: 'Architect',
+            agentColor: '#9334e6',
+            agentAvatar: '🧠',
+            nodeId: 'swarm-spec',
+            nodeLabel: 'API Architecture & Security Contract',
+            actionType: 'claimed_node',
+            detail: 'Demo Swarm initialized: 6 specialized agents dispatched across graph topology.',
+          },
+          {
+            id: `act-${Date.now()}-2`,
+            timestamp: Date.now() + 100,
+            agentId: 'agent-sentinel',
+            agentName: 'Sentinel',
+            agentRole: 'SecurityAnalyst',
+            agentColor: '#ea4335',
+            agentAvatar: '🛡️',
+            nodeId: 'swarm-spec',
+            nodeLabel: 'API Architecture & Security Contract',
+            actionType: 'collaborated',
+            detail: 'Paired with Sage on shared node in Debate & Consensus mode.',
+          },
+        ],
+      });
+      setTimeout(() => {
+        get().startSimulation();
+      }, 400);
+    },
+
+    assignAgentToNode: (nodeId, agent) => {
+      saveSnapshot();
+      const nodes = get().nodes.map(n => {
+        if (n.id === nodeId) {
+          const currentAgents = n.context.assignedAgents || [];
+          if (currentAgents.some(a => a.id === agent.id)) return n;
+          return {
+            ...n,
+            context: {
+              ...n.context,
+              assignedAgents: [...currentAgents, agent],
+              collaborationMode: (currentAgents.length + 1 > 1) ? (n.context.collaborationMode || 'parallel_subtasks') : 'solo',
+            },
+          };
+        }
+        return n;
+      });
+      set({ nodes });
+      get().addActivityEvent({
+        agentId: agent.id,
+        agentName: agent.name,
+        agentRole: agent.role,
+        agentColor: agent.color,
+        agentAvatar: agent.avatar,
+        nodeId,
+        nodeLabel: nodes.find(n => n.id === nodeId)?.label || nodeId,
+        actionType: 'claimed_node',
+        detail: `${agent.name} assigned to node "${nodes.find(n => n.id === nodeId)?.label || nodeId}".`,
+      });
+    },
+
+    removeAgentFromNode: (nodeId, agentId) => {
+      saveSnapshot();
+      const nodes = get().nodes.map(n => {
+        if (n.id === nodeId) {
+          const remaining = (n.context.assignedAgents || []).filter(a => a.id !== agentId);
+          return {
+            ...n,
+            context: {
+              ...n.context,
+              assignedAgents: remaining,
+              collaborationMode: remaining.length <= 1 ? 'solo' : n.context.collaborationMode,
+            },
+          };
+        }
+        return n;
+      });
+      set({ nodes });
+    },
+
+    setNodeCollaborationMode: (nodeId, mode) => {
+      saveSnapshot();
+      const nodes = get().nodes.map(n => {
+        if (n.id === nodeId) {
+          return {
+            ...n,
+            context: {
+              ...n.context,
+              collaborationMode: mode,
+            },
+          };
+        }
+        return n;
+      });
+      set({ nodes });
     },
 
     setTheme: (theme) => {
