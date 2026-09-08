@@ -88,11 +88,19 @@ npm run build
 
 ### 6. Universal Interoperability & Export
 From the **Export** menu in the header:
-- **Obsidian Canvas (`.canvas`)**: Lossless visual layout compatible with Obsidian.
-- **Mermaid Flowchart (`.mmd`)**: Markdown diagram for GitHub READMEs and docs.
-- **Agent DAG JSON (`.json`)**: Complete state machine data.
-- **Universal Agent Manifest (`manifest.json`)**: Machine-readable MCP/Gemini specification.
-- **Headless Python CLI (`run_topology.py`)**: Self-contained executable Python script to run the graph headlessly.
+- **Obsidian Canvas (`.canvas`)**: Export for visual knowledge graphs in Obsidian.
+- **Universal Agent Manifest (`.json`)**: Machine-readable specification for orchestrator frameworks.
+- **Mermaid Flowchart (`.mmd`)**: Clean markdown diagrams for PR documentation.
+- **Headless Python CLI Runner (`run_topology.py`)**: Zero-dependency runner for executing tasks headlessly.
+- **Import Canvas / JSON**: Drag-and-drop or select any `.canvas` or Topology JSON file to restore workspaces.
+
+### 7. Touch-First Mobile & Tablet Ergonomics
+Topology is designed for phones (down to 320px) and tablets:
+- **Touch Gestures**: Single finger drag to pan canvas, two-finger pinch to zoom in/out, tap node to inspect.
+- **Slide-Up Bottom Sheet**: Node Inspector gracefully transforms into a native slide-up drawer on mobile with a drag handle.
+- **Auto-Collapsing Sidebar**: Filter drawer collapses into a floating button on mobile screens (`<768px`) with tap-to-dismiss backdrop.
+- **Smart Radar Suppression**: The minimap automatically tucks away when the inspector drawer is open on mobile to prevent control overlap.
+- **Safe Touch Targets**: All buttons adhere to >=44px ergonomic touch bounds with zero borders and natural elevation.
 
 ---
 
