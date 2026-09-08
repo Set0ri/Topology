@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import SpriteText from 'three-spritetext';
 import { useTopologyStore } from '../../store/useTopologyStore';
 import { getNodeTypeColor } from '../../utils/catppuccin';
-import { Plus, Minus, Maximize2, Layers, AlertCircle } from 'lucide-react';
+import { Plus, Minus, Maximize2, Layers, AlertCircle, RotateCw, Compass } from 'lucide-react';
 
 function checkWebGLSupport(): boolean {
   if (typeof window === 'undefined') return true;
@@ -17,6 +17,46 @@ function checkWebGLSupport(): boolean {
   } catch {
     return false;
   }
+}
+
+// Reusable Object Pools for Geometries to avoid WebGL GC churn
+const sphereGeoNormal = new THREE.SphereGeometry(6, 24, 24);
+const sphereGeoSelected = new THREE.SphereGeometry(8, 28, 28);
+const haloGeoNormal = new THREE.SphereGeometry(6 * 1.45, 16, 16);
+const haloGeoSelected = new THREE.SphereGeometry(8 * 1.45, 16, 16);
+
+// Material caches keyed by `color_selected_light`
+const standardMaterialCache = new Map<string, THREE.MeshStandardMaterial>();
+function getCachedStandardMaterial(colorHex: string, isSelected: boolean, isLight: boolean): THREE.MeshStandardMaterial {
+  const key = `${colorHex}_${isSelected ? 'sel' : 'norm'}_${isLight ? 'lt' : 'dk'}`;
+  let mat = standardMaterialCache.get(key);
+  if (!mat) {
+    mat = new THREE.MeshStandardMaterial({
+      color: new THREE.Color(colorHex),
+      emissive: new THREE.Color(colorHex),
+      emissiveIntensity: isLight ? (isSelected ? 0.6 : 0.25) : (isSelected ? 0.8 : 0.35),
+      roughness: 0.25,
+      metalness: 0.15,
+    });
+    standardMaterialCache.set(key, mat);
+  }
+  return mat;
+}
+
+const haloMaterialCache = new Map<string, THREE.MeshBasicMaterial>();
+function getCachedHaloMaterial(colorHex: string, isLight: boolean): THREE.MeshBasicMaterial {
+  const key = `${colorHex}_${isLight ? 'lt' : 'dk'}`;
+  let mat = haloMaterialCache.get(key);
+  if (!mat) {
+    mat = new THREE.MeshBasicMaterial({
+      color: new THREE.Color(colorHex),
+      transparent: true,
+      opacity: isLight ? 0.35 : 0.25,
+      wireframe: true,
+    });
+    haloMaterialCache.set(key, mat);
+  }
+  return mat;
 }
 
 export const TopologyGraph3D: React.FC = () => {
@@ -32,6 +72,7 @@ export const TopologyGraph3D: React.FC = () => {
 
   const isLight = theme === 'default' || theme === 'light' || theme === 'latte';
   const [isWebGLSupported] = useState<boolean>(() => checkWebGLSupport());
+  const [isAutoRotating, setIsAutoRotating] = useState(false);
 
   // Dynamic container dimensions with ResizeObserver
   const [dimensions, setDimensions] = useState<{ width: number; height: number }>({
@@ -57,15 +98,63 @@ export const TopologyGraph3D: React.FC = () => {
     // Initial camera auto-fit once simulation warms up
     const timer = setTimeout(() => {
       if (fgRef.current && nodes.length > 0) {
-        fgRef.current.zoomToFit(1200, 60);
+        fgRef.current.zoomToFit(1000, 60);
       }
-    }, 700);
+    }, 600);
 
     return () => {
       observer.disconnect();
       clearTimeout(timer);
     };
   }, [nodes.length]);
+
+  // Scene Lighting Injection for Rich Physically Based Spheres
+  useEffect(() => {
+    if (fgRef.current) {
+      const scene = fgRef.current.scene();
+      if (scene) {
+        const existingLight = scene.getObjectByName('topology-custom-light');
+        if (!existingLight) {
+          const ambientLight = new THREE.AmbientLight(0xffffff, 0.95);
+          ambientLight.name = 'topology-custom-light';
+          scene.add(ambientLight);
+
+          const dirLight1 = new THREE.DirectionalLight(0xffffff, 0.7);
+          dirLight1.position.set(100, 200, 100);
+          scene.add(dirLight1);
+
+          const dirLight2 = new THREE.DirectionalLight(0xffffff, 0.4);
+          dirLight2.position.set(-100, -200, -100);
+          scene.add(dirLight2);
+        }
+      }
+    }
+  }, [isWebGLSupported]);
+
+  // Auto-Rotate Presentation Mode
+  useEffect(() => {
+    if (!isAutoRotating) return;
+    let angle = 0;
+    let animId: number;
+    const distance = 320;
+
+    const rotate = () => {
+      angle += 0.003;
+      if (fgRef.current) {
+        const fg = fgRef.current as any;
+        const cur = fg.cameraPosition();
+        const y = cur ? cur.y : 60;
+        fg.cameraPosition({
+          x: distance * Math.sin(angle),
+          y,
+          z: distance * Math.cos(angle),
+        });
+      }
+      animId = requestAnimationFrame(rotate);
+    };
+    animId = requestAnimationFrame(rotate);
+    return () => cancelAnimationFrame(animId);
+  }, [isAutoRotating]);
 
   // Format graph data with strict orphan/dangling link validation
   const graphData = useMemo(() => {
@@ -96,7 +185,7 @@ export const TopologyGraph3D: React.FC = () => {
     if (!node || !node.id) return;
     selectNode(node.id);
 
-    const distance = 90;
+    const distance = 95;
     const hyp = Math.hypot(node.x || 0, node.y || 0, node.z || 0) || 1;
     const distRatio = 1 + distance / hyp;
 
@@ -104,7 +193,7 @@ export const TopologyGraph3D: React.FC = () => {
       fgRef.current.cameraPosition(
         { x: (node.x || 0) * distRatio, y: (node.y || 0) * distRatio, z: (node.z || 0) * distRatio },
         node,
-        1500
+        1400
       );
     }
   }, [selectNode]);
@@ -112,7 +201,13 @@ export const TopologyGraph3D: React.FC = () => {
   // Camera Control Actions
   const handleResetCamera = () => {
     if (fgRef.current && nodes.length > 0) {
-      fgRef.current.zoomToFit(1000, 60);
+      fgRef.current.zoomToFit(900, 60);
+    }
+  };
+
+  const handleTopDownView = () => {
+    if (fgRef.current) {
+      fgRef.current.cameraPosition({ x: 0, y: 350, z: 0.1 }, { x: 0, y: 0, z: 0 }, 1000);
     }
   };
 
@@ -144,34 +239,22 @@ export const TopologyGraph3D: React.FC = () => {
     }
   };
 
-  // Custom 3D Node Object (Theme-Aware Sphere, Halo & Frosted Label)
+  // Custom 3D Node Object (Theme-Aware Sphere, Halo & Frosted Label with Geometry/Material Pooling)
   const nodeThreeObject = useCallback((node: any) => {
     const group = new THREE.Group();
     const typeColor = getNodeTypeColor(node.type, theme);
     const isSelected = node.id === selectedNodeId;
 
-    // Node Sphere
-    const sphereRadius = isSelected ? 8 : 6;
-    const geometry = new THREE.SphereGeometry(sphereRadius, 32, 32);
-    const material = new THREE.MeshStandardMaterial({
-      color: new THREE.Color(typeColor),
-      emissive: new THREE.Color(typeColor),
-      emissiveIntensity: isLight ? (isSelected ? 0.6 : 0.3) : (isSelected ? 0.8 : 0.4),
-      roughness: 0.25,
-      metalness: 0.15,
-    });
-    const sphere = new THREE.Mesh(geometry, material);
+    // Node Sphere using pooled geometry and cached material
+    const sphereGeo = isSelected ? sphereGeoSelected : sphereGeoNormal;
+    const sphereMat = getCachedStandardMaterial(typeColor, isSelected, isLight);
+    const sphere = new THREE.Mesh(sphereGeo, sphereMat);
     group.add(sphere);
 
     // Outer Halo for Selected or Active Nodes
     if (isSelected || node.status === 'in_progress') {
-      const haloGeo = new THREE.SphereGeometry(sphereRadius * 1.45, 16, 16);
-      const haloMat = new THREE.MeshBasicMaterial({
-        color: new THREE.Color(typeColor),
-        transparent: true,
-        opacity: isLight ? 0.35 : 0.25,
-        wireframe: true,
-      });
+      const haloGeo = isSelected ? haloGeoSelected : haloGeoNormal;
+      const haloMat = getCachedHaloMaterial(typeColor, isLight);
       const halo = new THREE.Mesh(haloGeo, haloMat);
       group.add(halo);
     }
@@ -179,8 +262,8 @@ export const TopologyGraph3D: React.FC = () => {
     // Floating Text Sprite Label
     const sprite = new SpriteText(node.label || 'Node');
     sprite.color = isLight ? '#202124' : '#cdd6f4';
-    sprite.textHeight = 4.2;
-    sprite.position.set(0, -10, 0);
+    sprite.textHeight = 4.0;
+    sprite.position.set(0, -9.5, 0);
     sprite.backgroundColor = isLight ? 'rgba(255, 255, 255, 0.92)' : 'rgba(24, 24, 37, 0.85)';
     sprite.padding = [3, 6];
     sprite.borderRadius = 6;
@@ -229,33 +312,50 @@ export const TopologyGraph3D: React.FC = () => {
         graphData={graphData}
         backgroundColor={bgColor}
         nodeThreeObject={nodeThreeObject}
-        nodeLabel={(node: any) => `
-          <div style="
-            background: ${isLight ? 'rgba(255, 255, 255, 0.95)' : 'rgba(30, 30, 46, 0.95)'};
-            color: ${isLight ? '#202124' : '#cdd6f4'};
-            padding: 8px 12px;
-            border-radius: 12px;
-            box-shadow: 0 10px 25px rgba(0,0,0,0.15);
-            font-family: system-ui, -apple-system, sans-serif;
-            font-size: 12px;
-            border: none;
-            pointer-events: none;
-          ">
-            <div style="font-weight: 700; color: ${getNodeTypeColor(node.type, theme)}">${node.label}</div>
-            <div style="font-size: 10px; color: ${isLight ? '#5f6368' : '#a6adc8'}; margin-top: 2px;">
-              Role: ${node.context?.role || 'GeneralAgent'} • Status: ${node.status}
+        nodeLabel={(node: any) => {
+          const assigned = node.context?.assignedAgents || [];
+          const agentString = assigned.length > 0 
+            ? assigned.map((a: any) => `${a.avatar} ${a.name}`).join(', ')
+            : (node.context?.role || 'GeneralAgent');
+
+          return `
+            <div style="
+              background: ${isLight ? 'rgba(255, 255, 255, 0.95)' : 'rgba(30, 30, 46, 0.95)'};
+              color: ${isLight ? '#202124' : '#cdd6f4'};
+              padding: 8px 12px;
+              border-radius: 12px;
+              box-shadow: 0 10px 25px rgba(0,0,0,0.15);
+              font-family: system-ui, -apple-system, sans-serif;
+              font-size: 12px;
+              border: none;
+              pointer-events: none;
+            ">
+              <div style="font-weight: 700; color: ${getNodeTypeColor(node.type, theme)}">${node.label}</div>
+              <div style="font-size: 10px; color: ${isLight ? '#5f6368' : '#a6adc8'}; margin-top: 2px;">
+                ${agentString} • Status: ${node.status}
+              </div>
             </div>
-          </div>
-        `}
+          `;
+        }}
         onNodeClick={handleNodeClick}
         onBackgroundClick={() => selectNode(null)}
         linkColor={() => linkColor}
         linkWidth={1.5}
-        linkDirectionalParticles={3}
-        linkDirectionalParticleSpeed={0.008}
+        linkDirectionalParticles={edges.length > 40 ? 1 : 2}
+        linkDirectionalParticleSpeed={0.007}
         linkDirectionalParticleWidth={2}
         linkDirectionalParticleColor={() => particleColor}
         enableNodeDrag={true}
+        onNodeDragEnd={() => {
+          if (fgRef.current) {
+            fgRef.current.d3ReheatSimulation();
+          }
+        }}
+        warmupTicks={60}
+        cooldownTicks={120}
+        cooldownTime={3500}
+        d3AlphaDecay={0.025}
+        d3VelocityDecay={0.3}
         showNavInfo={false}
       />
 
@@ -285,7 +385,33 @@ export const TopologyGraph3D: React.FC = () => {
         >
           <Maximize2 size={15} />
         </button>
+
         <div className="w-5 h-px bg-black/5 dark:bg-white/10 my-0.5" />
+
+        <button
+          type="button"
+          onClick={handleTopDownView}
+          title="Top-Down (2.5D) Layout View"
+          className="p-2 rounded-xl text-[#5f6368] dark:text-[#94a3b8] hover:text-[#202124] dark:hover:text-[#f8fafc] hover:bg-black/5 dark:hover:bg-white/10 transition-colors border-none cursor-pointer"
+        >
+          <Compass size={15} />
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setIsAutoRotating(!isAutoRotating)}
+          title={isAutoRotating ? 'Stop Auto-Rotate' : 'Start Cinematic Auto-Rotate'}
+          className={`p-2 rounded-xl transition-colors border-none cursor-pointer ${
+            isAutoRotating 
+              ? 'bg-[#1a73e8] text-white' 
+              : 'text-[#5f6368] dark:text-[#94a3b8] hover:text-[#202124] dark:hover:text-[#f8fafc] hover:bg-black/5 dark:hover:bg-white/10'
+          }`}
+        >
+          <RotateCw size={15} className={isAutoRotating ? 'animate-spin' : ''} />
+        </button>
+
+        <div className="w-5 h-px bg-black/5 dark:bg-white/10 my-0.5" />
+
         <button
           type="button"
           onClick={() => setViewMode('2d')}
@@ -298,9 +424,9 @@ export const TopologyGraph3D: React.FC = () => {
 
       {/* Floating 3D Navigation Guide Tip */}
       <div className="absolute bottom-4 left-4 px-3 py-1.5 rounded-xl bg-white/85 dark:bg-[#181a24]/85 backdrop-blur-xl text-[#5f6368] dark:text-[#94a3b8] text-xs shadow-elevated-md pointer-events-none flex items-center gap-2">
-        <span>Orbit: <strong className="text-[#202124] dark:text-[#f8fafc] font-medium">Left Click + Drag</strong></span>
+        <span>Orbit: <strong className="text-[#202124] dark:text-[#f8fafc] font-medium">Left Drag</strong></span>
         <span>•</span>
-        <span>Pan: <strong className="text-[#202124] dark:text-[#f8fafc] font-medium">Right Click</strong></span>
+        <span>Pan: <strong className="text-[#202124] dark:text-[#f8fafc] font-medium">Right Drag</strong></span>
         <span>•</span>
         <span>Zoom: <strong className="text-[#202124] dark:text-[#f8fafc] font-medium">Scroll</strong></span>
       </div>

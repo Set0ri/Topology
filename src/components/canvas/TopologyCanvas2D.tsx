@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useEffect, useState } from 'react';
+import React, { useCallback, useMemo, useEffect, useState, useRef } from 'react';
 import {
   ReactFlow,
   Background,
@@ -106,14 +106,37 @@ const TopologyCanvasInner: React.FC = () => {
     }));
   }, [edges]);
 
-  // Handle position changes when dragging
+  const rafRef = useRef<number | null>(null);
+  const pendingChangesRef = useRef<Map<string, { x: number; y: number }>>(new Map());
+
+  useEffect(() => {
+    return () => {
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current);
+      }
+    };
+  }, []);
+
+  // Handle position changes when dragging with 60fps rAF throttling
   const handleNodesChange: OnNodesChange = useCallback(
     (changes) => {
+      let hasPos = false;
       changes.forEach(change => {
         if (change.type === 'position' && change.position && change.id) {
-          updateNode(change.id, { position: change.position });
+          pendingChangesRef.current.set(change.id, change.position);
+          hasPos = true;
         }
       });
+
+      if (hasPos && rafRef.current === null) {
+        rafRef.current = requestAnimationFrame(() => {
+          pendingChangesRef.current.forEach((pos: { x: number; y: number }, id: string) => {
+            updateNode(id, { position: pos });
+          });
+          pendingChangesRef.current.clear();
+          rafRef.current = null;
+        });
+      }
     },
     [updateNode]
   );

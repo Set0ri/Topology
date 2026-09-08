@@ -65,7 +65,7 @@ const NodeTypeIcon: React.FC<{ type: TopologyNode['type']; color: string; size?:
   }
 };
 
-export const TopologyCustomNode: React.FC<NodeProps> = ({ id, data, selected }) => {
+const TopologyCustomNodeComponent: React.FC<NodeProps> = ({ id, data, selected }) => {
   const node = data as unknown as TopologyNode;
   const [isHovered, setIsHovered] = useState(false);
 
@@ -674,3 +674,26 @@ export const TopologyCustomNode: React.FC<NodeProps> = ({ id, data, selected }) 
     </div>
   );
 };
+
+export const TopologyCustomNode = React.memo(
+  TopologyCustomNodeComponent,
+  (prev, next) => {
+    if (prev.id !== next.id) return false;
+    if (prev.selected !== next.selected) return false;
+
+    const prevNode = prev.data as unknown as TopologyNode;
+    const nextNode = next.data as unknown as TopologyNode;
+
+    if (prevNode.label !== nextNode.label) return false;
+    if (prevNode.status !== nextNode.status) return false;
+    if (prevNode.priority !== nextNode.priority) return false;
+    if (prevNode.type !== nextNode.type) return false;
+    if (prevNode.context?.activeThought !== nextNode.context?.activeThought) return false;
+    if (prevNode.context?.collaborationMode !== nextNode.context?.collaborationMode) return false;
+    if ((prevNode.context?.assignedAgents?.length || 0) !== (nextNode.context?.assignedAgents?.length || 0)) return false;
+    if (prevNode.context?.approvalStatus !== nextNode.context?.approvalStatus) return false;
+    if (prevNode.context?.telemetry?.state !== nextNode.context?.telemetry?.state) return false;
+
+    return true;
+  }
+);

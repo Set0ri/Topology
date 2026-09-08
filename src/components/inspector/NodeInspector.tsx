@@ -60,6 +60,15 @@ export const NodeInspector: React.FC = () => {
   const [copiedArtifact, setCopiedArtifact] = useState(false);
   const [copiedAgentPrompt, setCopiedAgentPrompt] = useState(false);
   const [supervisorNotes, setSupervisorNotes] = useState('');
+  const [isMobile, setIsMobile] = useState<boolean>(() => 
+    typeof window !== 'undefined' ? window.innerWidth < 640 : false
+  );
+
+  React.useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth < 640);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   const [newTool, setNewTool] = useState('');
   const [newInput, setNewInput] = useState('');
@@ -177,14 +186,18 @@ export const NodeInspector: React.FC = () => {
   return (
     <AnimatePresence>
       <motion.div
-        initial={{ x: 420, opacity: 0 }}
-        animate={{ x: 0, opacity: 1 }}
-        exit={{ x: 420, opacity: 0 }}
-        transition={{ duration: 0.22, ease: 'easeOut' }}
-        className="fixed top-14 sm:top-16 right-0 sm:right-4 bottom-0 sm:bottom-4 w-full sm:w-[420px] max-w-full z-40 rounded-t-3xl sm:rounded-3xl p-4 sm:p-5 bg-white/95 dark:bg-[#181a24]/95 text-[#202124] dark:text-[#f8fafc] backdrop-blur-2xl shadow-elevated-2xl border-none flex flex-col overflow-hidden transition-colors duration-200"
+        initial={isMobile ? { y: '100%', opacity: 0 } : { x: 420, opacity: 0 }}
+        animate={isMobile ? { y: 0, opacity: 1 } : { x: 0, opacity: 1 }}
+        exit={isMobile ? { y: '100%', opacity: 0 } : { x: 420, opacity: 0 }}
+        transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+        className="fixed bottom-0 sm:bottom-4 right-0 sm:right-4 top-auto sm:top-16 w-full sm:w-[420px] max-h-[85vh] sm:max-h-[calc(100vh-5rem)] z-40 rounded-t-3xl sm:rounded-3xl p-4 sm:p-5 bg-white/95 dark:bg-[#181a24]/95 text-[#202124] dark:text-[#f8fafc] backdrop-blur-2xl shadow-elevated-2xl border-none flex flex-col overflow-hidden transition-colors duration-200"
       >
         {/* Mobile Drag Indicator */}
-        <div className="w-10 h-1 rounded-full bg-black/15 dark:bg-white/20 mx-auto mb-2.5 sm:hidden shrink-0" />
+        <div 
+          onClick={() => selectNode(null)}
+          className="w-12 h-1.5 rounded-full bg-black/15 dark:bg-white/25 mx-auto mb-3 sm:hidden shrink-0 cursor-pointer"
+          title="Tap to dismiss inspector"
+        />
 
         {/* Top Header */}
         <div className="flex items-center justify-between pb-3 border-none">
@@ -212,7 +225,7 @@ export const NodeInspector: React.FC = () => {
         </div>
 
         {/* Tab Switcher */}
-        <div className="flex items-center gap-1 p-1 mb-4 rounded-2xl bg-black/4 dark:bg-white/5">
+        <div className="flex items-center gap-1 p-1 mb-4 rounded-2xl bg-black/4 dark:bg-white/5 overflow-x-auto scrollbar-none shrink-0">
           <button
             type="button"
             onClick={() => setActiveTab('overview')}

@@ -481,3 +481,33 @@ flowchart TD
   2. *Squad Fleet*: Roster with live statuses, model engines, assigned tools, and node counts.
   3. *Collab Nodes*: Real-time matrix of all nodes utilizing collaborative multi-agent execution.
 
+---
+
+## 21. WebGL 3D Performance, App-Wide React Memoization & Touch Architecture
+
+### 1. Three.js Object & Material Pooling
+To prevent frame drops, garbage collection spikes, and WebGL shader re-compiles during graph interactions:
+- **Geometry Pooling**: Shared instances of `SphereGeometry(6, 24, 24)`, `SphereGeometry(8, 28, 28)`, and wireframe halos.
+- **Material Caching**: Materials cached in a Map keyed by `${colorHex}_${isSelected}_${isLight}`.
+- **Physics Cooldown Engine**:
+  - `warmupTicks={60}`: Pre-positions layout off-screen.
+  - `cooldownTicks={120}` / `cooldownTime={3500}`: Freezes physics engine once layout converges, dropping idle CPU/GPU load to near zero.
+  - Interactive reheat (`d3ReheatSimulation()`) triggers smoothly on node drag.
+- **Presentation Modes**:
+  - Auto-orbit turntable mode (`requestAnimationFrame` spherical rotation).
+  - 2.5D Top-Down camera projection (`Compass` preset).
+
+### 2. App-Wide React Flow Memoization
+- **Granular Node Memoization**: `TopologyCustomNode` is wrapped in `React.memo` with a custom equality comparator checking only relevant node state (`label`, `status`, `priority`, `activeThought`, `assignedAgents`, `approvalStatus`). Non-targeted nodes remain completely idle during live simulation streaming.
+- **60fps rAF Drag Throttling**: Dragging nodes batches position mutations into `requestAnimationFrame`, preventing high-frequency Zustand store notification floods.
+- **Vite Rollup Code Splitting**:
+  - Main bundle reduced from 921 kB to 350 kB.
+  - Three.js isolated into a lazy chunk (`vendor-three`) loaded on demand.
+  - UI libraries (`framer-motion`, `lucide-react`) isolated into `vendor-ui`.
+
+### 3. Mobile Responsive Architecture
+- **Adaptive Drawer & Bottom Sheet**: On `< 640px` screens, `NodeInspector` smoothly animates as a bottom sheet (`y: '100%'` to `y: 0`) with a native tap-to-dismiss handle and horizontally scrollable tab ribbon.
+- **Zero-Overflow Mobile Header**: Extra-wide buttons collapse on phone screens while primary studio switches (2D/3D, AI Plan, Swarm Agents, Theme) remain fully visible without horizontal scrollbar clipping.
+- **Smart Dock Spacing**: Bottom docks (`SimulationBar`, `MultiAgentCockpit`, `CanvasMiniMap`) automatically negotiate screen space and auto-hide when inspector sheets are open.
+
+

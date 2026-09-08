@@ -43,12 +43,12 @@ export const SimulationBar: React.FC = () => {
   }, [isSimulating]);
 
   return (
-    <div className="fixed bottom-4 sm:bottom-6 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2 sm:py-2.5 rounded-2xl bg-white/95 dark:bg-[#181a24]/95 text-[#202124] dark:text-[#f8fafc] backdrop-blur-2xl shadow-elevated-xl border-none max-w-[calc(100vw-2rem)] transition-colors duration-200">
+    <div className="fixed bottom-3 sm:bottom-6 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1.5 sm:gap-3 px-2.5 sm:px-4 py-1.5 sm:py-2.5 rounded-2xl bg-white/95 dark:bg-[#181a24]/95 text-[#202124] dark:text-[#f8fafc] backdrop-blur-2xl shadow-elevated-xl border-none max-w-[calc(100vw-1rem)] overflow-x-auto scrollbar-none transition-colors duration-200">
       {/* Simulation Status Icon */}
-      <div className="flex items-center gap-1.5 sm:gap-2 pr-1.5 sm:pr-2 border-r border-black/5 dark:border-white/10 shrink-0">
-        <Activity size={15} className={`text-[#f9ab00] ${isSimulating ? 'animate-pulse' : ''}`} />
-        <span className="text-xs font-semibold tracking-wide hidden sm:inline">
-          {isSimulating ? 'Simulating Run...' : 'Simulation Engine'}
+      <div className="flex items-center gap-1.5 sm:gap-2 pr-1 sm:pr-2 border-r border-black/5 dark:border-white/10 shrink-0">
+        <Activity size={14} className={`text-[#f9ab00] ${isSimulating ? 'animate-pulse' : ''}`} />
+        <span className="text-xs font-semibold tracking-wide hidden lg:inline">
+          {isSimulating ? 'Simulating...' : 'Simulation Engine'}
         </span>
       </div>
 

@@ -86,7 +86,7 @@ export const MultiAgentCockpit: React.FC = () => {
         animate={{ opacity: 1, y: 0, scale: 1 }}
         exit={{ opacity: 0, y: 20, scale: 0.98 }}
         transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
-        className="fixed bottom-20 sm:bottom-22 right-4 sm:right-6 z-40 w-[calc(100vw-2rem)] sm:w-[540px] md:w-[620px] max-h-[75vh] flex flex-col rounded-3xl bg-white/95 dark:bg-[#13151f]/95 text-[#202124] dark:text-[#f8fafc] backdrop-blur-3xl shadow-elevated-2xl border-none overflow-hidden transition-colors"
+        className="fixed bottom-16 sm:bottom-22 left-2 sm:left-auto right-2 sm:right-6 z-40 w-[calc(100vw-1rem)] sm:w-[540px] md:w-[620px] max-h-[78vh] flex flex-col rounded-3xl bg-white/95 dark:bg-[#13151f]/95 text-[#202124] dark:text-[#f8fafc] backdrop-blur-3xl shadow-elevated-2xl border-none overflow-hidden transition-colors"
       >
         {/* Header Bar */}
         <div className="flex items-center justify-between px-5 py-4 bg-gradient-to-r from-black/[0.02] via-transparent to-black/[0.02] dark:from-white/[0.02] dark:to-white/[0.02] shrink-0 border-none">
@@ -132,11 +132,11 @@ export const MultiAgentCockpit: React.FC = () => {
         {/* Tab Switcher & Secondary Filter Bar */}
         <div className="px-5 pb-2 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 shrink-0">
           {/* Tabs */}
-          <div className="flex items-center p-1 rounded-2xl bg-black/5 dark:bg-white/5 shadow-inner">
+          <div className="flex items-center p-1 rounded-2xl bg-black/5 dark:bg-white/5 shadow-inner overflow-x-auto scrollbar-none">
             <button
               type="button"
               onClick={() => setActiveTab('stream')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition-all border-none cursor-pointer ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition-all border-none cursor-pointer shrink-0 ${
                 activeTab === 'stream'
                   ? 'bg-white dark:bg-[#1e2230] text-[#1a73e8] dark:text-[#8ab4f8] shadow-elevated-xs font-semibold'
                   : 'text-[#5f6368] dark:text-[#94a3b8] hover:text-[#202124] dark:hover:text-[#f8fafc]'

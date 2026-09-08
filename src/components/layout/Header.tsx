@@ -236,7 +236,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenGenerator, onOpenCoherence
         <button
           type="button"
           onClick={onOpenLibrary}
-          className="h-8 px-2 sm:px-2.5 rounded-xl text-xs font-medium bg-gradient-to-r from-[#1a73e8]/10 to-[#9334e6]/10 hover:from-[#1a73e8]/15 hover:to-[#9334e6]/15 text-[#1a73e8] dark:text-[#8ab4f8] flex items-center gap-1 sm:gap-1.5 transition-all border-none cursor-pointer shadow-xs shrink-0"
+          className="h-8 px-2 sm:px-2.5 rounded-xl text-xs font-medium bg-gradient-to-r from-[#1a73e8]/10 to-[#9334e6]/10 hover:from-[#1a73e8]/15 hover:to-[#9334e6]/15 text-[#1a73e8] dark:text-[#8ab4f8] hidden sm:flex items-center gap-1 sm:gap-1.5 transition-all border-none cursor-pointer shadow-xs shrink-0"
           title="Browse 10 Canonical Archetypes, % Coverage Map & Community Topologies"
         >
           <Compass size={13} className="text-[#1a73e8] dark:text-[#8ab4f8]" />
