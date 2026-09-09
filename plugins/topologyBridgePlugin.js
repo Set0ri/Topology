@@ -1,5 +1,14 @@
 import fs from 'fs';
 import path from 'path';
+import {
+  acquireLock,
+  releaseLock,
+  appendLog,
+  readRecentLogs,
+  getActiveLocks,
+  syncGitLog,
+  LOG_FILE,
+} from '../mcp-server/gitLock.js';
 
 export function topologyBridgePlugin() {
   const clients = new Map();
@@ -49,6 +58,57 @@ export function topologyBridgePlugin() {
       }
     });
   };
+
+  // Live File Watcher on .topology directory for direct external file appends and lock changes
+  ensureDir();
+  let logFileByteOffset = fs.existsSync(LOG_FILE) ? fs.statSync(LOG_FILE).size : 0;
+  let watcherDebounce = null;
+
+  try {
+    fs.watch(topologyDir, (eventType, filename) => {
+      if (watcherDebounce) clearTimeout(watcherDebounce);
+      watcherDebounce = setTimeout(() => {
+        try {
+          // If lock file changed, broadcast updated locks table
+          if (!filename || filename.endsWith('.lock')) {
+            broadcast('locks_updated', getActiveLocks());
+          }
+
+          // If topology.log changed, tail new lines and broadcast
+          if ((!filename || filename === 'topology.log') && fs.existsSync(LOG_FILE)) {
+            const currentSize = fs.statSync(LOG_FILE).size;
+            if (currentSize > logFileByteOffset) {
+              const stream = fs.createReadStream(LOG_FILE, {
+                start: logFileByteOffset,
+                end: currentSize,
+                encoding: 'utf-8',
+              });
+              let chunk = '';
+              stream.on('data', d => { chunk += d; });
+              stream.on('end', () => {
+                logFileByteOffset = currentSize;
+                const lines = chunk.split('\n').filter(Boolean);
+                for (const line of lines) {
+                  try {
+                    const event = JSON.parse(line);
+                    broadcast('log_event', event);
+                  } catch {
+                    // ignore
+                  }
+                }
+              });
+            } else if (currentSize < logFileByteOffset) {
+              logFileByteOffset = currentSize;
+            }
+          }
+        } catch {
+          // ignore
+        }
+      }, 60);
+    });
+  } catch (err) {
+    console.warn('[Topology Bridge] File watcher could not start on .topology dir:', err.message);
+  }
 
   const TOPOLOGY_ERROR_CODES = {
     BRIDGE_OFFLINE: 'TOPOLOGY_ERR_BRIDGE_OFFLINE',
@@ -138,6 +198,10 @@ export function topologyBridgePlugin() {
           if (existingPlan) {
             res.write(`event: plan_updated\ndata: ${JSON.stringify(existingPlan)}\n\n`);
           }
+
+          // Deliver active resource locks immediately
+          const activeLocks = getActiveLocks();
+          res.write(`event: locks_updated\ndata: ${JSON.stringify(activeLocks)}\n\n`);
 
           // Heartbeat keepalive every 20s
           const heartbeatTimer = setInterval(() => {
@@ -428,6 +492,91 @@ export function topologyBridgePlugin() {
 
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ success: true, data: result }));
+          return;
+        }
+
+        // 11. Append Event to Log: /api/topology/log (POST)
+        if (pathname === '/api/topology/log' && req.method === 'POST') {
+          try {
+            const data = await parseJsonBody(req);
+            const entry = await appendLog(data);
+            broadcast('log_event', entry);
+            if (entry.nodeId && (entry.status || entry.thought || entry.toolName)) {
+              broadcast('node_updated', {
+                nodeId: entry.nodeId,
+                status: entry.status,
+                thought: entry.thought,
+                toolName: entry.toolName,
+                timestamp: entry.timestamp,
+              });
+            }
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: true, entry }));
+          } catch (err) {
+            sendError(res, 400, TOPOLOGY_ERROR_CODES.INVALID_SCHEMA, err.message);
+          }
+          return;
+        }
+
+        // 12. Query Recent Log Entries: /api/topology/log (GET)
+        if (pathname === '/api/topology/log' && req.method === 'GET') {
+          const searchParams = new URL(url, 'http://localhost').searchParams;
+          const limit = parseInt(searchParams.get('limit') || '100', 10);
+          const logs = readRecentLogs(limit);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true, count: logs.length, logs }));
+          return;
+        }
+
+        // 13. Query Active Locks: /api/topology/locks (GET)
+        if (pathname === '/api/topology/locks' && req.method === 'GET') {
+          const locks = getActiveLocks();
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true, count: locks.length, locks }));
+          return;
+        }
+
+        // 14. Acquire or Release Resource Lock: /api/topology/lock (POST)
+        if (pathname === '/api/topology/lock' && req.method === 'POST') {
+          try {
+            const { nodeId, action = 'acquire', agentId = 'web-supervisor', ttlSeconds = 60, reason } = await parseJsonBody(req);
+            if (!nodeId) {
+              sendError(res, 400, TOPOLOGY_ERROR_CODES.INVALID_SCHEMA, 'nodeId is required');
+              return;
+            }
+
+            let result;
+            if (action === 'acquire') {
+              result = acquireLock(nodeId, agentId, ttlSeconds, { reason });
+            } else if (action === 'release') {
+              result = releaseLock(nodeId, agentId);
+            } else {
+              sendError(res, 400, TOPOLOGY_ERROR_CODES.INVALID_SCHEMA, `Unknown lock action: "${action}"`);
+              return;
+            }
+
+            // Broadcast current lock table to all UI clients
+            broadcast('locks_updated', getActiveLocks());
+
+            res.writeHead(result.ok ? 200 : 409, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(result));
+          } catch (err) {
+            sendError(res, 400, TOPOLOGY_ERROR_CODES.INVALID_SCHEMA, err.message);
+          }
+          return;
+        }
+
+        // 15. Synchronize with Remote Git Repository: /api/topology/sync-git (POST)
+        if (pathname === '/api/topology/sync-git' && req.method === 'POST') {
+          try {
+            const body = await parseJsonBody(req);
+            const syncRes = await syncGitLog(body);
+            broadcast('git_synced', syncRes);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: true, sync: syncRes }));
+          } catch (err) {
+            sendError(res, 500, TOPOLOGY_ERROR_CODES.INTERNAL_ERROR, err.message);
+          }
           return;
         }
 

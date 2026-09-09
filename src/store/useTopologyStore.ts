@@ -21,7 +21,10 @@ import {
   AgentActivityEvent,
   MultiAgentCollaborationMode,
   SharedContextEntry,
-  SharedContextRepository
+  SharedContextRepository,
+  NodeLock,
+  TopologyLogEntry,
+  GitSyncStatus
 } from '../types/topology';
 import { SAMPLE_TOPOLOGIES, DEFAULT_AGENT_SQUAD } from '../data/sampleTopologies';
 import { CANONICAL_ARCHETYPES, CanonicalArchetype } from '../data/topologyRegistry';
@@ -253,6 +256,17 @@ interface TopologyStore {
   clearSharedContext: (scope: 'global' | 'node', key?: string, nodeId?: string) => void;
   setSharedContextRepository: (repo: SharedContextRepository) => void;
   setViewingArtifact: (item: { artifact: ArtifactPayload; nodeId: string; nodeLabel: string } | null) => void;
+
+  // Active Resource Locks & Git Log Sync
+  activeLocks: Record<string, NodeLock>;
+  setActiveLocks: (locks: NodeLock[]) => void;
+  setNodeLock: (lock: NodeLock) => void;
+  removeNodeLock: (resourceKey: string) => void;
+  gitSyncStatus: GitSyncStatus;
+  setGitSyncStatus: (status: Partial<GitSyncStatus>) => void;
+  recentLogEntries: TopologyLogEntry[];
+  addLogEntry: (entry: TopologyLogEntry) => void;
+  setRecentLogEntries: (entries: TopologyLogEntry[]) => void;
 }
 
 const defaultSample = SAMPLE_TOPOLOGIES[0];
@@ -316,6 +330,19 @@ export const useTopologyStore = create<TopologyStore>((set, get) => {
     filterRole: 'all',
     filterStatus: 'all',
     filterType: 'all',
+
+    // Active Resource Locks & Git Log Sync
+    activeLocks: {},
+    gitSyncStatus: {
+      enabled: true,
+      branch: 'main',
+      remote: 'origin',
+      lastCommitHash: null,
+      lastSyncTimestamp: null,
+      isSyncing: false,
+      error: null,
+    },
+    recentLogEntries: [],
 
     isSimulating: false,
     simulationStep: 0,
@@ -2241,6 +2268,46 @@ export const useTopologyStore = create<TopologyStore>((set, get) => {
       set(s => ({
         liveSyncStatus: { ...s.liveSyncStatus, audioChimesEnabled: enabled }
       }));
+    },
+
+    setActiveLocks: (locks) => {
+      const map: Record<string, NodeLock> = {};
+      locks.forEach(l => {
+        const key = l.nodeId || l.resourceKey;
+        if (key) map[key] = l;
+      });
+      set({ activeLocks: map });
+    },
+
+    setNodeLock: (lock) => {
+      const key = lock.nodeId || lock.resourceKey;
+      set(s => ({
+        activeLocks: { ...s.activeLocks, [key]: lock }
+      }));
+    },
+
+    removeNodeLock: (resourceKey) => {
+      set(s => {
+        const next = { ...s.activeLocks };
+        delete next[resourceKey];
+        return { activeLocks: next };
+      });
+    },
+
+    setGitSyncStatus: (partial) => {
+      set(s => ({
+        gitSyncStatus: { ...s.gitSyncStatus, ...partial }
+      }));
+    },
+
+    addLogEntry: (entry) => {
+      set(s => ({
+        recentLogEntries: [entry, ...s.recentLogEntries.filter(e => e.id !== entry.id)].slice(0, 100)
+      }));
+    },
+
+    setRecentLogEntries: (entries) => {
+      set({ recentLogEntries: entries });
     },
   };
 });

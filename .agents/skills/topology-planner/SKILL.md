@@ -147,6 +147,69 @@ Read shared context entries written by other agents or by the human supervisor:
 }
 ```
 
+### 8. `topology_acquire_lock`
+Acquire a process-safe advisory lease on a node or shared resource to prevent race conditions:
+```json
+{
+  "resource": "node:task-spec",
+  "agentId": "agent-worker-1",
+  "agentName": "CodeGenerator",
+  "ttlSeconds": 30
+}
+```
+
+### 9. `topology_release_lock`
+Release an advisory lease when finishing work on a node or resource:
+```json
+{
+  "resource": "node:task-spec",
+  "agentId": "agent-worker-1"
+}
+```
+
+### 10. `topology_log_event`
+Append an immutable JSONL event directly to `.topology/topology.log`:
+```json
+{
+  "action": "checkpoint_created",
+  "nodeId": "task-spec",
+  "agentId": "agent-worker-1",
+  "status": "completed",
+  "details": { "testsPassed": 42 }
+}
+```
+
+### 11. `topology_sync_git_log`
+Synchronize `.topology/topology.log` across Git branches and remotes using rebase and push:
+```json
+{
+  "commitMessage": "topology: sync agent execution log",
+  "push": true
+}
+```
+
+---
+
+## Standalone Zero-Dependency CLI (`scripts/topology-log.mjs`)
+
+Agents without direct MCP access can run commands from the project root:
+```bash
+# Acquire advisory lease
+node scripts/topology-log.mjs lock node:task-spec --agent="AgentA" --ttl=30
+
+# Append execution log entry
+node scripts/topology-log.mjs log --action="node_updated" --nodeId="task-spec" --status="in_progress"
+
+# View active advisory leases
+node scripts/topology-log.mjs locks
+
+# Release advisory lease
+node scripts/topology-log.mjs unlock node:task-spec --agent="AgentA"
+
+# Pull rebase & push to remote repository
+node scripts/topology-log.mjs sync --push
+```
+
 ---
 
 ## Fallback: Direct HTTP / File Sync
@@ -180,7 +243,9 @@ Topology operates strictly as a **visualization and observability companion**. I
 | `TOPOLOGY_ERR_CACHE_IO_FAILED` | Filesystem | Error reading/writing to `.topology/` directory | In-memory fallback engaged. Proceed with work. |
 | `TOPOLOGY_ERR_INVALID_SCHEMA` | Validation | Missing or malformed parameters passed to tool | Tool supplies default values and reports warning. Proceed with valid inputs. |
 | `TOPOLOGY_ERR_GATE_UNATTENDED` | HITL Review | Review gate triggered while supervisor UI is offline | **Do not deadlock.** Prompt supervisor in chat, or proceed autonomously if safe. |
+| `TOPOLOGY_ERR_LOCK_CONTENTION` | Concurrency | Another agent currently holds an active lease | Backoff and retry, or work on an unlocked node. Leases auto-expire via TTL. |
 | `TOPOLOGY_ERR_SSE_DROPPED` | Real-time Sync | Browser SSE stream disconnected from dev server | Background exponential backoff auto-reconnects. UI remains interactive. |
 | `TOPOLOGY_ERR_UI_RENDER_CRASH` | Frontend UI | React component error boundary caught render exception | Use 1-click "Reset to Safe Canvas" or reload state. External agents unhindered. |
 | `TOPOLOGY_ERR_INTERNAL` | Internal | Uncaught exception in MCP server execution | Non-fatal result returned. Agent loop is never terminated. |
+
 

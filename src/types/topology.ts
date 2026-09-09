@@ -262,3 +262,53 @@ export interface SubgraphStackFrame {
   nodes: TopologyNode[];
   edges: TopologyEdge[];
 }
+
+export interface NodeLock {
+  resourceKey: string;
+  resource?: string;
+  nodeId?: string;
+  agentId: string;
+  agentName?: string;
+  agentRole?: string;
+  agentAvatar?: string;
+  acquiredAt: number;
+  expiresAt: number;
+  remainingSeconds: number;
+  ttlSeconds?: number;
+  pid?: number;
+  hostname?: string;
+  metadata?: {
+    reason?: string;
+    [key: string]: unknown;
+  };
+}
+
+export interface TopologyLogEntry {
+  id: string;
+  timestamp: number;
+  agentId: string;
+  agentRole?: string;
+  action: string;
+  nodeId?: string | null;
+  thought?: string | null;
+  toolName?: string | null;
+  status?: string | null;
+  resource?: string | null;
+  payload?: Record<string, unknown> | null;
+  details?: Record<string, any> | null;
+  gitCommitHash?: string;
+}
+
+export interface GitSyncStatus {
+  enabled: boolean;
+  status?: 'synced' | 'diverged' | 'offline' | 'idle' | string;
+  branch: string;
+  remote: string;
+  lastCommitHash?: string | null;
+  lastSyncTimestamp?: number | null;
+  lastSyncedAt?: number | string | null;
+  isSyncing?: boolean;
+  error?: string | null;
+}
+
+

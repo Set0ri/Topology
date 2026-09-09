@@ -383,6 +383,46 @@ export function useLiveAgentSync() {
         }
       });
 
+      // 7. Resource Locks Updated
+      es.addEventListener('locks_updated', (e: MessageEvent) => {
+        if (!isSubscribed) return;
+        try {
+          const locks = JSON.parse(e.data);
+          if (Array.isArray(locks)) {
+            useTopologyStore.getState().setActiveLocks(locks);
+          }
+        } catch {
+          // ignore
+        }
+      });
+
+      // 8. Log Event Appended
+      es.addEventListener('log_event', (e: MessageEvent) => {
+        if (!isSubscribed) return;
+        try {
+          const entry = JSON.parse(e.data);
+          useTopologyStore.getState().addLogEntry(entry);
+        } catch {
+          // ignore
+        }
+      });
+
+      // 9. Git Synced
+      es.addEventListener('git_synced', (e: MessageEvent) => {
+        if (!isSubscribed) return;
+        try {
+          const syncRes = JSON.parse(e.data);
+          useTopologyStore.getState().setGitSyncStatus({
+            lastCommitHash: syncRes.currentCommit,
+            lastSyncTimestamp: syncRes.timestamp || Date.now(),
+            error: syncRes.errors?.length ? syncRes.errors.join('; ') : null,
+          });
+          chimeSynthesizer.play('ping');
+        } catch {
+          // ignore
+        }
+      });
+
       es.onerror = () => {
         if (!isSubscribed) return;
         setLiveSyncConnected(false, 'TOPOLOGY_ERR_SSE_DROPPED');

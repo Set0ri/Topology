@@ -28,7 +28,8 @@ import {
   UserCheck,
   Copy,
   Eye,
-  Brain
+  Brain,
+  Lock
 } from 'lucide-react';
 import { TopologyNode } from '../../types/topology';
 import { useTopologyStore } from '../../store/useTopologyStore';
@@ -132,6 +133,8 @@ const TopologyCustomNodeComponent: React.FC<NodeProps> = ({ id, data, selected }
   const nodeContextCount = Object.keys(nodeContextMap).length;
   const collaborationMode = node.context?.collaborationMode || (assignedAgents.length > 1 ? 'parallel_subtasks' : 'solo');
   const isMultiAgent = assignedAgents.length > 1;
+  const activeLocks = useTopologyStore(s => s.activeLocks);
+  const nodeLock = activeLocks[node.id];
 
   const handleCardClick = (e: React.MouseEvent) => {
     if (e.shiftKey || e.ctrlKey || e.metaKey) {
@@ -341,7 +344,19 @@ const TopologyCustomNodeComponent: React.FC<NodeProps> = ({ id, data, selected }
             )}
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-1.5 shrink-0">
+            {/* Active Git Resource Lease Badge */}
+            {nodeLock && (
+              <div 
+                className="flex items-center gap-1 px-1.5 py-0.5 rounded-lg text-[10px] font-mono font-medium bg-amber-500/15 text-amber-600 dark:text-amber-400 border-none shrink-0"
+                title={`Locked by agent "${nodeLock.agentId}" (TTL remaining: ${nodeLock.remainingSeconds}s)${nodeLock.metadata?.reason ? ` - ${nodeLock.metadata.reason}` : ''}`}
+              >
+                <Lock size={10} className="text-amber-500 animate-pulse" />
+                <span className="truncate max-w-[60px]">{nodeLock.agentId}</span>
+                <span className="opacity-75">{nodeLock.remainingSeconds}s</span>
+              </div>
+            )}
+
             {/* Status Beacon dot */}
             <span 
               className="relative flex h-2 w-2" 

@@ -15,7 +15,15 @@ import {
   ShieldCheck,
   Sparkles,
   Wifi,
-  WifiOff
+  WifiOff,
+  Lock,
+  Unlock,
+  GitBranch,
+  GitCommit,
+  RotateCcw,
+  FileText,
+  Clock,
+  ShieldAlert
 } from 'lucide-react';
 import { useTopologyStore } from '../../store/useTopologyStore';
 import { chimeSynthesizer, requestDesktopNotificationPermission, showDesktopNotification } from '../../services/liveAgentSync';
@@ -26,11 +34,17 @@ interface AgentSyncModalProps {
 }
 
 export const AgentSyncModal: React.FC<AgentSyncModalProps> = ({ isOpen, onClose }) => {
-  const [activeTab, setActiveTab] = useState<'status' | 'mcp' | 'instructions' | 'curl'>('status');
+  const [activeTab, setActiveTab] = useState<'status' | 'git_locks' | 'mcp' | 'instructions' | 'curl'>('status');
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [isSimulatingTest, setIsSimulatingTest] = useState(false);
+  const [isSyncingGit, setIsSyncingGit] = useState(false);
 
   const liveSyncStatus = useTopologyStore(s => s.liveSyncStatus);
+  const activeLocks = useTopologyStore(s => s.activeLocks);
+  const recentLogEntries = useTopologyStore(s => s.recentLogEntries);
+  const gitSyncStatus = useTopologyStore(s => s.gitSyncStatus);
+  const removeNodeLock = useTopologyStore(s => s.removeNodeLock);
+  const setGitSyncStatus = useTopologyStore(s => s.setGitSyncStatus);
   const setDesktopNotificationsEnabled = useTopologyStore(s => s.setDesktopNotificationsEnabled);
   const setAudioChimesEnabled = useTopologyStore(s => s.setAudioChimesEnabled);
   const theme = useTopologyStore(s => s.theme);
@@ -124,6 +138,51 @@ export const AgentSyncModal: React.FC<AgentSyncModalProps> = ({ isOpen, onClose 
     }
   };
 
+  const handleReleaseLock = async (lockName: string, agentId: string) => {
+    try {
+      await fetch('/api/topology/lock', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'release', lockName, agentId }),
+      });
+      removeNodeLock(lockName);
+    } catch (err) {
+      console.warn('Failed to release lock via bridge:', err);
+      removeNodeLock(lockName);
+    }
+  };
+
+  const handleTriggerGitSync = async () => {
+    setIsSyncingGit(true);
+    try {
+      const res = await fetch('/api/topology/sync-git', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ commitMessage: 'topology: manual sync from UI' }),
+      });
+      const data = await res.json();
+      if (data.status) {
+        setGitSyncStatus(data.status);
+      }
+    } catch (err) {
+      console.warn('Git sync failed:', err);
+    } finally {
+      setIsSyncingGit(false);
+    }
+  };
+
+  const gitCliSnippet = `# 1. Acquire an advisory lock on a node or shared resource
+node scripts/topology-log.mjs lock node:step-1 --agent="WorkerAgent" --ttl=30
+
+# 2. Append an immutable execution event
+node scripts/topology-log.mjs log --action="node_updated" --nodeId="step-1" --status="completed"
+
+# 3. Release the advisory lock
+node scripts/topology-log.mjs unlock node:step-1 --agent="WorkerAgent"
+
+# 4. Synchronize state with remote Git repository (pull rebase + push)
+node scripts/topology-log.mjs sync --push`;
+
   const mcpConfigSnippet = `{
   "mcpServers": {
     "topology": {
@@ -202,6 +261,7 @@ When executing multi-step projects, complex architectures, or long-running refac
           <div className="flex items-center gap-1.5 px-4 sm:px-6 pt-2 border-none">
             {[
               { id: 'status', label: 'Live Notifications & Controls' },
+              { id: 'git_locks', label: 'Git Log & Locking' },
               { id: 'mcp', label: 'MCP Config' },
               { id: 'instructions', label: 'Agent Guidelines' },
               { id: 'curl', label: 'HTTP / Webhooks' },
@@ -311,6 +371,205 @@ When executing multi-step projects, complex architectures, or long-running refac
                     <Zap size={14} />
                     <span>{isSimulatingTest ? 'Dispatching Test Telemetry...' : 'Trigger Live External Agent Simulation'}</span>
                   </button>
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'git_locks' && (
+              <div className="space-y-4">
+                {/* Active Advisory Locks Card */}
+                <div className="p-4 rounded-2xl bg-slate-50 dark:bg-white/5 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="p-1.5 rounded-lg bg-amber-500/10 text-amber-500">
+                        <Lock size={16} />
+                      </div>
+                      <div>
+                        <span className="text-xs font-bold">Local Advisory Leases (.topology/*.lock)</span>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                          Process-safe advisory locking prevents agent race conditions on shared nodes and resources.
+                        </p>
+                      </div>
+                    </div>
+                    <span className="text-[11px] font-mono px-2 py-0.5 rounded-lg bg-amber-500/10 text-amber-700 dark:text-amber-300 font-semibold">
+                      {Object.keys(activeLocks).length} Active {Object.keys(activeLocks).length === 1 ? 'Lease' : 'Leases'}
+                    </span>
+                  </div>
+
+                  {Object.keys(activeLocks).length === 0 ? (
+                    <div className="p-3.5 rounded-xl bg-white/60 dark:bg-white/[0.03] text-center text-xs text-slate-500 dark:text-slate-400">
+                      No active resource leases held. All nodes and files are available for concurrent agent execution.
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {Object.values(activeLocks).map((lock) => {
+                        const remainingSec = Math.max(0, Math.round((lock.expiresAt - Date.now()) / 1000));
+                        return (
+                          <div 
+                            key={lock.resource || lock.resourceKey}
+                            className="flex items-center justify-between p-3 rounded-xl bg-white dark:bg-white/10 shadow-elevated-xs"
+                          >
+                            <div className="space-y-0.5">
+                              <div className="flex items-center gap-2">
+                                <span className="font-mono text-xs font-bold text-slate-800 dark:text-slate-200">
+                                  {lock.resource || lock.resourceKey}
+                                </span>
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 font-mono">
+                                  PID {lock.pid}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-3 text-[11px] text-slate-500 dark:text-slate-400">
+                                <span>Agent: <strong className="text-slate-700 dark:text-slate-300">{lock.agentName || lock.agentId}</strong></span>
+                                <span className="flex items-center gap-1">
+                                  <Clock size={11} /> {remainingSec}s TTL remaining
+                                </span>
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => handleReleaseLock(lock.resource || lock.resourceKey, lock.agentId)}
+                              className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-red-50 hover:bg-red-100 text-red-600 dark:bg-red-950/40 dark:hover:bg-red-900/60 dark:text-red-300 border-none cursor-pointer transition-colors"
+                              title="Force-release this advisory lock"
+                            >
+                              <Unlock size={12} />
+                              <span>Release</span>
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Git Remote Repository Sync Card */}
+                <div className="p-4 rounded-2xl bg-slate-50 dark:bg-white/5 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="p-1.5 rounded-lg bg-teal-500/10 text-teal-500">
+                        <GitBranch size={16} />
+                      </div>
+                      <div>
+                        <span className="text-xs font-bold">Distributed Git Repository Sync</span>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                          Non-local agents synchronize across worktrees or clones via append-only commit logs.
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={handleTriggerGitSync}
+                      disabled={isSyncingGit}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-[#1a73e8] hover:bg-[#1557b0] text-white shadow-elevated-xs transition-colors border-none cursor-pointer disabled:opacity-50"
+                    >
+                      <RotateCcw size={13} className={isSyncingGit ? 'animate-spin' : ''} />
+                      <span>{isSyncingGit ? 'Syncing...' : 'Sync Git Now'}</span>
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-xs">
+                    <div className="p-2.5 rounded-xl bg-white dark:bg-white/10 space-y-0.5">
+                      <span className="text-[10px] text-slate-400 uppercase font-mono">Status</span>
+                      <p className="font-semibold text-slate-700 dark:text-slate-200 capitalize">
+                        {gitSyncStatus.status || 'Ready'}
+                      </p>
+                    </div>
+                    <div className="p-2.5 rounded-xl bg-white dark:bg-white/10 space-y-0.5">
+                      <span className="text-[10px] text-slate-400 uppercase font-mono">Branch / Remote</span>
+                      <p className="font-semibold text-slate-700 dark:text-slate-200 truncate">
+                        {gitSyncStatus.branch || 'main'} ({gitSyncStatus.remote || 'origin'})
+                      </p>
+                    </div>
+                    <div className="p-2.5 rounded-xl bg-white dark:bg-white/10 space-y-0.5">
+                      <span className="text-[10px] text-slate-400 uppercase font-mono">Commit Hash</span>
+                      <p className="font-mono text-[11px] font-semibold text-slate-700 dark:text-slate-200 truncate">
+                        {gitSyncStatus.lastCommitHash ? gitSyncStatus.lastCommitHash.substring(0, 8) : 'HEAD'}
+                      </p>
+                    </div>
+                    <div className="p-2.5 rounded-xl bg-white dark:bg-white/10 space-y-0.5">
+                      <span className="text-[10px] text-slate-400 uppercase font-mono">Last Synced</span>
+                      <p className="font-semibold text-slate-700 dark:text-slate-200">
+                        {gitSyncStatus.lastSyncedAt ? new Date(gitSyncStatus.lastSyncedAt).toLocaleTimeString() : 'Recently'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Recent Append-Only Log Stream (.topology/topology.log) */}
+                <div className="p-4 rounded-2xl bg-slate-50 dark:bg-white/5 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="p-1.5 rounded-lg bg-blue-500/10 text-blue-500">
+                        <FileText size={16} />
+                      </div>
+                      <div>
+                        <span className="text-xs font-bold">Append-Only Event Stream (.topology/topology.log)</span>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                          Conflict-free JSONL journal tracked across local and distributed workflows.
+                        </p>
+                      </div>
+                    </div>
+                    <span className="text-[11px] font-mono text-slate-400">
+                      {recentLogEntries.length} Recent {recentLogEntries.length === 1 ? 'Entry' : 'Entries'}
+                    </span>
+                  </div>
+
+                  {recentLogEntries.length === 0 ? (
+                    <div className="p-3.5 rounded-xl bg-white/60 dark:bg-white/[0.03] text-center text-xs text-slate-500 dark:text-slate-400">
+                      No recent log entries detected yet. Events appended by agents or CLI tools will stream here live.
+                    </div>
+                  ) : (
+                    <div className="max-h-48 overflow-y-auto space-y-1.5 pr-1 custom-scrollbar">
+                      {recentLogEntries.slice(-10).reverse().map((entry, idx) => (
+                        <div 
+                          key={idx}
+                          className="flex items-start justify-between p-2 rounded-xl bg-white dark:bg-white/10 text-[11px] gap-2"
+                        >
+                          <div className="space-y-0.5 truncate">
+                            <div className="flex items-center gap-1.5">
+                              <span className="px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-mono font-semibold text-[10px]">
+                                {entry.action}
+                              </span>
+                              <span className="text-slate-500 dark:text-slate-400 font-mono">
+                                {entry.agentId || 'agent'}
+                              </span>
+                              {entry.nodeId && (
+                                <span className="text-slate-700 dark:text-slate-300 font-medium">
+                                  node: {entry.nodeId}
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-slate-600 dark:text-slate-400 truncate">
+                              {entry.thought || entry.status || entry.resource || entry.details?.title || JSON.stringify(entry.details || {})}
+                            </div>
+                          </div>
+                          <span className="font-mono text-[10px] text-slate-400 whitespace-nowrap">
+                            {new Date(entry.timestamp).toLocaleTimeString()}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* CLI Reference & Quick Commands */}
+                <div className="p-4 rounded-2xl bg-slate-50 dark:bg-white/5 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Terminal size={16} className="text-purple-500" />
+                      <span className="text-xs font-bold">Zero-Dependency Agent CLI (scripts/topology-log.mjs)</span>
+                    </div>
+                    <button
+                      onClick={() => copyToClipboard(gitCliSnippet, 'cli')}
+                      className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-white dark:bg-white/10 hover:bg-slate-100 dark:hover:bg-white/20 transition-colors border-none cursor-pointer text-slate-700 dark:text-slate-200"
+                    >
+                      {copiedKey === 'cli' ? <Check size={13} className="text-emerald-500" /> : <Copy size={13} />}
+                      <span>{copiedKey === 'cli' ? 'Copied' : 'Copy Commands'}</span>
+                    </button>
+                  </div>
+                  <pre className="p-3.5 rounded-2xl bg-slate-900 text-slate-100 font-mono text-xs overflow-x-auto border-none">
+                    {gitCliSnippet}
+                  </pre>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Agents can invoke this CLI directly or use the <code className="px-1 py-0.5 rounded bg-slate-100 dark:bg-white/10 font-mono text-[11px]">topology_acquire_lock</code>, <code className="px-1 py-0.5 rounded bg-slate-100 dark:bg-white/10 font-mono text-[11px]">topology_log_event</code>, and <code className="px-1 py-0.5 rounded bg-slate-100 dark:bg-white/10 font-mono text-[11px]">topology_sync_git_log</code> MCP tools.
+                  </p>
                 </div>
               </div>
             )}

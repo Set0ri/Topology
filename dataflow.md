@@ -726,6 +726,101 @@ When `topology_request_approval` is invoked without an active bridge supervisor:
    `[TOPOLOGY_ERR_GATE_UNATTENDED]: Topology UI is unattended or offline. Prompt supervisor in chat, or proceed if invariant criteria are met.`
 3. The external agent can either prompt the user directly in terminal/chat or proceed according to safety rules.
 
+---
+
+## 27. Git-Backed Append-Only Log, Local Locking Architecture & Distributed Synchronization
+
+### 1. Motivation & Distributed Architectural Invariants
+In multi-agent environments, multiple autonomous agents (local CLI processes, subagents, or remote machines working on git clones) interact with common graph nodes and shared project resources. Two fundamental requirements emerge:
+1. **Local Concurrency Control**: Preventing multiple local agents from conflicting or overwriting each other's work on the same graph node or resource simultaneously.
+2. **Distributed Conflict-Free Synchronization**: Propagating execution telemetry across distributed agents on different machines or Git branches without encountering merge conflicts.
+
+```mermaid
+flowchart TB
+    subgraph LocalHost ["Local Machine (Multi-Process Agents)"]
+        A1[Agent Alpha] -->|1. Acquire Lease| L1[".topology/node:step-1.lock<br/>(PID, TTL: 30s)"]
+        A2[Agent Beta] -->|Contention Check| L1
+        A1 -->|2. Append Event| J[".topology/topology.log<br/>(Immutable JSONL Journal)"]
+        A1 -->|3. Release Lease| L1
+        FW["fs.watch(.topology/)<br/>Debounced File Watcher"] -->|Watches .topology/| J
+        FW -->|SSE Stream| UI["Topology UI (Vite Bridge)"]
+    end
+
+    subgraph GitCloud ["Git Remote Repository"]
+        J -->|4. git pull --rebase & commit| RemoteRepo[("origin/main<br/>.topology/topology.log")]
+    end
+
+    subgraph RemoteHost ["Remote Machine (Distributed Agent)"]
+        RemoteRepo -->|5. git pull --rebase| RLog[".topology/topology.log"]
+        RLog --> RWatcher["Remote Bridge / UI"]
+    end
+```
+
+### 2. Process-Safe Advisory Locking (`mcp-server/gitLock.js`)
+- **Atomic Creation**: Lock acquisition utilizes atomic file creation (`fs.openSync(lockPath, 'wx')`), guaranteeing process-safe exclusion at the operating system filesystem level.
+- **Lease Metadata**: Lock files contain structured JSON:
+  ```json
+  {
+    "resource": "node:step-1",
+    "agentId": "agent-alpha",
+    "agentName": "ArchitectAgent",
+    "pid": 12844,
+    "acquiredAt": 1725883200000,
+    "expiresAt": 1725883230000,
+    "ttlSeconds": 30
+  }
+  ```
+- **Deadlock Breaker (Lease TTL Auto-Expiration)**: If an agent process crashes or is killed before calling `releaseLock`, locks automatically expire when `Date.now() > lock.expiresAt`. Other agents acquire the lock immediately without manual intervention.
+- **Contention Handling (`TOPOLOGY_ERR_LOCK_CONTENTION`)**: When an unexpired lock is held by another process, acquisition returns `TOPOLOGY_ERR_LOCK_CONTENTION` with remaining lease seconds, allowing agents to backoff, retry, or move to alternate nodes.
+
+### 3. Append-Only Execution Log (`.topology/topology.log`)
+- **Immutable JSONL Format**: Every graph update, agent thought, status transition, and advisory lock event is appended as a single JSON line:
+  ```jsonl
+  {"timestamp":"2026-09-09T10:45:00.000Z","action":"lock_acquired","resource":"node:step-1","agentId":"alpha","details":{"ttlSeconds":30}}
+  {"timestamp":"2026-09-09T10:45:02.000Z","action":"node_updated","nodeId":"step-1","status":"in_progress","thought":"Designing DB schema"}
+  {"timestamp":"2026-09-09T10:45:15.000Z","action":"lock_released","resource":"node:step-1","agentId":"alpha"}
+  ```
+- **Git Merge Conflict Immunity**: Because events are append-only lines, standard Git merge and `git pull --rebase` operations unite logs cleanly from multiple machines or branches with zero merge conflicts.
+- **Gitignore Segregation**:
+  ```gitignore
+  .topology/*
+  !.topology/topology.log
+  !.topology/config.json
+  ```
+  Temporary lock files (`.topology/*.lock`) remain local and uncommitted, while the append-only event stream (`.topology/topology.log`) is committed and pushed.
+
+### 4. Live Bridge SSE Streaming & UI Observability
+- **Debounced File Watcher (`plugins/topologyBridgePlugin.js`)**:
+  Vite's dev bridge watches `.topology/` with a 60ms debounce. Direct appends by CLI scripts or external git pulls trigger real-time SSE broadcasts (`log_event`, `locks_updated`, and `node_updated`) to the browser canvas without restarting the server.
+- **Canvas Node Lock Badges (`TopologyCustomNode.tsx`)**:
+  Nodes currently locked display an elevated amber lock badge with the active agent name and countdown timer (`🔒 [Agent] (24s)`).
+- **Git & Locks Management Modal Tab (`AgentSyncModal.tsx`)**:
+  A dedicated tab in the Live Agent Sync modal displays:
+  1. Active advisory leases with PID, remaining TTL, and manual force-release buttons.
+  2. Git repository synchronization controls and branch/commit telemetry.
+  3. Real-time append-only event stream table from `.topology/topology.log`.
+  4. Quick copy snippets for the zero-dependency CLI.
+
+### 5. Zero-Dependency Agent CLI (`scripts/topology-log.mjs`)
+Agents without direct MCP server integration can execute standard operations via shell commands:
+```bash
+# Acquire lock
+node scripts/topology-log.mjs lock node:step-1 --agent="Worker" --ttl=30
+
+# Log node status or thought
+node scripts/topology-log.mjs log --action="node_updated" --nodeId="step-1" --status="completed"
+
+# Inspect active leases
+node scripts/topology-log.mjs locks
+
+# Release lock
+node scripts/topology-log.mjs unlock node:step-1 --agent="Worker"
+
+# Pull rebase & push to remote repository
+node scripts/topology-log.mjs sync --push
+```
+
+
 
 
 
