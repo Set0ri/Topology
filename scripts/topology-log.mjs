@@ -12,6 +12,7 @@
  */
 
 import { acquireLock, releaseLock, appendLog, readRecentLogs, getActiveLocks, syncGitLog } from '../mcp-server/gitLock.js';
+import { ensureBridgeRunning } from '../mcp-server/serverSupervisor.js';
 
 function parseArgs(args) {
   const result = { _: [] };
@@ -143,12 +144,24 @@ async function main() {
       break;
     }
 
+    case 'server': {
+      console.log('🔍 Checking Topology visualizer dev server on port 5173...');
+      const serverRes = await ensureBridgeRunning({ forceRestart: Boolean(args.restart) });
+      if (serverRes.running) {
+        console.log(`✅ Topology visualizer server is online at ${serverRes.url} ${serverRes.autoStarted ? '(auto-started in background)' : '(already active)'}`);
+      } else {
+        console.warn(`⚠️ Could not auto-start visualizer server: ${serverRes.error}`);
+      }
+      break;
+    }
+
     case 'help':
     default: {
       console.log(`
 Topology Agent CLI - Git-Backed Event Log & Atomic Resource Locking
 
 Usage:
+  node scripts/topology-log.mjs server   Ensure visualizer dev server is running on http://localhost:5173
   node scripts/topology-log.mjs log      --action <action> [--nodeId <id>] [--agent <name>] [--thought <text>] [--status <status>]
   node scripts/topology-log.mjs lock     --nodeId <id> [--agent <name>] [--ttl <seconds>]
   node scripts/topology-log.mjs unlock   --nodeId <id> [--agent <name>]

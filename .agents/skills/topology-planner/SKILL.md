@@ -188,12 +188,23 @@ Synchronize `.topology/topology.log` across Git branches and remotes using rebas
 }
 ```
 
+### 12. `topology_ensure_server`
+Verify and auto-start the Topology visualizer dev server in the background:
+```json
+{
+  "port": 5173
+}
+```
+
 ---
 
 ## Standalone Zero-Dependency CLI (`scripts/topology-log.mjs`)
 
 Agents without direct MCP access can run commands from the project root:
 ```bash
+# Ensure visualizer server is running on http://localhost:5173 (auto-starts if offline)
+node scripts/topology-log.mjs server
+
 # Acquire advisory lease
 node scripts/topology-log.mjs lock node:task-spec --agent="AgentA" --ttl=30
 

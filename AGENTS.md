@@ -1,14 +1,15 @@
 # Agent Collaboration Guidelines for Topology
 
 Whenever executing multi-step projects, complex architectures, or long-running refactors:
-1. **Initialize the Plan in Topology**: Call `topology_create_plan` with decomposed nodes and causal dependency edges so the user can visualize progress on http://localhost:5173.
-2. **Stream Live Reasoning**: Before executing significant actions or tools, emit your active thought using `topology_emit_thought` (or `topology_update_node`).
-3. **Report Status Continuously**: When starting work on a task, set `status: "in_progress"`; when finishing, set `status: "completed"` and pass output artifacts.
-4. **Human-in-the-Loop Review Gates**: If a step requires user verification or breaking change sign-off, invoke `topology_request_approval`. The user can inspect the canvas and approve it directly to unblock execution.
-5. **Shared Blackboard Knowledge**: For cross-agent coordination, write architectural decisions, DB schemas, or contracts to `topology_write_shared_context`, and read them with `topology_read_shared_context`.
-6. **Local Advisory Locking**: When modifying shared resources or taking ownership of a node, acquire a process-safe advisory lease using `topology_acquire_lock` (or `node scripts/topology-log.mjs lock <resource>`). Release it upon task completion with `topology_release_lock`.
-7. **Append-Only Execution Logging**: All actions automatically write to `.topology/topology.log`. Custom progress events or checkpoints can be appended directly via `topology_log_event`.
-8. **Distributed Git Synchronization**: For multi-agent workflows spanning branches or remotes, sync state using `topology_sync_git_log` or `node scripts/topology-log.mjs sync --push`.
+1. **Auto-Started Visualizer**: Topology MCP tools automatically start the visualizer dev server in the background on http://localhost:5173 if currently offline (with single-instance locking). You can also explicitly call `topology_ensure_server` (or `node scripts/topology-log.mjs server`).
+2. **Initialize the Plan in Topology**: Call `topology_create_plan` with decomposed nodes and causal dependency edges so the user can visualize progress on http://localhost:5173.
+3. **Stream Live Reasoning**: Before executing significant actions or tools, emit your active thought using `topology_emit_thought` (or `topology_update_node`).
+4. **Report Status Continuously**: When starting work on a task, set `status: "in_progress"`; when finishing, set `status: "completed"` and pass output artifacts.
+5. **Human-in-the-Loop Review Gates**: If a step requires user verification or breaking change sign-off, invoke `topology_request_approval`. The user can inspect the canvas and approve it directly to unblock execution.
+6. **Shared Blackboard Knowledge**: For cross-agent coordination, write architectural decisions, DB schemas, or contracts to `topology_write_shared_context`, and read them with `topology_read_shared_context`.
+7. **Local Advisory Locking**: When modifying shared resources or taking ownership of a node, acquire a process-safe advisory lease using `topology_acquire_lock` (or `node scripts/topology-log.mjs lock <resource>`). Release it upon task completion with `topology_release_lock`.
+8. **Append-Only Execution Logging**: All actions automatically write to `.topology/topology.log`. Custom progress events or checkpoints can be appended directly via `topology_log_event`.
+9. **Distributed Git Synchronization**: For multi-agent workflows spanning branches or remotes, sync state using `topology_sync_git_log` or `node scripts/topology-log.mjs sync --push`.
 
 ## Non-Critical Infrastructure & Fail-Safe Execution
 

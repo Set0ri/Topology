@@ -132,6 +132,7 @@ When starting a project, refactor, or multi-step task:
 | `topology_release_lock` | `resource`, `agentId` | Releases an advisory lease when completing work on a resource. |
 | `topology_log_event` | `action`, `nodeId`, `agentId`, `status`, `details` | Appends an immutable JSONL event line to `.topology/topology.log`. |
 | `topology_sync_git_log` | `commitMessage`, `push` | Rebase-pulls and pushes `.topology/topology.log` across Git clones. |
+| `topology_ensure_server` | `port`, `forceRestart` | Ensures visualizer dev server is running on http://localhost:5173 (auto-starts detached in background if offline). |
 
 ---
 
@@ -140,8 +141,12 @@ When starting a project, refactor, or multi-step task:
 Agents or subagents operating in environments without direct MCP bindings can execute standard shell commands from the project root:
 
 ```bash
+# 0. Ensure the visualizer server is online (auto-starts if offline)
+node scripts/topology-log.mjs server
+
 # 1. Acquire advisory lock on a node or shared file
 node scripts/topology-log.mjs lock node:task-1 --agent="ArchitectAgent" --ttl=30
+
 
 # 2. Append an execution log entry
 node scripts/topology-log.mjs log --action="node_updated" --nodeId="task-1" --status="completed"

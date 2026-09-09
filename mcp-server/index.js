@@ -21,9 +21,12 @@ import {
   readRecentLogs,
   syncGitLog,
 } from './gitLock.js';
-
-const BRIDGE_PORT = 5173;
-const BRIDGE_HOST = 'localhost';
+import {
+  ensureBridgeRunning,
+  isBridgeAlive,
+  BRIDGE_HOST,
+  BRIDGE_PORT,
+} from './serverSupervisor.js';
 const TOPOLOGY_DIR = path.resolve(process.cwd(), '.topology');
 const PLAN_FILE = path.join(TOPOLOGY_DIR, 'plan.json');
 const APPROVALS_FILE = path.join(TOPOLOGY_DIR, 'approvals.json');
@@ -115,8 +118,8 @@ function formatResilientNotice(bridgeResult) {
   return `\n\n> ℹ️ **[${code}] Non-Critical Notice**: ${meta.message}\n> **Execution Status**: Unblocked. State safely cached to disk (\`.topology/\`). You can proceed with your tasks normally.`;
 }
 
-// Low-overhead HTTP POST to the local Vite bridge with fail-open fallback
-function sendToBridge(endpoint, payload) {
+// Low-overhead HTTP POST to the local Vite bridge with fail-open fallback and auto-start
+function rawSendToBridge(endpoint, payload) {
   return new Promise((resolve) => {
     const dataString = JSON.stringify(payload);
     const options = {
@@ -147,7 +150,7 @@ function sendToBridge(endpoint, payload) {
       const code = (err.code === 'ECONNREFUSED' || err.code === 'ENOTFOUND')
         ? TOPOLOGY_ERROR_CODES.BRIDGE_OFFLINE
         : TOPOLOGY_ERROR_CODES.INTERNAL_ERROR;
-      logDebug(`Bridge HTTP request failed: ${err.message} [${code}]. Using fallback disk persistence.`);
+      logDebug(`Bridge HTTP request failed: ${err.message} [${code}].`);
       resolve({ ok: false, code, error: err.message });
     });
 
@@ -161,8 +164,21 @@ function sendToBridge(endpoint, payload) {
   });
 }
 
-// Low-overhead HTTP GET with fail-open fallback
-function getFromBridge(endpoint) {
+async function sendToBridge(endpoint, payload, allowAutoStart = true) {
+  let result = await rawSendToBridge(endpoint, payload);
+  if (!result.ok && result.code === TOPOLOGY_ERROR_CODES.BRIDGE_OFFLINE && allowAutoStart) {
+    logDebug(`[Topology-MCP] Live visualizer is offline. Auto-starting Vite server in background...`);
+    const serverStatus = await ensureBridgeRunning();
+    if (serverStatus.running) {
+      logDebug(`[Topology-MCP] Visualizer server is ready! Resending payload to bridge...`);
+      result = await rawSendToBridge(endpoint, payload);
+    }
+  }
+  return result;
+}
+
+// Low-overhead HTTP GET with fail-open fallback and auto-start
+function rawGetFromBridge(endpoint) {
   return new Promise((resolve) => {
     const options = {
       hostname: BRIDGE_HOST,
@@ -198,6 +214,18 @@ function getFromBridge(endpoint) {
 
     req.end();
   });
+}
+
+async function getFromBridge(endpoint, allowAutoStart = true) {
+  let result = await rawGetFromBridge(endpoint);
+  if (!result.ok && result.code === TOPOLOGY_ERROR_CODES.BRIDGE_OFFLINE && allowAutoStart) {
+    logDebug(`[Topology-MCP] Live visualizer is offline. Auto-starting Vite server in background...`);
+    const serverStatus = await ensureBridgeRunning();
+    if (serverStatus.running) {
+      result = await rawGetFromBridge(endpoint);
+    }
+  }
+  return result;
 }
 
 // Tool Definitions
@@ -380,6 +408,17 @@ const TOOLS = [
         branch: { type: 'string', default: 'main', description: 'Git branch name' },
         autoCommit: { type: 'boolean', default: true, description: 'Automatically commit local log additions' },
         autoPush: { type: 'boolean', default: false, description: 'Automatically push committed log events to remote repository' }
+      }
+    }
+  },
+  {
+    name: 'topology_ensure_server',
+    description: 'Ensure the Topology visualizer server is running on http://localhost:5173. Auto-starts the background server process if currently offline, with process-safe single-instance locking so only one agent starts it.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        port: { type: 'number', default: 5173, description: 'Visualizer port number' },
+        forceRestart: { type: 'boolean', default: false, description: 'Force restart of server process' }
       }
     }
   }
@@ -850,6 +889,19 @@ async function handleToolCall(name, args = {}) {
         text: `🔄 **Git Log Sync**: (Pulled: ${syncRes.pulled} | Committed: ${syncRes.committed} | Pushed: ${syncRes.pushed})${syncRes.currentCommit ? ` | HEAD: \`${syncRes.currentCommit}\`` : ''}\n` +
               (syncRes.errors.length ? `⚠️ Notices: ${syncRes.errors.join('; ')}\n` : '') +
               resilientNotice
+      }]
+    };
+  }
+
+  if (name === 'topology_ensure_server') {
+    const { forceRestart = false } = args;
+    const serverRes = await ensureBridgeRunning({ forceRestart });
+    return {
+      content: [{
+        type: 'text',
+        text: serverRes.running
+          ? `✅ **Topology Visualizer Server Online**: Active at ${serverRes.url} ${serverRes.autoStarted ? '(auto-started in background)' : '(already active)'}.\n\nOpen ${serverRes.url} in your browser to inspect the visual canvas.`
+          : `⚠️ **[${TOPOLOGY_ERROR_CODES.BRIDGE_OFFLINE}] Notice**: Could not auto-start visualizer server (${serverRes.error || 'timeout'}). State is safely stored on disk in \`.topology/\`. Agent execution remains 100% unblocked.`
       }]
     };
   }
