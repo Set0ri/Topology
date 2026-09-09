@@ -181,8 +181,8 @@ export function calculateDagreLayout(
     marginy: isVertical ? 30 : 50
   });
 
-  const nodeWidth = isVertical ? 290 : 320;
-  const nodeHeight = isVertical ? 150 : 160;
+  const nodeWidth = isVertical ? 310 : 330;
+  const nodeHeight = isVertical ? 160 : 175;
 
   nodes.forEach(n => {
     dagreGraph.setNode(n.id, { width: nodeWidth, height: nodeHeight });

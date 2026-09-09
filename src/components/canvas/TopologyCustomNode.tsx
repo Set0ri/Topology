@@ -302,7 +302,7 @@ const TopologyCustomNodeComponent: React.FC<NodeProps> = ({ id, data, selected }
         layout
         transition={{ layout: { duration: 0.18, ease: 'easeOut' } }}
         className={`rounded-2xl relative overflow-hidden backdrop-blur-2xl border-none outline-none select-none transition-all duration-200 cursor-pointer ${
-          isMicro ? 'w-80 p-4' : 'w-72 p-4'
+          isMicro ? 'w-[340px] p-4' : 'w-[316px] p-3.5 sm:p-4'
         } ${isHovered ? '-translate-y-1' : ''}`}
         style={{ background, boxShadow }}
       >
@@ -683,13 +683,13 @@ const TopologyCustomNodeComponent: React.FC<NodeProps> = ({ id, data, selected }
               </div>
 
               {/* Micro-Action Dock */}
-              <div className="flex items-center justify-between gap-1 pt-1.5">
-                <div className="flex items-center gap-1">
+              <div className="flex items-center justify-between gap-1.5 pt-2 pb-0.5">
+                <div className="flex items-center gap-1 shrink-0">
                   <button
                     type="button"
                     onClick={handleQuickStatusToggle}
                     title={node.status === 'completed' ? 'Mark Pending' : 'Mark Done'}
-                    className={`flex items-center gap-1 px-2 py-1 rounded-xl text-[11px] font-medium transition-colors border-none cursor-pointer ${
+                    className={`flex items-center gap-1 px-2 py-1 rounded-xl text-[10px] font-semibold shrink-0 transition-colors border-none cursor-pointer ${
                       isDark 
                         ? 'bg-cat-mocha-surface0/80 hover:bg-cat-mocha-surface1 text-cat-mocha-text' 
                         : 'bg-cat-latte-surface0 hover:bg-cat-latte-surface1 text-cat-latte-text'
@@ -707,7 +707,7 @@ const TopologyCustomNodeComponent: React.FC<NodeProps> = ({ id, data, selected }
                     type="button"
                     onClick={handleRunAgent}
                     title="Dispatch Autonomous Agent"
-                    className={`flex items-center gap-1 px-2 py-1 rounded-xl text-[11px] font-semibold transition-colors border-none cursor-pointer ${
+                    className={`flex items-center gap-1 px-2 py-1 rounded-xl text-[10px] font-semibold shrink-0 transition-colors border-none cursor-pointer ${
                       isDark 
                         ? 'bg-cat-mocha-mauve/20 hover:bg-cat-mocha-mauve/30 text-cat-mocha-mauve' 
                         : 'bg-cat-latte-mauve/15 hover:bg-cat-latte-mauve/25 text-cat-latte-mauve'
@@ -721,7 +721,7 @@ const TopologyCustomNodeComponent: React.FC<NodeProps> = ({ id, data, selected }
                     type="button"
                     onClick={handleCopyPrompt}
                     title="Copy LLM Prompt for Agent (Gemini CLI / Claude)"
-                    className={`flex items-center gap-1 px-1.5 py-1 rounded-xl text-[11px] font-medium transition-colors border-none cursor-pointer ${
+                    className={`p-1.5 rounded-xl shrink-0 transition-colors border-none cursor-pointer ${
                       isDark 
                         ? 'bg-cat-mocha-surface0/80 hover:bg-cat-mocha-surface1 text-cat-mocha-teal' 
                         : 'bg-cat-latte-surface0 hover:bg-cat-latte-surface1 text-cat-latte-teal'
@@ -731,57 +731,57 @@ const TopologyCustomNodeComponent: React.FC<NodeProps> = ({ id, data, selected }
                   </button>
                 </div>
 
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-1 shrink-0">
                   <button
                     type="button"
                     onClick={handleBranch}
                     title="Branch Connected Subtask (Tab)"
-                    className={`p-1.5 rounded-xl transition-colors border-none cursor-pointer ${
+                    className={`p-1.5 rounded-xl shrink-0 transition-colors border-none cursor-pointer ${
                       isDark 
                         ? 'bg-cat-mocha-surface0/80 hover:bg-cat-mocha-surface1 text-cat-mocha-sapphire' 
                         : 'bg-cat-latte-surface0 hover:bg-cat-latte-surface1 text-cat-latte-sapphire'
                     }`}
                   >
-                    <Plus size={13} />
+                    <Plus size={12} />
                   </button>
 
                   <button
                     type="button"
                     onClick={handleEnterSubgraph}
                     title="Open / Create Nested Sub-Graph Topology"
-                    className={`p-1.5 rounded-xl transition-colors border-none cursor-pointer ${
+                    className={`p-1.5 rounded-xl shrink-0 transition-colors border-none cursor-pointer ${
                       isDark 
                         ? 'bg-cat-mocha-surface0/80 hover:bg-cat-mocha-surface1 text-cat-mocha-mauve' 
                         : 'bg-cat-latte-surface0 hover:bg-cat-latte-surface1 text-cat-latte-mauve'
                     }`}
                   >
-                    <FolderTree size={13} />
+                    <FolderTree size={12} />
                   </button>
 
                   <button
                     type="button"
                     onClick={handleInspect}
                     title="Open Full Agent Context (Space)"
-                    className={`p-1.5 rounded-xl transition-colors border-none cursor-pointer ${
+                    className={`p-1.5 rounded-xl shrink-0 transition-colors border-none cursor-pointer ${
                       isDark 
                         ? 'bg-cat-mocha-surface0/80 hover:bg-cat-mocha-surface1 text-cat-mocha-subtext0' 
                         : 'bg-cat-latte-surface0 hover:bg-cat-latte-surface1 text-cat-latte-subtext0'
                     }`}
                   >
-                    <Maximize2 size={12} />
+                    <Maximize2 size={11} />
                   </button>
 
                   <button
                     type="button"
                     onClick={handleDelete}
                     title="Delete Node"
-                    className={`p-1.5 rounded-xl transition-colors border-none cursor-pointer ${
+                    className={`p-1.5 rounded-xl shrink-0 transition-colors border-none cursor-pointer text-red-500 hover:text-red-600 ${
                       isDark 
-                        ? 'bg-cat-mocha-surface0/80 hover:bg-cat-mocha-surface1 text-cat-mocha-red' 
-                        : 'bg-cat-latte-surface0 hover:bg-cat-latte-surface1 text-cat-latte-red'
+                        ? 'bg-cat-mocha-surface0/80 hover:bg-red-950/40' 
+                        : 'bg-cat-latte-surface0 hover:bg-red-100'
                     }`}
                   >
-                    <Trash2 size={12} />
+                    <Trash2 size={11} />
                   </button>
                 </div>
               </div>
