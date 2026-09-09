@@ -113,6 +113,40 @@ Read the current DAG, node states, and whether human approval has been granted:
 }
 ```
 
+### 6. `topology_write_shared_context`
+Write shared contracts, schemas, invariants, or intermediate state to the dual-tier blackboard repository:
+```json
+{
+  "scope": "global",
+  "key": "system_architecture",
+  "value": {
+    "version": "2.0.0",
+    "strictIsolation": true,
+    "invariants": ["zero cycles", "immutable payloads"]
+  },
+  "authorAgentRole": "Architect"
+}
+```
+Or scope it directly to a specific node:
+```json
+{
+  "scope": "node",
+  "nodeId": "task-spec",
+  "key": "validated_schema",
+  "value": { "endpoints": ["/api/users", "/api/tasks"] },
+  "authorAgentRole": "Architect"
+}
+```
+
+### 7. `topology_read_shared_context`
+Read shared context entries written by other agents or by the human supervisor:
+```json
+{
+  "scope": "global",
+  "key": "system_architecture"
+}
+```
+
 ---
 
 ## Fallback: Direct HTTP / File Sync

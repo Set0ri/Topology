@@ -6,6 +6,7 @@ export function topologyBridgePlugin() {
   const topologyDir = path.resolve(process.cwd(), '.topology');
   const planFilePath = path.join(topologyDir, 'plan.json');
   const approvalsFilePath = path.join(topologyDir, 'approvals.json');
+  const contextFilePath = path.join(topologyDir, 'shared_context.json');
 
   const ensureDir = () => {
     if (!fs.existsSync(topologyDir)) {
@@ -277,24 +278,27 @@ export function topologyBridgePlugin() {
         // 8. Human-in-the-Loop Approval: /api/topology/approve (UI or agent triggers)
         if (pathname === '/api/topology/approve' && req.method === 'POST') {
           try {
-            const { nodeId, notes, approved } = await parseJsonBody(req);
+            const { nodeId, notes, approved, decision } = await parseJsonBody(req);
             const approvals = readJsonFile(approvalsFilePath, {});
+            const isApproved = decision ? decision === 'approved' : approved !== false;
             approvals[nodeId] = {
-              approved: approved !== false,
-              notes: notes || 'Approved by human operator via Topology UI',
+              approved: isApproved,
+              decision: isApproved ? 'approved' : 'rejected',
+              notes: notes || (isApproved ? 'Approved by human operator via Topology UI' : 'Revision requested'),
               decidedAt: Date.now(),
             };
             writeJsonFile(approvalsFilePath, approvals);
 
             broadcast('node_approved', {
               nodeId,
-              approved: approved !== false,
+              approved: isApproved,
+              decision: isApproved ? 'approved' : 'rejected',
               notes: approvals[nodeId].notes,
               timestamp: Date.now(),
             });
 
             res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: true, nodeId, approved: approvals[nodeId].approved }));
+            res.end(JSON.stringify({ success: true, nodeId, approved: isApproved, decision: approvals[nodeId].decision }));
           } catch (err) {
             res.writeHead(400, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: err.message }));
@@ -319,10 +323,93 @@ export function topologyBridgePlugin() {
           res.end(JSON.stringify({
             nodeId,
             approved: record ? Boolean(record.approved) : false,
+            decision: record ? (record.decision || (record.approved ? 'approved' : 'rejected')) : null,
             decided: Boolean(record),
             notes: record ? record.notes : null,
             decidedAt: record ? record.decidedAt : null,
           }));
+          return;
+        }
+
+        // 10. Shared Context Blackboard: /api/topology/context (GET & POST)
+        if (pathname === '/api/topology/context' && req.method === 'POST') {
+          try {
+            const data = await parseJsonBody(req);
+            const { scope = 'global', key, value, authorAgentId, authorAgentRole, nodeId } = data;
+
+            if (!key) {
+              res.writeHead(400, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Context "key" is required' }));
+              return;
+            }
+
+            const currentRepo = readJsonFile(contextFilePath, { global: {}, nodes: {} });
+            if (!currentRepo.global) currentRepo.global = {};
+            if (!currentRepo.nodes) currentRepo.nodes = {};
+
+            const entry = {
+              key,
+              value,
+              authorAgentId: authorAgentId || 'agent-external',
+              authorAgentRole: authorAgentRole || 'Agent',
+              nodeId: scope === 'node' ? nodeId : undefined,
+              scope,
+              updatedAt: Date.now(),
+            };
+
+            if (scope === 'global') {
+              currentRepo.global[key] = entry;
+            } else if (nodeId) {
+              if (!currentRepo.nodes[nodeId]) currentRepo.nodes[nodeId] = {};
+              currentRepo.nodes[nodeId][key] = entry;
+            }
+
+            writeJsonFile(contextFilePath, currentRepo);
+
+            // Broadcast real-time update to all connected UI clients
+            broadcast('context_updated', {
+              scope,
+              key,
+              value,
+              nodeId,
+              entry,
+              repository: currentRepo,
+              timestamp: Date.now(),
+            });
+
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: true, entry }));
+          } catch (err) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: err.message }));
+          }
+          return;
+        }
+
+        if (pathname === '/api/topology/context' && req.method === 'GET') {
+          const searchParams = new URL(url, 'http://localhost').searchParams;
+          const scope = searchParams.get('scope'); // 'global' | 'node' | null (all)
+          const key = searchParams.get('key');
+          const nodeId = searchParams.get('nodeId');
+
+          const currentRepo = readJsonFile(contextFilePath, { global: {}, nodes: {} });
+
+          let result;
+          if (!scope) {
+            result = currentRepo;
+          } else if (scope === 'global') {
+            result = key ? (currentRepo.global?.[key]?.value ?? null) : (currentRepo.global || {});
+          } else if (scope === 'node') {
+            if (nodeId) {
+              const nodeEntries = currentRepo.nodes?.[nodeId] || {};
+              result = key ? (nodeEntries[key]?.value ?? null) : nodeEntries;
+            } else {
+              result = currentRepo.nodes || {};
+            }
+          }
+
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true, data: result }));
           return;
         }
 

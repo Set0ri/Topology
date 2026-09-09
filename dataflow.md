@@ -629,6 +629,57 @@ Waits / polls / checks approval           Topology UI shows Review Alert & Deskt
        └────────────── Human clicks "Approve" ────────┘
 ```
 
+---
+
+## 25. Multi-Agent Satellite Workers, Dual-Tier Shared Context & Elevated Artifact HITL Review
+
+### 1. Satellite Worker Nodes with Dynamic Overflow Clustering (`AgentSatelliteNodes.tsx`)
+- **Orbital Positioning**: Workers assigned to a task node render as elevated pill capsules anchored along the card boundary (`absolute -top-3.5 right-3`).
+- **Dynamic Cluster Collapse**:
+  - **$\le 3$ Agents**: Individual pills display the worker's avatar emoji, name, colored accent, and real-time status beacon (pulsing when active or debating). Hovering triggers an elevated glass popover with full role, model engine, live thought snippet, and a shortcut to filter the Swarm Activity Stream.
+  - **$> 3$ Agents**: Automatically clusters into the first 2 agents plus a compact `+N agents` gradient capsule. Hovering or clicking expands an elevated drawer popover listing the entire squad roster with individual statuses and live thoughts.
+
+### 2. Dual-Tier Shared Context Blackboard (`SharedContextRepository`)
+- **Architecture**: Provides a decentralized memory bus shared across all autonomous workers and human supervisors:
+  - **Graph-Level (`scope: "global"`)**: High-level invariants, system architecture definitions, API specifications, and global security policies.
+  - **Node-Level (`scope: "node"`, keyed by `nodeId`)**: Task-specific intermediate data, verified schemas, and outputs passed downstream.
+- **Model Context Protocol (MCP) Tools**:
+  - `topology_write_shared_context({ scope, key, value, nodeId, authorAgentRole })`: Writes an entry to memory and disk.
+  - `topology_read_shared_context({ scope, key, nodeId })`: Reads single entries or scopes.
+- **Real-Time Reactive Pipeline**:
+  ```mermaid
+  sequenceDiagram
+      autonumber
+      participant Agent as External Agent (CLI / Subagent)
+      participant MCP as Topology MCP Server
+      participant Bridge as Vite Bridge (/api/topology/context)
+      participant UI as Topology Web UI (Zustand)
+
+      Agent->>MCP: topology_write_shared_context(scope, key, value)
+      MCP->>Bridge: POST /api/topology/context
+      Bridge->>Bridge: Save to .topology/shared_context.json
+      Bridge->>UI: SSE Event "context_updated"
+      UI->>UI: Store updates sharedContext reactive state
+      UI->>UI: Play pleasant audio ping & update Context badges
+  ```
+- **UI Blackboard Controls**:
+  - **Global Context Modal (`GlobalContextModal.tsx`)**: Accessed via the "Context" button in the header navbar. Searchable key-value cards, JSON pre-formatting, copy, delete, and manual entry forms.
+  - **Node Inspector Context Tab**: Displays entries scoped specifically to the selected node with an inline form to add or modify contracts.
+  - **Node Card Context Pill**: Nodes with active context display a `🧠 N Context` pill in their badge row.
+
+### 3. Elevated Artifact Inspection & In-Card HITL Sign-Off
+- **Clickable Deliverable Pills**: Output artifact tags on node cards and inspector tabs are interactive buttons. Clicking immediately opens the full-screen `ArtifactViewerModal`.
+- **Artifact Viewer Modal (`ArtifactViewerModal.tsx`)**:
+  - Borderless elevated glass modal with Catppuccin and high-contrast styling.
+  - Pre-formatted, syntax-styled view of code (`.ts`, `.tsx`), Markdown (`.md`), and JSON (`.json`).
+  - Size formatting, formatted timestamp, "Copy Content", and "Download File" actions.
+  - Integrated HITL review controls: "Request Revision" with reason notes, and "Approve Deliverable".
+- **In-Card HITL Review Checkpoint**:
+  - Nodes awaiting approval display an in-card supervisor action bar.
+  - "Review Deliverable" opens the generated artifact in the viewer modal.
+  - "Approve & Send to Squad" and "Reject" buttons immediately post to `/api/topology/approve`, persisting decisions to `.topology/approvals.json` and broadcasting back to the agent.
+
+
 
 
 

@@ -131,6 +131,27 @@ export interface ArtifactPayload {
   mimeType: 'text/markdown' | 'text/typescript' | 'application/json' | 'text/plain';
   sizeBytes: number;
   updatedAt: number;
+  language?: string;
+  authorRole?: string;
+  description?: string;
+}
+
+export interface SharedContextEntry {
+  key: string;
+  value: unknown;
+  authorAgent?: string;
+  authorAgentId?: string;
+  authorAgentRole?: string;
+  authorRole?: string;
+  nodeId?: string;
+  scope?: 'global' | 'node';
+  description?: string;
+  updatedAt: number;
+}
+
+export interface SharedContextRepository {
+  global: Record<string, SharedContextEntry>;
+  nodes: Record<string, Record<string, SharedContextEntry>>;
 }
 
 export interface AgentActionContext {

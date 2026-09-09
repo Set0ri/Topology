@@ -342,17 +342,42 @@ export function useLiveAgentSync() {
       es.addEventListener('node_approved', (e: MessageEvent) => {
         if (!isSubscribed) return;
         try {
-          const { nodeId, notes, approved } = JSON.parse(e.data);
+          const { nodeId, notes, approved, decision } = JSON.parse(e.data);
           const target = useTopologyStore.getState().nodes.find(n => n.id === nodeId);
-          if (target && approved) {
+          const isApproved = decision ? decision === 'approved' : Boolean(approved);
+          if (target) {
             updateNode(nodeId, {
+              status: isApproved ? 'completed' : 'blocked',
               context: {
                 ...target.context,
-                approvalStatus: 'approved',
+                approvalStatus: isApproved ? 'approved' : 'rejected',
                 approvalNotes: notes,
               },
             });
           }
+        } catch {
+          // ignore
+        }
+      });
+
+      // 6. Shared Context Updated
+      es.addEventListener('context_updated', (e: MessageEvent) => {
+        if (!isSubscribed) return;
+        try {
+          const { scope, key, entry, repository } = JSON.parse(e.data);
+          if (repository) {
+            useTopologyStore.getState().setSharedContextRepository(repository);
+          } else if (entry) {
+            useTopologyStore.getState().writeSharedContext(
+              entry.scope || scope,
+              entry.key || key,
+              entry.value,
+              entry.authorAgentId,
+              entry.authorAgentRole,
+              entry.nodeId
+            );
+          }
+          chimeSynthesizer.play('ping');
         } catch {
           // ignore
         }

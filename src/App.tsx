@@ -11,6 +11,8 @@ import { OnboardingTutorialModal } from './components/tutorial/OnboardingTutoria
 import { TopologyLibraryModal } from './components/library/TopologyLibraryModal';
 import { MultiAgentCockpit } from './components/swarm/MultiAgentCockpit';
 import { AgentSyncModal } from './components/modals/AgentSyncModal';
+import { GlobalContextModal } from './components/modals/GlobalContextModal';
+import { ArtifactViewerModal } from './components/modals/ArtifactViewerModal';
 import { useLiveAgentSync } from './services/liveAgentSync';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { Sparkles } from 'lucide-react';
@@ -30,6 +32,7 @@ export const App: React.FC = () => {
   const [isTutorialOpen, setIsTutorialOpen] = useState(false);
   const [isLibraryOpen, setIsLibraryOpen] = useState(false);
   const [isAgentSyncOpen, setIsAgentSyncOpen] = useState(false);
+  const [isSharedContextOpen, setIsSharedContextOpen] = useState(false);
 
   // Initialize theme class on document element & check first-time tutorial
   useEffect(() => {
@@ -58,6 +61,7 @@ export const App: React.FC = () => {
         onOpenTutorial={() => setIsTutorialOpen(true)}
         onOpenLibrary={() => setIsLibraryOpen(true)}
         onOpenAgentSync={() => setIsAgentSyncOpen(true)}
+        onOpenSharedContext={() => setIsSharedContextOpen(true)}
       />
 
       {/* Main Viewport wrapped in ErrorBoundary */}
@@ -119,6 +123,15 @@ export const App: React.FC = () => {
         isOpen={isAgentSyncOpen}
         onClose={() => setIsAgentSyncOpen(false)}
       />
+
+      {/* Shared Context Blackboard Modal */}
+      <GlobalContextModal
+        isOpen={isSharedContextOpen}
+        onClose={() => setIsSharedContextOpen(false)}
+      />
+
+      {/* Elevated Artifact Viewer & HITL Review Modal */}
+      <ArtifactViewerModal />
     </div>
   );
 };

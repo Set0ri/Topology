@@ -26,10 +26,13 @@ import {
   Code2,
   Terminal,
   UserCheck,
-  Copy
+  Copy,
+  Eye,
+  Brain
 } from 'lucide-react';
 import { TopologyNode } from '../../types/topology';
 import { useTopologyStore } from '../../store/useTopologyStore';
+import { AgentSatelliteNodes } from './AgentSatelliteNodes';
 import { getNodeTypeColor, getStatusColor, hexToRgba, getNodeCardStyling } from '../../utils/catppuccin';
 import { generateAgentPromptPayload } from '../../utils/agentHandoff';
 
@@ -86,7 +89,10 @@ const TopologyCustomNodeComponent: React.FC<NodeProps> = ({ id, data, selected }
   const enterSubgraph = useTopologyStore(s => s.enterSubgraph);
   const runAutonomousAgent = useTopologyStore(s => s.runAutonomousAgent);
   const approveNode = useTopologyStore(s => s.approveNode);
+  const rejectNode = useTopologyStore(s => s.rejectNode);
   const evaluateDecisionBranch = useTopologyStore(s => s.evaluateDecisionBranch);
+  const sharedContext = useTopologyStore(s => s.sharedContext);
+  const setViewingArtifact = useTopologyStore(s => s.setViewingArtifact);
 
   const [copiedPrompt, setCopiedPrompt] = useState(false);
 
@@ -122,6 +128,8 @@ const TopologyCustomNodeComponent: React.FC<NodeProps> = ({ id, data, selected }
   const artifactPayloads = node.context?.artifactPayloads || {};
   const artifactList = Object.keys(artifactPayloads);
   const assignedAgents = node.context?.assignedAgents || [];
+  const nodeContextMap = sharedContext?.nodes ? (sharedContext.nodes[node.id] || {}) : {};
+  const nodeContextCount = Object.keys(nodeContextMap).length;
   const collaborationMode = node.context?.collaborationMode || (assignedAgents.length > 1 ? 'parallel_subtasks' : 'solo');
   const isMultiAgent = assignedAgents.length > 1;
 
@@ -279,6 +287,13 @@ const TopologyCustomNodeComponent: React.FC<NodeProps> = ({ id, data, selected }
         </>
       )}
 
+      {/* Satellite Worker Nodes indicating assigned agents */}
+      <AgentSatelliteNodes 
+        agents={assignedAgents} 
+        nodeId={node.id} 
+        nodeLabel={node.label} 
+      />
+
       {/* Main Card */}
       <motion.div
         layout
@@ -388,21 +403,58 @@ const TopologyCustomNodeComponent: React.FC<NodeProps> = ({ id, data, selected }
 
         {/* HITL Pending Review Checkpoint Alert */}
         {isHitlPending && (
-          <div className={`my-2 p-2 rounded-xl flex items-center justify-between gap-2 text-xs font-medium backdrop-blur-md animate-pulse ${
+          <div className={`my-2 p-2.5 rounded-2xl flex flex-col gap-2 text-xs font-medium backdrop-blur-md ${
             isDark ? 'bg-cat-mocha-peach/20 text-cat-mocha-peach' : 'bg-cat-latte-peach/15 text-cat-latte-peach'
           }`}>
-            <span className="flex items-center gap-1 text-[11px] font-semibold">
-              <ShieldAlert size={13} />
-              <span>Awaiting Human Sign-off</span>
-            </span>
-            <button
-              type="button"
-              onClick={handleQuickApprove}
-              className="flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold bg-cat-latte-green text-white dark:bg-cat-mocha-green dark:text-cat-mocha-base hover:opacity-90 transition-all border-none cursor-pointer"
-            >
-              <Check size={11} />
-              <span>Approve</span>
-            </button>
+            <div className="flex items-center justify-between">
+              <span className="flex items-center gap-1 text-[11px] font-bold">
+                <ShieldAlert size={14} className="animate-pulse" />
+                <span>Awaiting Sign-off</span>
+              </span>
+              {artifactList.length > 0 && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const firstArt = artifactPayloads[artifactList[0]];
+                    if (firstArt) {
+                      setViewingArtifact({
+                        artifact: firstArt,
+                        nodeId: node.id,
+                        nodeLabel: node.label,
+                      });
+                    }
+                  }}
+                  className="flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-semibold bg-purple-500/20 text-purple-600 dark:text-purple-300 hover:bg-purple-500/30 transition-all border-none cursor-pointer"
+                  title="Inspect deliverable before sign-off"
+                >
+                  <Eye size={11} />
+                  <span>Review Deliverable</span>
+                </button>
+              )}
+            </div>
+
+            <div className="flex items-center gap-1.5 pt-0.5">
+              <button
+                type="button"
+                onClick={handleQuickApprove}
+                className="flex-1 flex items-center justify-center gap-1 py-1 px-2 rounded-xl text-[10px] font-bold bg-cat-latte-green text-white dark:bg-cat-mocha-green dark:text-cat-mocha-base hover:opacity-95 transition-all border-none cursor-pointer shadow-xs"
+              >
+                <Check size={11} />
+                <span>Approve & Send to Squad</span>
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  rejectNode(node.id, 'Supervisor requested revision from card checkpoint');
+                }}
+                className="flex items-center justify-center gap-1 py-1 px-2 rounded-xl text-[10px] font-semibold bg-red-500/20 text-red-600 dark:text-red-300 hover:bg-red-500/30 transition-all border-none cursor-pointer"
+              >
+                <X size={11} />
+                <span>Reject</span>
+              </button>
+            </div>
           </div>
         )}
 
@@ -454,9 +506,23 @@ const TopologyCustomNodeComponent: React.FC<NodeProps> = ({ id, data, selected }
                 </span>
                 <div className="flex flex-wrap gap-1">
                   {artifactList.map(art => (
-                    <span key={art} className="text-[10px] font-mono px-2 py-0.5 rounded-lg bg-cat-latte-surface0 dark:bg-cat-mocha-surface0 text-cat-latte-teal dark:text-cat-mocha-teal">
-                      {art}
-                    </span>
+                    <button
+                      key={art}
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setViewingArtifact({
+                          artifact: artifactPayloads[art],
+                          nodeId: node.id,
+                          nodeLabel: node.label,
+                        });
+                      }}
+                      className="text-[10px] font-mono px-2 py-0.5 rounded-lg bg-cat-latte-surface0 dark:bg-cat-mocha-surface0 text-cat-latte-teal dark:text-cat-mocha-teal hover:scale-105 transition-transform flex items-center gap-1 border-none cursor-pointer"
+                      title="Click to inspect deliverable"
+                    >
+                      <span>{art}</span>
+                      <Eye size={10} className="opacity-60" />
+                    </button>
                   ))}
                 </div>
               </div>
@@ -464,7 +530,7 @@ const TopologyCustomNodeComponent: React.FC<NodeProps> = ({ id, data, selected }
           </div>
         )}
 
-        {/* Badges Row: Subgraph Badge, Recursive Indicator */}
+        {/* Badges Row: Subgraph Badge, Recursive Indicator, Shared Context Indicator */}
         <div className="flex flex-wrap items-center gap-1.5 mt-1">
           {hasSubgraph && (
             <button
@@ -478,6 +544,21 @@ const TopologyCustomNodeComponent: React.FC<NodeProps> = ({ id, data, selected }
             >
               <FolderTree size={10} />
               <span>Sub-Graph ({node.subgraph?.nodes.length || 0})</span>
+            </button>
+          )}
+
+          {nodeContextCount > 0 && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                selectNode(id);
+              }}
+              className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-purple-500/15 text-purple-600 dark:text-purple-300 hover:scale-105 transition-all border-none cursor-pointer"
+              title={`${nodeContextCount} shared context entries scoped to this node. Click to inspect.`}
+            >
+              <Brain size={10} />
+              <span>{nodeContextCount} Context</span>
             </button>
           )}
 

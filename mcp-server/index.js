@@ -19,6 +19,7 @@ const BRIDGE_HOST = 'localhost';
 const TOPOLOGY_DIR = path.resolve(process.cwd(), '.topology');
 const PLAN_FILE = path.join(TOPOLOGY_DIR, 'plan.json');
 const APPROVALS_FILE = path.join(TOPOLOGY_DIR, 'approvals.json');
+const CONTEXT_FILE = path.join(TOPOLOGY_DIR, 'shared_context.json');
 
 function logDebug(...args) {
   process.stderr.write(`[Topology-MCP] ${args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(' ')}\n`);
@@ -226,6 +227,33 @@ const TOOLS = [
         includeApprovals: { type: 'boolean', default: true }
       }
     }
+  },
+  {
+    name: 'topology_write_shared_context',
+    description: 'Write a shared context entry (architectural contract, database schema, security policy, or intermediate data) to the Topology blackboard repository. Can be scoped globally to the entire workflow or to a specific node.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        scope: { type: 'string', enum: ['global', 'node'], default: 'global', description: 'Scope: "global" for the entire graph or "node" for a specific task node' },
+        key: { type: 'string', description: 'Unique identifier for the context entry (e.g., "auth_contract", "db_schema")' },
+        value: { description: 'The context value, can be a JSON object, array, string, or number' },
+        nodeId: { type: 'string', description: 'Required if scope is "node": the target node ID' },
+        authorAgentRole: { type: 'string', description: 'Specialist role of the authoring agent' }
+      },
+      required: ['key', 'value']
+    }
+  },
+  {
+    name: 'topology_read_shared_context',
+    description: 'Read shared context entries from the Topology blackboard repository. Retrieve global architectural contracts or node-specific state.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        scope: { type: 'string', enum: ['global', 'node'], description: 'Optional scope filter: "global" or "node". Omit to read the full repository' },
+        key: { type: 'string', description: 'Optional key filter to retrieve a specific entry value directly' },
+        nodeId: { type: 'string', description: 'Required if reading a specific node\'s context' }
+      }
+    }
   }
 ];
 
@@ -405,6 +433,88 @@ async function handleToolCall(name, args) {
           text: `### 📋 Current Topology Plan: "${plan.title || 'Workspace Plan'}"\n\n` +
                 (summary || 'No active nodes in plan.') +
                 `\n\n[Open Topology Studio](http://localhost:5173)`
+        }
+      ]
+    };
+  }
+
+  if (name === 'topology_write_shared_context') {
+    const { scope = 'global', key, value, nodeId, authorAgentRole } = args;
+
+    // 1. Fallback update to disk
+    const stored = readJson(CONTEXT_FILE, { global: {}, nodes: {} });
+    if (!stored.global) stored.global = {};
+    if (!stored.nodes) stored.nodes = {};
+
+    const entry = {
+      key,
+      value,
+      authorAgentId: 'agent-mcp',
+      authorAgentRole: authorAgentRole || 'ExternalAgent',
+      nodeId: scope === 'node' ? nodeId : undefined,
+      scope,
+      updatedAt: Date.now(),
+    };
+
+    if (scope === 'global') {
+      stored.global[key] = entry;
+    } else if (nodeId) {
+      if (!stored.nodes[nodeId]) stored.nodes[nodeId] = {};
+      stored.nodes[nodeId][key] = entry;
+    }
+    writeJson(CONTEXT_FILE, stored);
+
+    // 2. Broadcast via bridge
+    await sendToBridge('context', {
+      scope,
+      key,
+      value,
+      authorAgentId: 'agent-mcp',
+      authorAgentRole: authorAgentRole || 'ExternalAgent',
+      nodeId,
+    });
+
+    return {
+      content: [
+        {
+          type: 'text',
+          text: `🧠 **Shared Context Written** [${scope}${nodeId ? `:${nodeId}` : ''}] Key: \`${key}\``
+        }
+      ]
+    };
+  }
+
+  if (name === 'topology_read_shared_context') {
+    const { scope, key, nodeId } = args;
+    const query = new URLSearchParams();
+    if (scope) query.append('scope', scope);
+    if (key) query.append('key', key);
+    if (nodeId) query.append('nodeId', nodeId);
+
+    const bridgeResp = await getFromBridge(`context?${query.toString()}`);
+    let result = bridgeResp.ok ? bridgeResp.data : null;
+
+    if (!result) {
+      const stored = readJson(CONTEXT_FILE, { global: {}, nodes: {} });
+      if (!scope) {
+        result = stored;
+      } else if (scope === 'global') {
+        result = key ? (stored.global?.[key]?.value ?? null) : (stored.global || {});
+      } else if (scope === 'node') {
+        if (nodeId) {
+          const nodeEntries = stored.nodes?.[nodeId] || {};
+          result = key ? (nodeEntries[key]?.value ?? null) : nodeEntries;
+        } else {
+          result = stored.nodes || {};
+        }
+      }
+    }
+
+    return {
+      content: [
+        {
+          type: 'text',
+          text: `### 🧠 Topology Shared Context\n\`\`\`json\n${JSON.stringify(result, null, 2)}\n\`\`\``
         }
       ]
     };

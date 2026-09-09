@@ -19,7 +19,9 @@ import {
   ArtifactPayload,
   AgentWorker,
   AgentActivityEvent,
-  MultiAgentCollaborationMode
+  MultiAgentCollaborationMode,
+  SharedContextEntry,
+  SharedContextRepository
 } from '../types/topology';
 import { SAMPLE_TOPOLOGIES, DEFAULT_AGENT_SQUAD } from '../data/sampleTopologies';
 import { CANONICAL_ARCHETYPES, CanonicalArchetype } from '../data/topologyRegistry';
@@ -241,6 +243,15 @@ interface TopologyStore {
   setLiveSyncHeartbeat: (timestamp: number) => void;
   setDesktopNotificationsEnabled: (enabled: boolean) => void;
   setAudioChimesEnabled: (enabled: boolean) => void;
+
+  // Shared Context Blackboard & Artifact Inspection
+  sharedContext: SharedContextRepository;
+  viewingArtifact: { artifact: ArtifactPayload; nodeId: string; nodeLabel: string } | null;
+  writeSharedContext: (scope: 'global' | 'node', key: string, value: unknown, authorAgentId?: string, authorAgentRole?: string, nodeId?: string) => void;
+  readSharedContext: (scope: 'global' | 'node', key?: string, nodeId?: string) => unknown;
+  clearSharedContext: (scope: 'global' | 'node', key?: string, nodeId?: string) => void;
+  setSharedContextRepository: (repo: SharedContextRepository) => void;
+  setViewingArtifact: (item: { artifact: ArtifactPayload; nodeId: string; nodeLabel: string } | null) => void;
 }
 
 const defaultSample = SAMPLE_TOPOLOGIES[0];
@@ -366,6 +377,58 @@ export const useTopologyStore = create<TopologyStore>((set, get) => {
     ],
     isCockpitOpen: false,
     activeFilterAgentId: null,
+
+    // Shared Context Blackboard & Artifact Inspection Initial State
+    sharedContext: {
+      global: {
+        system_architecture: {
+          key: 'system_architecture',
+          value: {
+            paradigm: 'Autonomous Multi-Agent DAG Orchestration',
+            contractVersion: '2.5.0',
+            invariants: [
+              'Zero circular causal dependencies (DAG validated)',
+              'Artifact payload immutability across edges',
+              'Explicit supervisor sign-off gate on high-criticality mutations'
+            ]
+          },
+          authorAgentId: 'agent-sage',
+          authorAgentRole: 'Architect',
+          updatedAt: Date.now() - 3600000,
+          scope: 'global'
+        },
+        security_policy: {
+          key: 'security_policy',
+          value: {
+            authMethod: 'Local IPC / Bearer Bridge Token',
+            sandboxStrict: true,
+            maxConcurrentAutonomousWorkers: 6
+          },
+          authorAgentId: 'agent-sentinel',
+          authorAgentRole: 'SecurityAnalyst',
+          updatedAt: Date.now() - 1800000,
+          scope: 'global'
+        }
+      },
+      nodes: {
+        'swarm-spec': {
+          api_schema_spec: {
+            key: 'api_schema_spec',
+            value: {
+              version: 'v2',
+              endpoints: ['/api/topology/status', '/api/topology/plan', '/api/topology/context', '/api/topology/approve'],
+              cors: 'origin-restricted'
+            },
+            authorAgentId: 'agent-sage',
+            authorAgentRole: 'Architect',
+            nodeId: 'swarm-spec',
+            updatedAt: Date.now() - 900000,
+            scope: 'node'
+          }
+        }
+      }
+    },
+    viewingArtifact: null,
 
     history: [],
     future: [],
@@ -1107,6 +1170,15 @@ export const useTopologyStore = create<TopologyStore>((set, get) => {
       });
 
       set({ nodes: updatedNodes, edges: updatedEdges });
+
+      // Notify external agent bridge of human decision
+      if (typeof window !== 'undefined') {
+        fetch('/api/topology/approve', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ nodeId, decision: 'approved', notes: notes || 'Approved by supervisor' })
+        }).catch(() => {});
+      }
     },
 
     rejectNode: (nodeId, notes) => {
@@ -1135,6 +1207,15 @@ export const useTopologyStore = create<TopologyStore>((set, get) => {
           },
         },
       });
+
+      // Notify external agent bridge of human decision
+      if (typeof window !== 'undefined') {
+        fetch('/api/topology/approve', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ nodeId, decision: 'rejected', notes: notes || 'Supervisor requested revision' })
+        }).catch(() => {});
+      }
     },
 
     toggleApprovalRequired: (nodeId) => {
@@ -1148,6 +1229,85 @@ export const useTopologyStore = create<TopologyStore>((set, get) => {
           requiresHumanApproval: !current,
           approvalStatus: !current ? 'pending' : undefined,
         },
+      });
+    },
+
+    setViewingArtifact: (item) => set({ viewingArtifact: item }),
+
+    setSharedContextRepository: (repo) => set({ sharedContext: repo }),
+
+    writeSharedContext: (scope, key, value, authorAgentId = 'agent-supervisor', authorAgentRole = 'Supervisor', nodeId) => {
+      const entry: SharedContextEntry = {
+        key,
+        value,
+        authorAgentId,
+        authorAgentRole,
+        nodeId: scope === 'node' ? nodeId : undefined,
+        updatedAt: Date.now(),
+        scope,
+      };
+
+      set((state) => {
+        const next: SharedContextRepository = {
+          global: { ...state.sharedContext.global },
+          nodes: { ...state.sharedContext.nodes },
+        };
+
+        if (scope === 'global') {
+          next.global[key] = entry;
+        } else if (nodeId) {
+          next.nodes[nodeId] = {
+            ...(next.nodes[nodeId] || {}),
+            [key]: entry,
+          };
+        }
+        return { sharedContext: next };
+      });
+
+      // Synchronize with backend bridge in background (fire-and-forget with catch)
+      if (typeof window !== 'undefined') {
+        fetch('/api/topology/context', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ scope, key, value, authorAgentId, authorAgentRole, nodeId }),
+        }).catch(() => {});
+      }
+    },
+
+    readSharedContext: (scope, key, nodeId) => {
+      const { sharedContext } = get();
+      if (scope === 'global') {
+        if (key) return sharedContext.global[key]?.value;
+        return sharedContext.global;
+      } else if (nodeId) {
+        const nodeCtx = sharedContext.nodes[nodeId] || {};
+        if (key) return nodeCtx[key]?.value;
+        return nodeCtx;
+      }
+      return undefined;
+    },
+
+    clearSharedContext: (scope, key, nodeId) => {
+      set((state) => {
+        const next: SharedContextRepository = {
+          global: { ...state.sharedContext.global },
+          nodes: { ...state.sharedContext.nodes },
+        };
+
+        if (scope === 'global') {
+          if (key) {
+            delete next.global[key];
+          } else {
+            next.global = {};
+          }
+        } else if (nodeId && next.nodes[nodeId]) {
+          if (key) {
+            delete next.nodes[nodeId][key];
+          } else {
+            delete next.nodes[nodeId];
+          }
+        }
+        return { sharedContext: next };
       });
     },
 

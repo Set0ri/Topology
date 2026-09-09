@@ -27,14 +27,15 @@ import {
   GitBranch,
   ShieldAlert,
   Play,
-  Users
+  Users,
+  Brain
 } from 'lucide-react';
 import { useTopologyStore, createSyntheticArtifactPayload } from '../../store/useTopologyStore';
 import { NodeStatus, Priority, AgentRole, ArtifactPayload, ExecutionType, ModelEngine, MultiAgentCollaborationMode, AgentWorker } from '../../types/topology';
 import { getNodeTypeColor, getStatusColor } from '../../utils/catppuccin';
 import { generateAgentPromptPayload } from '../../utils/agentHandoff';
 
-type InspectorTab = 'overview' | 'squad' | 'artifacts' | 'telemetry' | 'hitl';
+type InspectorTab = 'overview' | 'squad' | 'artifacts' | 'context' | 'telemetry' | 'hitl';
 
 export const NodeInspector: React.FC = () => {
   const selectedNodeId = useTopologyStore(s => s.selectedNodeId);
@@ -54,12 +55,19 @@ export const NodeInspector: React.FC = () => {
   const assignAgentToNode = useTopologyStore(s => s.assignAgentToNode);
   const removeAgentFromNode = useTopologyStore(s => s.removeAgentFromNode);
   const setNodeCollaborationMode = useTopologyStore(s => s.setNodeCollaborationMode);
+  const sharedContext = useTopologyStore(s => s.sharedContext);
+  const writeSharedContext = useTopologyStore(s => s.writeSharedContext);
+  const clearSharedContext = useTopologyStore(s => s.clearSharedContext);
+  const setViewingArtifact = useTopologyStore(s => s.setViewingArtifact);
 
   const [activeTab, setActiveTab] = useState<InspectorTab>('overview');
   const [selectedArtifactName, setSelectedArtifactName] = useState<string | null>(null);
   const [copiedArtifact, setCopiedArtifact] = useState(false);
   const [copiedAgentPrompt, setCopiedAgentPrompt] = useState(false);
   const [supervisorNotes, setSupervisorNotes] = useState('');
+  const [newContextKey, setNewContextKey] = useState('');
+  const [newContextValue, setNewContextValue] = useState('');
+  const [copiedContextKey, setCopiedContextKey] = useState<string | null>(null);
   const [isMobile, setIsMobile] = useState<boolean>(() => 
     typeof window !== 'undefined' ? window.innerWidth < 640 : false
   );
@@ -77,6 +85,9 @@ export const NodeInspector: React.FC = () => {
   const node = nodes.find(n => n.id === selectedNodeId);
 
   if (!node) return null;
+
+  const nodeContextMap = (sharedContext?.nodes && node) ? (sharedContext.nodes[node.id] || {}) : {};
+  const nodeContextEntries = Object.values(nodeContextMap);
 
   const typeColor = getNodeTypeColor(node.type, theme);
   const statusColor = getStatusColor(node.status, theme);
@@ -271,6 +282,24 @@ export const NodeInspector: React.FC = () => {
             {artifactNames.length > 0 && (
               <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-cat-latte-teal/15 dark:bg-cat-mocha-teal/20 text-cat-latte-teal dark:text-cat-mocha-teal font-mono">
                 {artifactNames.length}
+              </span>
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('context')}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-xl text-xs font-medium transition-all border-none cursor-pointer ${
+              activeTab === 'context'
+                ? 'bg-white dark:bg-cat-mocha-mantle text-purple-600 dark:text-purple-400 shadow-elevated-sm font-semibold'
+                : 'text-cat-latte-subtext0 dark:text-cat-mocha-subtext0 hover:text-cat-latte-text dark:hover:text-cat-mocha-text'
+            }`}
+          >
+            <Brain size={13} />
+            <span>Context</span>
+            {nodeContextEntries.length > 0 && (
+              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-purple-500/15 text-purple-500 font-mono font-bold">
+                {nodeContextEntries.length}
               </span>
             )}
           </button>
@@ -792,6 +821,15 @@ export const NodeInspector: React.FC = () => {
                   <div className="flex items-center gap-1">
                     <button
                       type="button"
+                      onClick={() => setViewingArtifact({ artifact: activePayload, nodeId: node.id, nodeLabel: node.label })}
+                      className="flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-semibold bg-cat-latte-teal/15 dark:bg-cat-mocha-teal/20 text-cat-latte-teal dark:text-cat-mocha-teal hover:opacity-90 transition-all border-none cursor-pointer"
+                      title="Open full-screen elevated artifact inspector"
+                    >
+                      <Sparkles size={11} />
+                      <span>Inspect & Approve</span>
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => handleCopyArtifact(activePayload.content)}
                       className="p-1 rounded-lg hover:bg-cat-latte-surface1 dark:hover:bg-cat-mocha-surface1 text-cat-latte-overlay1 dark:text-cat-mocha-overlay2 hover:text-cat-latte-text dark:hover:text-cat-mocha-text border-none cursor-pointer"
                       title="Copy payload"
@@ -894,6 +932,121 @@ export const NodeInspector: React.FC = () => {
                 >
                   <Plus size={14} />
                 </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Tab: Node-Scoped Shared Context Blackboard */}
+        {activeTab === 'context' && (
+          <div className="flex-1 overflow-y-auto pr-1 space-y-4 custom-scrollbar">
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-[11px] font-medium uppercase tracking-wider text-purple-500 flex items-center gap-1.5">
+                  <Brain size={13} />
+                  Node Shared Context Blackboard
+                </label>
+              </div>
+              <p className="text-xs text-cat-latte-subtext0 dark:text-cat-mocha-subtext0 mb-3">
+                Persistent shared memory scoped to <strong>{node.label}</strong>. Autonomous agents write invariants, contracts, and intermediate outputs here.
+              </p>
+
+              {/* Form to write node context */}
+              <form 
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (!newContextKey.trim()) return;
+                  let parsed: unknown = newContextValue;
+                  try {
+                    parsed = JSON.parse(newContextValue);
+                  } catch {
+                    parsed = newContextValue;
+                  }
+                  writeSharedContext('node', newContextKey.trim(), parsed, 'agent-user', 'Supervisor', node.id);
+                  setNewContextKey('');
+                  setNewContextValue('');
+                }}
+                className="p-3 rounded-2xl bg-purple-500/5 dark:bg-purple-500/10 space-y-2 mb-3"
+              >
+                <div className="text-xs font-semibold text-purple-600 dark:text-purple-400">
+                  + Add Node-Level Context Entry
+                </div>
+                <input
+                  type="text"
+                  placeholder="Key (e.g. verified_schema, auth_contract)"
+                  value={newContextKey}
+                  onChange={(e) => setNewContextKey(e.target.value)}
+                  className="w-full px-3 py-1.5 rounded-xl text-xs bg-cat-latte-surface0/70 dark:bg-cat-mocha-surface0/60 text-cat-latte-text dark:text-cat-mocha-text border-none focus:outline-none"
+                  required
+                />
+                <textarea
+                  rows={2}
+                  placeholder='Value JSON or text (e.g. {"status": "ok", "strict": true})'
+                  value={newContextValue}
+                  onChange={(e) => setNewContextValue(e.target.value)}
+                  className="w-full px-3 py-1.5 rounded-xl text-xs font-mono bg-cat-latte-surface0/70 dark:bg-cat-mocha-surface0/60 text-cat-latte-text dark:text-cat-mocha-text border-none resize-none focus:outline-none"
+                  required
+                />
+                <div className="flex justify-end">
+                  <button
+                    type="submit"
+                    className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-purple-600 text-white hover:bg-purple-700 transition-all border-none cursor-pointer"
+                  >
+                    Save Context
+                  </button>
+                </div>
+              </form>
+
+              {/* List of context entries */}
+              <div className="space-y-2">
+                {nodeContextEntries.length === 0 ? (
+                  <div className="p-4 rounded-xl text-center text-xs opacity-60 bg-black/5 dark:bg-white/5">
+                    No context entries written for this node yet. Use the form above or call <code>topology_write_shared_context</code> from an agent.
+                  </div>
+                ) : (
+                  nodeContextEntries.map((entry) => (
+                    <div
+                      key={entry.key}
+                      className="p-3 rounded-2xl bg-cat-latte-surface0/70 dark:bg-cat-mocha-surface0/50 space-y-1.5"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-mono font-bold text-xs text-purple-600 dark:text-purple-400">
+                          {entry.key}
+                        </span>
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText(JSON.stringify(entry.value, null, 2));
+                              setCopiedContextKey(entry.key);
+                              setTimeout(() => setCopiedContextKey(null), 1800);
+                            }}
+                            className="p-1 rounded-lg text-xs opacity-60 hover:opacity-100 border-none bg-transparent cursor-pointer"
+                            title="Copy JSON"
+                          >
+                            {copiedContextKey === entry.key ? <Check size={12} className="text-emerald-500" /> : <Copy size={12} />}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => clearSharedContext('node', entry.key, node.id)}
+                            className="p-1 rounded-lg text-xs opacity-60 hover:opacity-100 hover:text-red-500 border-none bg-transparent cursor-pointer"
+                            title="Delete entry"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
+                      </div>
+                      <div className="text-[10px] opacity-60 font-sans">
+                        Author: <strong>{entry.authorAgentRole || entry.authorAgentId || 'Agent'}</strong>
+                      </div>
+                      <div className="p-2 rounded-xl font-mono text-[10px] bg-cat-latte-mantle dark:bg-cat-mocha-crust overflow-x-auto select-text">
+                        <pre className="m-0 whitespace-pre-wrap">
+                          <code>{typeof entry.value === 'string' ? entry.value : JSON.stringify(entry.value, null, 2)}</code>
+                        </pre>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           </div>

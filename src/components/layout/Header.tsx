@@ -17,7 +17,8 @@ import {
   Terminal,
   Compass,
   Users,
-  Radio
+  Radio,
+  Brain
 } from 'lucide-react';
 import { useTopologyStore } from '../../store/useTopologyStore';
 import { exportToObsidianCanvas, exportToMermaid, exportToUniversalAgentManifest } from '../../utils/obsidianCanvas';
@@ -31,6 +32,7 @@ interface HeaderProps {
   onOpenTutorial: () => void;
   onOpenLibrary: () => void;
   onOpenAgentSync: () => void;
+  onOpenSharedContext?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({ 
@@ -38,7 +40,8 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenCoherence, 
   onOpenTutorial, 
   onOpenLibrary,
-  onOpenAgentSync
+  onOpenAgentSync,
+  onOpenSharedContext
 }) => {
   const viewMode = useTopologyStore(s => s.viewMode);
   const setViewMode = useTopologyStore(s => s.setViewMode);
@@ -56,6 +59,7 @@ export const Header: React.FC<HeaderProps> = ({
   const setCockpitOpen = useTopologyStore(s => s.setCockpitOpen);
   const globalSquad = useTopologyStore(s => s.globalSquad);
   const liveSyncStatus = useTopologyStore(s => s.liveSyncStatus);
+  const sharedContext = useTopologyStore(s => s.sharedContext);
 
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [isSamplesOpen, setIsSamplesOpen] = useState(false);
@@ -238,6 +242,20 @@ export const Header: React.FC<HeaderProps> = ({
             isCockpitOpen ? 'bg-white/20 text-white' : 'bg-[#1a73e8]/10 text-[#1a73e8] dark:text-[#8ab4f8]'
           }`}>
             {globalSquad.length}
+          </span>
+        </button>
+
+        {/* Shared Context Blackboard Modal Button */}
+        <button
+          type="button"
+          onClick={onOpenSharedContext}
+          title="Open Shared Agent Context Repository (Dual-Tier Blackboard)"
+          className="h-8 px-2 sm:px-2.5 rounded-xl text-xs font-medium bg-purple-500/10 hover:bg-purple-500/15 text-purple-700 dark:text-purple-300 flex items-center gap-1 sm:gap-1.5 transition-all border-none cursor-pointer shadow-xs shrink-0"
+        >
+          <Brain size={13} className="text-purple-600 dark:text-purple-400" />
+          <span className="font-semibold hidden md:inline">Context</span>
+          <span className="px-1.5 py-0.2 rounded-md text-[10px] bg-purple-500/15 text-purple-600 dark:text-purple-300 font-bold font-mono">
+            {Object.keys(sharedContext?.global || {}).length}
           </span>
         </button>
 
