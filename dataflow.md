@@ -872,10 +872,67 @@ node scripts/topology-log.mjs sync --push
   - **1-Click Diagnostics Export**: Generates `topology-diagnostics-report.json` bundle containing browser specs, graph metrics, coherence diagnostics, active locks, and bridge status.
   - **Hotkeys**: `Ctrl+Shift+D` or Header "Telemetry" pill.
 
+---
 
+## 28. Active Work Observability: Radiant Aura & Orbital Satellite Nodes
 
+Topology provides immediate, borderless spatial situational awareness identifying which nodes are being actively worked on by AI agents or human operators:
 
+```mermaid
+flowchart TD
+    subgraph Signal_Inputs ["Active Work Signals"]
+        S1["node.status === 'in_progress'"]
+        S2["telemetry.state IN ('thinking', 'executing_tool', 'validating')"]
+        S3["Advisory Lock Active (nodeLock in activeLocks)"]
+    end
 
+    Signal_Inputs --> Detector["Active Work Detection (isNodeActivelyWorking)"]
 
+    subgraph Visual_Manifestation ["Visual Real-Time Feedback"]
+        Detector --> Aura["Radiant Ambient Glow Aura (motion.div -inset-2 blur-12px)"]
+        Detector --> DynSat["Dynamic Agent Satellite Worker Pill"]
+        Detector --> MacroPill["Macro LOD Pulsing Ring Aura"]
+    end
+
+    Aura --> ZeroBorder["Strictly Zero Border: Layered Blur & Diffuse Shadows"]
+    DynSat --> Orbital["Orbital Float Animation (animate: y [0, -2.5, 0])"]
+```
+
+### 1. Multi-Signal Active Work Invariant
+A node is classified as actively undergoing work (`isNodeActivelyWorking`) if **any** of three criteria are met:
+1. `node.status === 'in_progress'`
+2. `isAgentActive`: `node.context.telemetry?.state` is `'thinking'`, `'executing_tool'`, or `'validating'`.
+3. `Boolean(nodeLock)`: An active process or external agent holds an advisory lease (`activeLocks[id]` or `activeLocks['node:' + id]`).
+
+### 2. Radiant Borderless Ambient Glow Aura (`TopologyCustomNode.tsx`)
+In accordance with zero-border design principles, active nodes indicate work without any hard lines or borders:
+- **Pulsing Backdrop Aura**: Rendered via an absolute `motion.div` positioned `-inset-2` behind the card with `filter: blur(12px)`.
+- **Gentle Respiratory Breathing**: Animated via Framer Motion with `opacity: [0.5, 0.88, 0.5]` and `scale: [0.99, 1.025, 0.99]` over a 2.6-second smooth loop.
+- **Adaptive Accent Tint**: Tinted with the active lock amber hue (`#f59e0b`) if locked by a external agent lease, or the node's type color (e.g. Google Blue `#1a73e8`, Purple `#9334e6`) with theme-adaptive opacity (`0.45` in dark mode, `0.28` in light mode).
+- **Macro LOD Pulsing Ring**: When zoomed out below 0.55 LOD, the minimal beacon capsule features an animated pulsing aura (`scale: [0.96, 1.06, 0.96]`, `filter: blur-sm`).
+
+### 3. Dynamic Agent Satellite Node Synthesis (`AgentSatelliteNodes.tsx`)
+External AI agents operating via CLI or MCP may not pre-populate `node.context.assignedAgents`. To ensure live satellite representation:
+- **Dynamic Worker Synthesis**: If `assignedAgents` is empty but `isNodeActivelyWorking` is true, an active `AgentWorker` is dynamically synthesized from `nodeLock.agent` or `node.context.role`/`telemetry`:
+  ```tsx
+  const effectiveAgents = useMemo<AgentWorker[]>(() => {
+    if (assignedAgents.length > 0) return assignedAgents;
+    if (isNodeActivelyWorking) {
+      return [{
+        id: nodeLock ? `lock-${nodeLock.agent}` : `active-agent-${id}`,
+        name: nodeLock ? nodeLock.agent : (node.context.role || 'Active Agent'),
+        role: node.context.role || 'Autonomous Worker',
+        avatar: nodeLock ? '🔒' : '🤖',
+        color: activeGlowColor,
+        status: isAgentActive ? 'thinking' : 'active',
+        activeThought: telemetry?.liveThought || activeThought,
+      }];
+    }
+    return [];
+  }, [assignedAgents, isNodeActivelyWorking, nodeLock, activeGlowColor, isAgentActive, telemetry, activeThought, id, node.context.role]);
+  ```
+- **Orbital Floating Physics**: Active worker pills float elevated above the card (`-top-4 right-3`) with continuous subtle vertical bobbing (`animate={{ y: [0, -2.5, 0] }}`).
+- **Ambient Glow Shadow**: Active worker pill drop shadow incorporates glowing ambient colored halos (`0 0 12px 1px ${agent.color}80, 0 3px 8px -2px rgba(0,0,0,0.25)`).
+- **Interactive Live Telemetry Popover**: Hovering the satellite node reveals the worker's active thought stream, tool invocation, role, and model engine in an elevated glass popover.
 
 

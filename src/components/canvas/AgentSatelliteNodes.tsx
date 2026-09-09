@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { motion } from 'framer-motion';
 import { Users, Bot, Sparkles, ChevronRight, Activity, Cpu } from 'lucide-react';
 import { AgentWorker } from '../../types/topology';
 import { useTopologyStore } from '../../store/useTopologyStore';
@@ -22,7 +23,7 @@ export const AgentSatelliteNodes: React.FC<AgentSatelliteNodesProps> = ({
   const setActiveFilterAgentId = useTopologyStore((s) => s.setActiveFilterAgentId);
   const setCockpitOpen = useTopologyStore((s) => s.setCockpitOpen);
   const theme = useTopologyStore((s) => s.theme);
-  const isDark = theme === 'mocha' || theme === 'catpuccin';
+  const isDark = theme !== 'default' && theme !== 'light' && theme !== 'latte';
 
   if (!agents || agents.length === 0) return null;
 
@@ -39,7 +40,7 @@ export const AgentSatelliteNodes: React.FC<AgentSatelliteNodesProps> = ({
 
   return (
     <div 
-      className="absolute -top-3.5 right-3 flex items-center gap-1.5 z-30 pointer-events-auto"
+      className="absolute -top-4 right-3 flex items-center gap-1.5 z-30 pointer-events-auto"
       onClick={(e) => e.stopPropagation()}
     >
       {/* Individual Satellite Worker Badges */}
@@ -48,8 +49,10 @@ export const AgentSatelliteNodes: React.FC<AgentSatelliteNodesProps> = ({
         const isHovered = hoveredAgentId === agent.id;
 
         return (
-          <div
+          <motion.div
             key={agent.id}
+            animate={isActive ? { y: [0, -2.5, 0] } : { y: 0 }}
+            transition={{ repeat: Infinity, duration: 2.6, ease: 'easeInOut' }}
             className="relative group"
             onMouseEnter={() => setHoveredAgentId(agent.id)}
             onMouseLeave={() => setHoveredAgentId(null)}
@@ -58,14 +61,14 @@ export const AgentSatelliteNodes: React.FC<AgentSatelliteNodesProps> = ({
             <button
               type="button"
               onClick={(e) => handleInspectAgent(e, agent.id)}
-              className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium shadow-elevated-sm backdrop-blur-md transition-all duration-200 hover:scale-105 border-none cursor-pointer select-none ${
+              className={`flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-medium shadow-elevated-sm backdrop-blur-md transition-all duration-200 hover:scale-105 border-none cursor-pointer select-none ${
                 isDark
-                  ? 'bg-cat-mocha-surface0/90 text-cat-mocha-text hover:bg-cat-mocha-surface1'
+                  ? 'bg-cat-mocha-surface0/95 text-cat-mocha-text hover:bg-cat-mocha-surface1'
                   : 'bg-white/95 text-cat-latte-text hover:bg-cat-latte-surface0'
               }`}
               style={{
                 boxShadow: isActive
-                  ? `0 0 10px -1px ${agent.color}80, 0 2px 6px -1px rgba(0,0,0,0.15)`
+                  ? `0 0 12px 1px ${agent.color}80, 0 3px 8px -2px rgba(0,0,0,0.25)`
                   : '0 2px 5px -1px rgba(0,0,0,0.12)',
               }}
             >
@@ -148,7 +151,7 @@ export const AgentSatelliteNodes: React.FC<AgentSatelliteNodesProps> = ({
                 </button>
               </div>
             )}
-          </div>
+          </motion.div>
         );
       })}
 

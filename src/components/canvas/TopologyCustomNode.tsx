@@ -31,7 +31,7 @@ import {
   Brain,
   Lock
 } from 'lucide-react';
-import { TopologyNode } from '../../types/topology';
+import { TopologyNode, AgentWorker } from '../../types/topology';
 import { useTopologyStore } from '../../store/useTopologyStore';
 import { AgentSatelliteNodes } from './AgentSatelliteNodes';
 import { getNodeTypeColor, getStatusColor, hexToRgba, getNodeCardStyling } from '../../utils/catppuccin';
@@ -129,6 +129,36 @@ const TopologyCustomNodeComponent: React.FC<NodeProps> = ({ id, data, selected }
   const collaborationMode = node.context?.collaborationMode || (assignedAgents.length > 1 ? 'parallel_subtasks' : 'solo');
   const isMultiAgent = assignedAgents.length > 1;
 
+  const isNodeActivelyWorking = node.status === 'in_progress' || isAgentActive || Boolean(nodeLock);
+  const activeGlowColor = nodeLock ? '#f59e0b' : (typeColor || '#1a73e8');
+
+  // Derive active working agents for satellite nodes (fallback to current active worker if assignedAgents is empty)
+  const effectiveAgents: AgentWorker[] = React.useMemo(() => {
+    if (assignedAgents && assignedAgents.length > 0) {
+      return assignedAgents;
+    }
+    if (isNodeActivelyWorking) {
+      const role = nodeLock?.agentRole || node.context?.role || 'GeneralAgent';
+      const name = nodeLock?.agentName || nodeLock?.agentId || (node.context?.role ? `${node.context.role}` : 'Active Agent');
+      const color = nodeLock ? '#f59e0b' : '#1a73e8';
+      const avatar = nodeLock ? '🔒' : (node.context?.executionType === 'automated_script' ? '⚡' : '🤖');
+      return [
+        {
+          id: nodeLock?.agentId || `worker-${node.id}`,
+          name,
+          role,
+          avatar,
+          color,
+          modelEngine: node.context?.modelEngine || 'gemini-2.5-pro',
+          status: 'thinking',
+          currentThought: node.context?.telemetry?.liveThought || node.context?.activeThought || (nodeLock ? `Holding advisory lock: ${nodeLock.resourceKey}` : 'Actively executing task...'),
+          activeTool: node.context?.telemetry?.activeTool,
+        }
+      ];
+    }
+    return [];
+  }, [assignedAgents, isNodeActivelyWorking, nodeLock, node.context, node.id]);
+
   const handleCardClick = (e: React.MouseEvent) => {
     if (e.shiftKey || e.ctrlKey || e.metaKey) {
       e.stopPropagation();
@@ -225,11 +255,28 @@ const TopologyCustomNodeComponent: React.FC<NodeProps> = ({ id, data, selected }
           </>
         )}
 
+        {/* Macro Active Glow Aura */}
+        {isNodeActivelyWorking && (
+          <motion.div
+            animate={{ opacity: [0.55, 0.95, 0.55], scale: [0.96, 1.06, 0.96] }}
+            transition={{ repeat: Infinity, duration: 2.2, ease: 'easeInOut' }}
+            className="absolute -inset-1 rounded-2xl pointer-events-none -z-10 blur-sm"
+            style={{
+              background: `radial-gradient(circle, ${hexToRgba(activeGlowColor, 0.65)} 0%, transparent 80%)`,
+            }}
+          />
+        )}
+
         <div
           className={`flex items-center gap-2 px-3 py-2 rounded-2xl backdrop-blur-xl border-none shadow-elevated-md transition-all duration-200 ${
             selected || isMultiSelected ? 'ring-2 ring-cat-mocha-sapphire/80 scale-105' : ''
           }`}
-          style={{ background, boxShadow }}
+          style={{ 
+            background, 
+            boxShadow: isNodeActivelyWorking 
+              ? `${boxShadow}, 0 0 14px 1px ${hexToRgba(activeGlowColor, 0.5)}` 
+              : boxShadow 
+          }}
         >
           <span 
             className="w-3 h-3 rounded-full shrink-0 shadow-sm" 
@@ -284,9 +331,29 @@ const TopologyCustomNodeComponent: React.FC<NodeProps> = ({ id, data, selected }
         </>
       )}
 
-      {/* Satellite Worker Nodes indicating assigned agents */}
+      {/* Active Agent Ambient Aura & Pulsing Glow (Border-Free Radiant Elevation) */}
+      {isNodeActivelyWorking && (
+        <motion.div
+          animate={{
+            opacity: [0.5, 0.88, 0.5],
+            scale: [0.99, 1.025, 0.99],
+          }}
+          transition={{
+            repeat: Infinity,
+            duration: 2.6,
+            ease: 'easeInOut',
+          }}
+          className="absolute -inset-2 rounded-3xl pointer-events-none -z-10 transition-all duration-300"
+          style={{
+            background: `radial-gradient(ellipse at center, ${hexToRgba(activeGlowColor, isDark ? 0.45 : 0.32)} 0%, ${hexToRgba(activeGlowColor, 0.12)} 60%, transparent 85%)`,
+            filter: 'blur(12px)',
+          }}
+        />
+      )}
+
+      {/* Satellite Worker Nodes indicating assigned or active agents */}
       <AgentSatelliteNodes 
-        agents={assignedAgents} 
+        agents={effectiveAgents} 
         nodeId={node.id} 
         nodeLabel={node.label} 
       />
@@ -298,7 +365,12 @@ const TopologyCustomNodeComponent: React.FC<NodeProps> = ({ id, data, selected }
         className={`rounded-2xl relative overflow-hidden backdrop-blur-2xl border-none outline-none select-none transition-all duration-200 cursor-pointer ${
           isMicro ? 'w-[340px] p-4' : 'w-[316px] p-3.5 sm:p-4'
         } ${isHovered ? '-translate-y-1' : ''}`}
-        style={{ background, boxShadow }}
+        style={{ 
+          background, 
+          boxShadow: isNodeActivelyWorking 
+            ? `${boxShadow}, 0 0 20px -2px ${hexToRgba(activeGlowColor, isDark ? 0.45 : 0.28)}` 
+            : boxShadow 
+        }}
       >
         {/* Top Header: Minimal Type Badge, Status Beacon, Priority & Multi-Agent Avatars */}
         <div className="flex items-center justify-between gap-2 mb-2 relative z-10">
@@ -312,12 +384,12 @@ const TopologyCustomNodeComponent: React.FC<NodeProps> = ({ id, data, selected }
             </div>
 
             {/* Overlapping Multi-Agent Avatar Cluster */}
-            {assignedAgents.length > 0 && (
+            {effectiveAgents.length > 0 && (
               <div 
                 className="flex items-center -space-x-1.5 ml-0.5 shrink-0" 
-                title={`Assigned Squad: ${assignedAgents.map(a => `${a.name} (${a.role})`).join(', ')}`}
+                title={`Assigned Squad: ${effectiveAgents.map(a => `${a.name} (${a.role})`).join(', ')}`}
               >
-                {assignedAgents.map((agent) => {
+                {effectiveAgents.map((agent) => {
                   const isActiveWorker = (node.status === 'in_progress' || isAgentActive) && (agent.status === 'thinking' || agent.status === 'executing_tool' || agent.status === 'debating');
                   return (
                     <div
