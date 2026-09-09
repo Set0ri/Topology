@@ -13,6 +13,7 @@ import { MultiAgentCockpit } from './components/swarm/MultiAgentCockpit';
 import { AgentSyncModal } from './components/modals/AgentSyncModal';
 import { GlobalContextModal } from './components/modals/GlobalContextModal';
 import { ArtifactViewerModal } from './components/modals/ArtifactViewerModal';
+import { DiagnosticsModal } from './components/modals/DiagnosticsModal';
 import { useLiveAgentSync } from './services/liveAgentSync';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { Sparkles } from 'lucide-react';
@@ -33,6 +34,7 @@ export const App: React.FC = () => {
   const [isLibraryOpen, setIsLibraryOpen] = useState(false);
   const [isAgentSyncOpen, setIsAgentSyncOpen] = useState(false);
   const [isSharedContextOpen, setIsSharedContextOpen] = useState(false);
+  const [isDiagnosticsOpen, setIsDiagnosticsOpen] = useState(false);
 
   // Initialize theme class on document element & check first-time tutorial
   useEffect(() => {
@@ -62,6 +64,7 @@ export const App: React.FC = () => {
         onOpenLibrary={() => setIsLibraryOpen(true)}
         onOpenAgentSync={() => setIsAgentSyncOpen(true)}
         onOpenSharedContext={() => setIsSharedContextOpen(true)}
+        onOpenDiagnostics={() => setIsDiagnosticsOpen(true)}
       />
 
       {/* Main Viewport wrapped in ErrorBoundary */}
@@ -132,6 +135,12 @@ export const App: React.FC = () => {
 
       {/* Elevated Artifact Viewer & HITL Review Modal */}
       <ArtifactViewerModal />
+
+      {/* Real-time System Diagnostics & Telemetry HUD */}
+      <DiagnosticsModal
+        isOpen={isDiagnosticsOpen}
+        onClose={() => setIsDiagnosticsOpen(false)}
+      />
     </div>
   );
 };

@@ -228,6 +228,36 @@ export function topologyBridgePlugin() {
             activeClients: clients.size,
             uptime: process.uptime(),
             timestamp: Date.now(),
+            pid: process.pid,
+            memory: process.memoryUsage(),
+          }));
+          return;
+        }
+
+        // 2b. Full Diagnostics Telemetry: /api/topology/diagnostics
+        if (pathname === '/api/topology/diagnostics' && req.method === 'GET') {
+          const activeLocks = getActiveLocks();
+          const logStats = fs.existsSync(LOG_FILE) ? { exists: true, sizeBytes: fs.statSync(LOG_FILE).size } : { exists: false, sizeBytes: 0 };
+          const planData = readJsonFile(planFilePath, { nodes: [], edges: [] });
+
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            ok: true,
+            timestamp: Date.now(),
+            bridge: {
+              port: 5173,
+              activeSseClients: clients.size,
+              uptimeSeconds: Math.round(process.uptime()),
+              pid: process.pid,
+              memory: process.memoryUsage(),
+            },
+            storage: {
+              log: logStats,
+              activeLocksCount: activeLocks.length,
+              activeLocks,
+              planNodesCount: (planData.nodes || []).length,
+              planEdgesCount: (planData.edges || []).length,
+            },
           }));
           return;
         }

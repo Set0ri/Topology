@@ -804,6 +804,12 @@ flowchart TB
 ### 5. Zero-Dependency Agent CLI (`scripts/topology-log.mjs`)
 Agents without direct MCP server integration can execute standard operations via shell commands:
 ```bash
+# Health audit (port 5173, PID, log size, lock contention)
+node scripts/topology-log.mjs health
+
+# Ensure visualizer server is running
+node scripts/topology-log.mjs server
+
 # Acquire lock
 node scripts/topology-log.mjs lock node:step-1 --agent="Worker" --ttl=30
 
@@ -819,6 +825,53 @@ node scripts/topology-log.mjs unlock node:step-1 --agent="Worker"
 # Pull rebase & push to remote repository
 node scripts/topology-log.mjs sync --push
 ```
+
+---
+
+## 7. High-Performance Rendering & Observability Architecture
+
+### 1. Canvas Render Isolation & Atomic Selectors (`TopologyCustomNode.tsx`)
+- **Eliminated Global Re-Renders**:
+  - Removed unused whole-graph subscriptions (`nodes`, `edges`).
+  - Replaced full-dictionary subscriptions with atomic, node-scoped boolean selectors:
+    ```tsx
+    const isSelfHovered = useTopologyStore(s => s.hoveredNodeId === id);
+    const isMultiSelected = useTopologyStore(s => s.selectedNodeIds.includes(id));
+    const nodeLock = useTopologyStore(s => s.activeLocks[id] || s.activeLocks['node:' + id]);
+    const nodeContextCount = useTopologyStore(s => Object.keys(s.sharedContext?.nodes?.[id] || {}).length);
+    ```
+  - Only the single node that changes hover, selection, lock, or context re-renders. All peer nodes remain untouched.
+- **Harden `React.memo` Comparator**:
+  - Compares all visually relevant fields: `label`, `description`, `status`, `priority`, `type`, `updatedAt`, `tags`, `activeThought`, `collaborationMode`, `approvalStatus`, `requiresHumanApproval`, `stoppingCondition`, `telemetry` (state, liveThought, activeTool, lastUpdated), assigned agents, artifact payloads, output artifacts, and subgraph counts.
+
+### 2. High-Frequency Telemetry Snapshot Bypass (`useTopologyStore.ts`)
+- **Problem**: In autonomous workflows, agents stream thoughts and logs at 10–20Hz. Previously, `updateNode` called `saveSnapshot()`, serializing the entire graph with `JSON.parse(JSON.stringify(nodes))` on every thought token, causing extreme GC pauses and polluting the undo stack.
+- **Solution**: Added `{ skipSnapshot?: boolean }` option to `updateNode`.
+  - High-frequency streaming events (`thought_stream`, live terminal logs) pass `skipSnapshot: true`.
+  - 60fps canvas dragging in `TopologyCanvas2D.tsx` passes `skipSnapshot: true`, recording a single snapshot on `onNodeDragStop`.
+  - Undo/redo history remains lightweight and reserved for structural mutations.
+
+### 3. GPU Texture Pooling in 3D Galaxy (`TopologyGraph3D.tsx`)
+- **Canvas Texture Reuse**: `SpriteText` prototypes are cached in `spriteTextCache` keyed by `${label}_${theme}`. Cloned sprites share the underlying WebGL canvas texture, eliminating repeated canvas 2D rasterization and GPU texture allocations during 3D constellation animation.
+
+### 4. Reverse Chunk Log Reader (`mcp-server/gitLock.js`)
+- **Tail Buffer Chunking**: For `.topology/topology.log` files larger than 64KB, `readRecentLogs` opens a file descriptor and reads only the trailing 128KB chunk from disk backwards, parsing JSON lines until the limit is satisfied. Tail operations remain instantaneous regardless of log size.
+
+### 5. Background Supervisor Zombie Detection (`mcp-server/serverSupervisor.js`)
+- **Process Liveness Verification**: Inspects recorded PIDs with `process.kill(pid, 0)`. If a recorded supervisor PID is dead or orphaned, stale lock and metadata files are automatically cleaned up on startup.
+- **CLI Commands**:
+  - `node scripts/topology-log.mjs health`: Audits bridge HTTP latency, supervisor PID, log byte size, and active locks.
+  - `node scripts/topology-log.mjs stop-server`: Gracefully terminates background Vite processes across Windows and POSIX.
+
+### 6. In-App Telemetry HUD (`DiagnosticsModal.tsx`)
+- **Elevated Borderless Glass HUD**:
+  - **Live Render FPS**: Measured via `requestAnimationFrame` delta over 60 frames.
+  - **Bridge Latency Ping**: Dynamically measures roundtrip HTTP latency to `/api/topology/status`.
+  - **Active Leases Table**: Real-time TTL countdown with 1-click force release.
+  - **Recent Log Tail**: Displays last 25 JSONL events with role and status badges.
+  - **1-Click Diagnostics Export**: Generates `topology-diagnostics-report.json` bundle containing browser specs, graph metrics, coherence diagnostics, active locks, and bridge status.
+  - **Hotkeys**: `Ctrl+Shift+D` or Header "Telemetry" pill.
+
 
 
 

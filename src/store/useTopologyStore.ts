@@ -145,7 +145,8 @@ interface TopologyStore {
 
   // CRUD Actions
   addNode: (partial?: Partial<TopologyNode>, options?: { autoConnect?: boolean; targetId?: string }) => TopologyNode;
-  updateNode: (id: string, updates: Partial<TopologyNode>) => void;
+  updateNode: (id: string, updates: Partial<TopologyNode>, options?: { skipSnapshot?: boolean }) => void;
+  recordSnapshot: () => void;
   deleteNode: (id: string) => void;
   connectNodes: (sourceId: string, targetId: string, type?: EdgeType, label?: string, condition?: 'true' | 'false' | 'always') => { success: boolean; error?: string };
   removeEdge: (edgeId: string) => void;
@@ -998,8 +999,10 @@ export const useTopologyStore = create<TopologyStore>((set, get) => {
       }
     },
 
-    updateNode: (id, updates) => {
-      saveSnapshot();
+    updateNode: (id, updates, options) => {
+      if (!options?.skipSnapshot) {
+        saveSnapshot();
+      }
       set({
         nodes: get().nodes.map(node => {
           if (node.id === id) {
@@ -1013,6 +1016,10 @@ export const useTopologyStore = create<TopologyStore>((set, get) => {
           return node;
         }),
       });
+    },
+
+    recordSnapshot: () => {
+      saveSnapshot();
     },
 
     deleteNode: (id) => {

@@ -38,6 +38,87 @@ export function isBridgeAlive(timeoutMs = 800) {
 }
 
 /**
+ * Check if a process with the given PID is currently active.
+ */
+export function isProcessAlive(pid) {
+  if (!pid || typeof pid !== 'number') return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err.code === 'EPERM'; // EPERM means process exists but we lack signal permissions
+  }
+}
+
+/**
+ * Inspect server runtime status, PID liveness, and HTTP latency.
+ */
+export async function getServerStatus() {
+  const supervisorMetaFile = path.join(TOPOLOGY_PROJECT_ROOT, '.topology', 'server-supervisor.json');
+  let meta = null;
+  if (fs.existsSync(supervisorMetaFile)) {
+    try {
+      meta = JSON.parse(fs.readFileSync(supervisorMetaFile, 'utf-8'));
+    } catch {
+      // ignore
+    }
+  }
+
+  const startPing = Date.now();
+  const alive = await isBridgeAlive(800);
+  const latencyMs = alive ? (Date.now() - startPing) : null;
+  const isPidAlive = meta?.pid ? isProcessAlive(meta.pid) : null;
+
+  return {
+    running: alive,
+    port: BRIDGE_PORT,
+    host: BRIDGE_HOST,
+    url: `http://${BRIDGE_HOST}:${BRIDGE_PORT}`,
+    latencyMs,
+    pid: meta?.pid || null,
+    pidAlive: isPidAlive,
+    startedAt: meta?.startedAt || null,
+    uptimeSeconds: meta?.startedAt ? Math.round((Date.now() - meta.startedAt) / 1000) : null,
+  };
+}
+
+/**
+ * Gracefully stop background server process.
+ */
+export function stopServer() {
+  const supervisorMetaFile = path.join(TOPOLOGY_PROJECT_ROOT, '.topology', 'server-supervisor.json');
+  let killed = false;
+  let pid = null;
+
+  if (fs.existsSync(supervisorMetaFile)) {
+    try {
+      const meta = JSON.parse(fs.readFileSync(supervisorMetaFile, 'utf-8'));
+      pid = meta.pid;
+      if (pid && isProcessAlive(pid)) {
+        if (process.platform === 'win32') {
+          try {
+            spawn('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore' });
+            killed = true;
+          } catch {
+            process.kill(pid, 'SIGKILL');
+            killed = true;
+          }
+        } else {
+          process.kill(pid, 'SIGTERM');
+          killed = true;
+        }
+      }
+      try { fs.unlinkSync(supervisorMetaFile); } catch { /* ignore */ }
+    } catch {
+      // ignore
+    }
+  }
+
+  releaseLock('topology_server_supervisor', 'force');
+  return { ok: true, stopped: killed, pid };
+}
+
+/**
  * Ensure the Vite dev server is running.
  * If offline, acquires an advisory lock (to prevent stampeding by concurrent agents)
  * and spawns the server as a background detached process.
@@ -45,8 +126,24 @@ export function isBridgeAlive(timeoutMs = 800) {
 export async function ensureBridgeRunning(options = {}) {
   const { maxWaitMs = 10000, forceRestart = false } = options;
 
+  // 0. Zombie process cleanup: if server is dead, clear stale supervisor metadata and lock
+  const supervisorMetaFile = path.join(TOPOLOGY_PROJECT_ROOT, '.topology', 'server-supervisor.json');
+  const isAlive = await isBridgeAlive(600);
+  if (!isAlive && fs.existsSync(supervisorMetaFile)) {
+    try {
+      const meta = JSON.parse(fs.readFileSync(supervisorMetaFile, 'utf-8'));
+      if (meta?.pid && !isProcessAlive(meta.pid)) {
+        logDebug(`Cleaning up stale supervisor record for dead PID ${meta.pid}...`);
+        try { fs.unlinkSync(supervisorMetaFile); } catch { /* ignore */ }
+        releaseLock('topology_server_supervisor', 'force');
+      }
+    } catch {
+      try { fs.unlinkSync(supervisorMetaFile); } catch { /* ignore */ }
+    }
+  }
+
   // 1. If already alive and not forcing restart, return immediately
-  if (!forceRestart && (await isBridgeAlive(600))) {
+  if (!forceRestart && isAlive) {
     return {
       running: true,
       wasAlreadyRunning: true,

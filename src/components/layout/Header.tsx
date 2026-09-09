@@ -18,7 +18,8 @@ import {
   Compass,
   Users,
   Radio,
-  Brain
+  Brain,
+  Activity
 } from 'lucide-react';
 import { useTopologyStore } from '../../store/useTopologyStore';
 import { exportToObsidianCanvas, exportToMermaid, exportToUniversalAgentManifest } from '../../utils/obsidianCanvas';
@@ -33,6 +34,7 @@ interface HeaderProps {
   onOpenLibrary: () => void;
   onOpenAgentSync: () => void;
   onOpenSharedContext?: () => void;
+  onOpenDiagnostics?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({ 
@@ -41,7 +43,8 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenTutorial, 
   onOpenLibrary,
   onOpenAgentSync,
-  onOpenSharedContext
+  onOpenSharedContext,
+  onOpenDiagnostics
 }) => {
   const viewMode = useTopologyStore(s => s.viewMode);
   const setViewMode = useTopologyStore(s => s.setViewMode);
@@ -128,6 +131,18 @@ export const Header: React.FC<HeaderProps> = ({
     e.target.value = '';
     setIsExportOpen(false);
   };
+
+  // Global shortcut for Diagnostics & Telemetry HUD: Ctrl+Shift+D
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'd' || e.key === 'D')) {
+        e.preventDefault();
+        onOpenDiagnostics?.();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onOpenDiagnostics]);
 
   return (
     <header className="h-13 px-2.5 sm:px-4 flex items-center justify-between bg-white/90 dark:bg-[#10121a]/90 backdrop-blur-2xl select-none z-30 border-none transition-colors duration-200 shadow-xs">
@@ -286,6 +301,17 @@ export const Header: React.FC<HeaderProps> = ({
           </span>
           <Radio size={13} className={liveSyncStatus.connected ? 'text-emerald-500' : 'opacity-60'} />
           <span className="font-semibold hidden lg:inline">Live Agent</span>
+        </button>
+
+        {/* System Diagnostics & Telemetry HUD Button */}
+        <button
+          type="button"
+          onClick={onOpenDiagnostics}
+          title="Open System Diagnostics & Telemetry HUD (Ctrl+Shift+D)"
+          className="h-8 px-2 sm:px-2.5 rounded-xl text-xs font-medium bg-blue-500/10 hover:bg-blue-500/15 text-blue-700 dark:text-blue-300 flex items-center gap-1 sm:gap-1.5 transition-all border-none cursor-pointer shadow-xs shrink-0"
+        >
+          <Activity size={13} className="text-blue-600 dark:text-blue-400" />
+          <span className="font-semibold hidden lg:inline">Telemetry</span>
         </button>
 
         {/* Topology Hub & Archetype Library Button with Coverage Badge */}

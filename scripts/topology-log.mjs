@@ -11,8 +11,10 @@
  *   node scripts/topology-log.mjs sync [--push]
  */
 
-import { acquireLock, releaseLock, appendLog, readRecentLogs, getActiveLocks, syncGitLog } from '../mcp-server/gitLock.js';
-import { ensureBridgeRunning } from '../mcp-server/serverSupervisor.js';
+import fs from 'fs';
+import path from 'path';
+import { acquireLock, releaseLock, appendLog, readRecentLogs, getActiveLocks, syncGitLog, LOG_FILE, TOPOLOGY_DIR } from '../mcp-server/gitLock.js';
+import { ensureBridgeRunning, getServerStatus, stopServer } from '../mcp-server/serverSupervisor.js';
 
 function parseArgs(args) {
   const result = { _: [] };
@@ -155,19 +157,91 @@ async function main() {
       break;
     }
 
+    case 'stop-server': {
+      console.log('🛑 Terminating background Topology visualizer server...');
+      const stopRes = stopServer();
+      if (stopRes.stopped) {
+        console.log(`✅ Server stopped (PID ${stopRes.pid}).`);
+      } else {
+        console.log('ℹ️ Server was not running or has already exited.');
+      }
+      break;
+    }
+
+    case 'health': {
+      console.log('\n=============================================');
+      console.log('       Topology Agent Diagnostics & Health    ');
+      console.log('=============================================\n');
+
+      // 1. Server / Bridge Status
+      const status = await getServerStatus();
+      if (status.running) {
+        console.log(`📡 Bridge Server:     ONLINE (http://${status.host}:${status.port})`);
+        console.log(`   - HTTP Ping:       ${status.latencyMs}ms`);
+        console.log(`   - Supervisor PID:  ${status.pid || 'External / Manual'} ${status.pidAlive ? '(Active)' : ''}`);
+        if (status.uptimeSeconds) console.log(`   - Uptime:          ${status.uptimeSeconds}s`);
+      } else {
+        console.log(`📡 Bridge Server:     OFFLINE (Fail-open mode active)`);
+        console.log(`   - Port 5173 is currently closed or busy.`);
+      }
+
+      // 2. Storage & Logs Status
+      const logExists = fs.existsSync(LOG_FILE);
+      const logSize = logExists ? fs.statSync(LOG_FILE).size : 0;
+      const recentLogs = readRecentLogs(5);
+      console.log(`\n📁 Append-Only Log:   ${logExists ? 'PRESENT' : 'NOT INITIALIZED'}`);
+      console.log(`   - Path:            ${LOG_FILE}`);
+      console.log(`   - Size:            ${(logSize / 1024).toFixed(2)} KB`);
+      console.log(`   - Recent Events:   ${recentLogs.length} sampled`);
+
+      // 3. Advisory Locks Status
+      const locks = getActiveLocks();
+      console.log(`\n🔒 Advisory Locks:    ${locks.length} active lease(s)`);
+      if (locks.length > 0) {
+        locks.forEach(l => {
+          console.log(`   - "${l.resourceKey}": Held by "${l.agentId}" (TTL remaining: ${l.remainingSeconds}s, PID: ${l.pid})`);
+        });
+      }
+
+      console.log('\n✅ System health audit complete.\n');
+      break;
+    }
+
+    case 'clean-locks': {
+      let cleaned = 0;
+      if (fs.existsSync(TOPOLOGY_DIR)) {
+        const files = fs.readdirSync(TOPOLOGY_DIR);
+        for (const file of files) {
+          if (file.endsWith('.lock')) {
+            try {
+              fs.unlinkSync(path.join(TOPOLOGY_DIR, file));
+              cleaned++;
+            } catch {
+              // ignore
+            }
+          }
+        }
+      }
+      console.log(`🧹 Purged ${cleaned} advisory lock file(s).`);
+      break;
+    }
+
     case 'help':
     default: {
       console.log(`
 Topology Agent CLI - Git-Backed Event Log & Atomic Resource Locking
 
 Usage:
-  node scripts/topology-log.mjs server   Ensure visualizer dev server is running on http://localhost:5173
-  node scripts/topology-log.mjs log      --action <action> [--nodeId <id>] [--agent <name>] [--thought <text>] [--status <status>]
-  node scripts/topology-log.mjs lock     --nodeId <id> [--agent <name>] [--ttl <seconds>]
-  node scripts/topology-log.mjs unlock   --nodeId <id> [--agent <name>]
-  node scripts/topology-log.mjs locks    List all currently active leases
-  node scripts/topology-log.mjs tail     [--limit <N>] Display recent event lines
-  node scripts/topology-log.mjs sync     [--push] [--remote <origin>] [--branch <main>] Pull/push log with Git
+  node scripts/topology-log.mjs health          Audit server health, log sizes, locks, and connectivity
+  node scripts/topology-log.mjs server          Ensure visualizer dev server is running on http://localhost:5173
+  node scripts/topology-log.mjs stop-server     Gracefully stop visualizer server process
+  node scripts/topology-log.mjs log             --action <action> [--nodeId <id>] [--agent <name>] [--thought <text>] [--status <status>]
+  node scripts/topology-log.mjs lock            --nodeId <id> [--agent <name>] [--ttl <seconds>]
+  node scripts/topology-log.mjs unlock          --nodeId <id> [--agent <name>]
+  node scripts/topology-log.mjs locks           List all currently active leases
+  node scripts/topology-log.mjs clean-locks     Purge all lock files
+  node scripts/topology-log.mjs tail            [--limit <N>] Display recent event lines
+  node scripts/topology-log.mjs sync            [--push] [--remote <origin>] [--branch <main>] Pull/push log with Git
       `);
       break;
     }

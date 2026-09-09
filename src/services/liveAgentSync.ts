@@ -248,7 +248,8 @@ export function useLiveAgentSync() {
             },
           };
 
-          updateNode(nodeId, updatedNodeUpdates);
+          const isStatusChanged = status && status !== targetNode.status;
+          updateNode(nodeId, updatedNodeUpdates, { skipSnapshot: !isStatusChanged });
           setLiveSyncHeartbeat(Date.now());
 
           const store = useTopologyStore.getState();
@@ -320,7 +321,7 @@ export function useLiveAgentSync() {
                   lastUpdated: Date.now(),
                 },
               },
-            });
+            }, { skipSnapshot: true });
           }
         } catch {
           // ignore

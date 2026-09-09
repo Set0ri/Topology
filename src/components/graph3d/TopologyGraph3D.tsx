@@ -57,6 +57,28 @@ function getCachedHaloMaterial(colorHex: string, isLight: boolean): THREE.MeshBa
   return mat;
 }
 
+// Cached SpriteText templates sharing underlying CanvasTextures across nodes
+const spriteTextCache = new Map<string, any>();
+function getCachedSpriteText(label: string, isLight: boolean): any {
+  const key = `${label || 'Node'}_${isLight ? 'lt' : 'dk'}`;
+  let proto = spriteTextCache.get(key);
+  if (!proto) {
+    proto = new SpriteText(label || 'Node');
+    proto.color = isLight ? '#202124' : '#cdd6f4';
+    proto.textHeight = 4.0;
+    proto.position.set(0, -9.5, 0);
+    proto.backgroundColor = isLight ? 'rgba(255, 255, 255, 0.92)' : 'rgba(24, 24, 37, 0.85)';
+    proto.padding = [3, 6];
+    proto.borderRadius = 6;
+    if (spriteTextCache.size > 250) {
+      const firstKey = spriteTextCache.keys().next().value;
+      if (firstKey) spriteTextCache.delete(firstKey);
+    }
+    spriteTextCache.set(key, proto);
+  }
+  return proto.clone();
+}
+
 export const TopologyGraph3D: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   const fgRef = useRef<ForceGraphMethods>();
@@ -275,14 +297,8 @@ export const TopologyGraph3D: React.FC = () => {
       group.add(halo);
     }
 
-    // Floating Text Sprite Label
-    const sprite = new SpriteText(node.label || 'Node');
-    sprite.color = isLight ? '#202124' : '#cdd6f4';
-    sprite.textHeight = 4.0;
-    sprite.position.set(0, -9.5, 0);
-    sprite.backgroundColor = isLight ? 'rgba(255, 255, 255, 0.92)' : 'rgba(24, 24, 37, 0.85)';
-    sprite.padding = [3, 6];
-    sprite.borderRadius = 6;
+    // Floating Text Sprite Label (pooled from texture cache)
+    const sprite = getCachedSpriteText(node.label || 'Node', isLight);
     group.add(sprite);
 
     return group;

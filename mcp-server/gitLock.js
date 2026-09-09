@@ -206,17 +206,54 @@ export function readRecentLogs(limit = 100) {
   if (!fs.existsSync(LOG_FILE)) return [];
 
   try {
-    const content = fs.readFileSync(LOG_FILE, 'utf-8');
-    const lines = content.trim().split('\n').filter(Boolean);
-    const parsed = [];
-    for (let i = lines.length - 1; i >= 0 && parsed.length < limit; i--) {
-      try {
-        parsed.unshift(JSON.parse(lines[i]));
-      } catch {
-        // ignore malformed line
+    const stat = fs.statSync(LOG_FILE);
+    if (stat.size === 0) return [];
+
+    // For files under 64KB, simple synchronous read is fastest
+    if (stat.size <= 65536) {
+      const content = fs.readFileSync(LOG_FILE, 'utf-8');
+      const lines = content.trim().split('\n').filter(Boolean);
+      const parsed = [];
+      for (let i = lines.length - 1; i >= 0 && parsed.length < limit; i--) {
+        try {
+          parsed.unshift(JSON.parse(lines[i]));
+        } catch {
+          // ignore malformed line
+        }
+      }
+      return parsed;
+    }
+
+    // For larger files: read trailing chunk from tail to avoid memory overhead
+    let fd = null;
+    try {
+      fd = fs.openSync(LOG_FILE, 'r');
+      const chunkSize = Math.min(131072, stat.size); // 128KB chunk
+      const buffer = Buffer.alloc(chunkSize);
+      const position = stat.size - chunkSize;
+      fs.readSync(fd, buffer, 0, chunkSize, position);
+
+      const chunkStr = buffer.toString('utf-8');
+      const lines = chunkStr.trim().split('\n').filter(Boolean);
+      // Discard potentially partial first line if read started mid-file
+      if (position > 0 && lines.length > 1) {
+        lines.shift();
+      }
+
+      const parsed = [];
+      for (let i = lines.length - 1; i >= 0 && parsed.length < limit; i--) {
+        try {
+          parsed.unshift(JSON.parse(lines[i]));
+        } catch {
+          // ignore malformed line
+        }
+      }
+      return parsed;
+    } finally {
+      if (fd !== null) {
+        try { fs.closeSync(fd); } catch { /* ignore */ }
       }
     }
-    return parsed;
   } catch {
     return [];
   }

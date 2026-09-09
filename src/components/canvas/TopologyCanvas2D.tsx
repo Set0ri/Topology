@@ -52,6 +52,7 @@ const TopologyCanvasInner: React.FC = () => {
   const setLayoutDirection = useTopologyStore(s => s.setLayoutDirection);
   const toggleLayoutDirection = useTopologyStore(s => s.toggleLayoutDirection);
   const updateNode = useTopologyStore(s => s.updateNode);
+  const recordSnapshot = useTopologyStore(s => s.recordSnapshot);
   const connectNodes = useTopologyStore(s => s.connectNodes);
   const selectNode = useTopologyStore(s => s.selectNode);
   const deleteNode = useTopologyStore(s => s.deleteNode);
@@ -156,7 +157,7 @@ const TopologyCanvasInner: React.FC = () => {
       if (hasPos && rafRef.current === null) {
         rafRef.current = requestAnimationFrame(() => {
           pendingChangesRef.current.forEach((pos: { x: number; y: number }, id: string) => {
-            updateNode(id, { position: pos });
+            updateNode(id, { position: pos }, { skipSnapshot: true });
           });
           pendingChangesRef.current.clear();
           rafRef.current = null;
@@ -262,6 +263,7 @@ const TopologyCanvasInner: React.FC = () => {
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         onNodesChange={handleNodesChange}
+        onNodeDragStop={() => recordSnapshot()}
         onConnect={handleConnect}
         onPaneClick={handlePaneClick}
         onDoubleClick={handlePaneDoubleClick}

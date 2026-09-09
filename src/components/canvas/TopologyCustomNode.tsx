@@ -77,10 +77,8 @@ const TopologyCustomNodeComponent: React.FC<NodeProps> = ({ id, data, selected }
   const lod = useTopologyStore(s => s.lod);
   const layoutDirection = useTopologyStore(s => s.layoutDirection);
   const isVertical = layoutDirection === 'TB';
-  const hoveredNodeId = useTopologyStore(s => s.hoveredNodeId);
-  const selectedNodeIds = useTopologyStore(s => s.selectedNodeIds);
-  const nodes = useTopologyStore(s => s.nodes);
-  const edges = useTopologyStore(s => s.edges);
+  const isSelfHovered = useTopologyStore(s => s.hoveredNodeId === id);
+  const isMultiSelected = useTopologyStore(s => s.selectedNodeIds.includes(id));
   const setHoveredNode = useTopologyStore(s => s.setHoveredNode);
   const selectNode = useTopologyStore(s => s.selectNode);
   const toggleNodeSelection = useTopologyStore(s => s.toggleNodeSelection);
@@ -92,13 +90,12 @@ const TopologyCustomNodeComponent: React.FC<NodeProps> = ({ id, data, selected }
   const approveNode = useTopologyStore(s => s.approveNode);
   const rejectNode = useTopologyStore(s => s.rejectNode);
   const evaluateDecisionBranch = useTopologyStore(s => s.evaluateDecisionBranch);
-  const sharedContext = useTopologyStore(s => s.sharedContext);
   const setViewingArtifact = useTopologyStore(s => s.setViewingArtifact);
+  const nodeLock = useTopologyStore(s => s.activeLocks[id] || s.activeLocks['node:' + id]);
+  const nodeContextCount = useTopologyStore(s => Object.keys(s.sharedContext?.nodes?.[id] || {}).length);
 
   const [copiedPrompt, setCopiedPrompt] = useState(false);
 
-  const isSelfHovered = hoveredNodeId === id;
-  const isMultiSelected = selectedNodeIds.includes(id);
   const isElevated = isHovered || isSelfHovered || selected || isMultiSelected;
 
   const { 
@@ -129,12 +126,8 @@ const TopologyCustomNodeComponent: React.FC<NodeProps> = ({ id, data, selected }
   const artifactPayloads = node.context?.artifactPayloads || {};
   const artifactList = Object.keys(artifactPayloads);
   const assignedAgents = node.context?.assignedAgents || [];
-  const nodeContextMap = sharedContext?.nodes ? (sharedContext.nodes[node.id] || {}) : {};
-  const nodeContextCount = Object.keys(nodeContextMap).length;
   const collaborationMode = node.context?.collaborationMode || (assignedAgents.length > 1 ? 'parallel_subtasks' : 'solo');
   const isMultiAgent = assignedAgents.length > 1;
-  const activeLocks = useTopologyStore(s => s.activeLocks);
-  const nodeLock = activeLocks[node.id];
 
   const handleCardClick = (e: React.MouseEvent) => {
     if (e.shiftKey || e.ctrlKey || e.metaKey) {
@@ -185,6 +178,7 @@ const TopologyCustomNodeComponent: React.FC<NodeProps> = ({ id, data, selected }
 
   const handleCopyPrompt = (e: React.MouseEvent) => {
     e.stopPropagation();
+    const { nodes, edges } = useTopologyStore.getState();
     const promptText = generateAgentPromptPayload(node, nodes, edges);
     navigator.clipboard.writeText(promptText);
     setCopiedPrompt(true);
@@ -802,15 +796,67 @@ export const TopologyCustomNode = React.memo(
     const prevNode = prev.data as unknown as TopologyNode;
     const nextNode = next.data as unknown as TopologyNode;
 
+    if (prevNode === nextNode) return true;
+
     if (prevNode.label !== nextNode.label) return false;
+    if (prevNode.description !== nextNode.description) return false;
     if (prevNode.status !== nextNode.status) return false;
     if (prevNode.priority !== nextNode.priority) return false;
     if (prevNode.type !== nextNode.type) return false;
-    if (prevNode.context?.activeThought !== nextNode.context?.activeThought) return false;
-    if (prevNode.context?.collaborationMode !== nextNode.context?.collaborationMode) return false;
-    if ((prevNode.context?.assignedAgents?.length || 0) !== (nextNode.context?.assignedAgents?.length || 0)) return false;
-    if (prevNode.context?.approvalStatus !== nextNode.context?.approvalStatus) return false;
-    if (prevNode.context?.telemetry?.state !== nextNode.context?.telemetry?.state) return false;
+    if (prevNode.updatedAt !== nextNode.updatedAt) return false;
+
+    // Compare tags
+    const prevTags = prevNode.tags || [];
+    const nextTags = nextNode.tags || [];
+    if (prevTags.length !== nextTags.length) return false;
+    for (let i = 0; i < prevTags.length; i++) {
+      if (prevTags[i] !== nextTags[i]) return false;
+    }
+
+    // Context & Telemetry comparison
+    const prevCtx = prevNode.context;
+    const nextCtx = nextNode.context;
+    if (prevCtx !== nextCtx) {
+      if (prevCtx?.role !== nextCtx?.role) return false;
+      if (prevCtx?.activeThought !== nextCtx?.activeThought) return false;
+      if (prevCtx?.collaborationMode !== nextCtx?.collaborationMode) return false;
+      if (prevCtx?.approvalStatus !== nextCtx?.approvalStatus) return false;
+      if (prevCtx?.requiresHumanApproval !== nextCtx?.requiresHumanApproval) return false;
+      if (prevCtx?.stoppingCondition?.expression !== nextCtx?.stoppingCondition?.expression) return false;
+
+      // Telemetry comparison
+      const prevTelem = prevCtx?.telemetry;
+      const nextTelem = nextCtx?.telemetry;
+      if (prevTelem !== nextTelem) {
+        if (prevTelem?.state !== nextTelem?.state) return false;
+        if (prevTelem?.liveThought !== nextTelem?.liveThought) return false;
+        if (prevTelem?.activeTool !== nextTelem?.activeTool) return false;
+        if (prevTelem?.lastUpdated !== nextTelem?.lastUpdated) return false;
+      }
+
+      // Assigned agents
+      const prevAgents = prevCtx?.assignedAgents || [];
+      const nextAgents = nextCtx?.assignedAgents || [];
+      if (prevAgents.length !== nextAgents.length) return false;
+      for (let i = 0; i < prevAgents.length; i++) {
+        if (prevAgents[i].id !== nextAgents[i].id || prevAgents[i].status !== nextAgents[i].status) return false;
+      }
+
+      // Artifact payloads
+      const prevArts = Object.keys(prevCtx?.artifactPayloads || {});
+      const nextArts = Object.keys(nextCtx?.artifactPayloads || {});
+      if (prevArts.length !== nextArts.length) return false;
+
+      // Output artifacts list
+      const prevOutputs = prevCtx?.outputArtifacts || [];
+      const nextOutputs = nextCtx?.outputArtifacts || [];
+      if (prevOutputs.length !== nextOutputs.length) return false;
+
+      // Subgraph
+      const prevSub = prevNode.subgraph?.nodes?.length || 0;
+      const nextSub = nextNode.subgraph?.nodes?.length || 0;
+      if (prevSub !== nextSub) return false;
+    }
 
     return true;
   }
