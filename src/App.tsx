@@ -16,7 +16,6 @@ import { ArtifactViewerModal } from './components/modals/ArtifactViewerModal';
 import { DiagnosticsModal } from './components/modals/DiagnosticsModal';
 import { useLiveAgentSync } from './services/liveAgentSync';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
-import { PlanWorkspaceTabs } from './components/layout/PlanWorkspaceTabs';
 import { MultiPlanFleetModal } from './components/modals/MultiPlanFleetModal';
 import { Sparkles } from 'lucide-react';
 
@@ -60,7 +59,7 @@ export const App: React.FC = () => {
 
   return (
     <div className={`w-screen h-screen flex flex-col overflow-hidden select-none ${!isLight ? 'dark' : ''} ${bgThemeClass} transition-colors duration-200`}>
-      {/* Top Navigation Bar */}
+      {/* Top Navigation Bar with Integrated Fleet & Plan Workspace Tabs */}
       <Header 
         onOpenGenerator={() => setIsGeneratorOpen(true)} 
         onOpenCoherence={() => setIsCoherenceOpen(true)}
@@ -69,12 +68,8 @@ export const App: React.FC = () => {
         onOpenAgentSync={() => setIsAgentSyncOpen(true)}
         onOpenSharedContext={() => setIsSharedContextOpen(true)}
         onOpenDiagnostics={() => setIsDiagnosticsOpen(true)}
+        onOpenFleetModal={() => setFleetModalOpen(true)}
       />
-
-      {/* Workspace Plan Tabs Ribbon (Multi-Agent Concurrent Workflows) */}
-      <div className="bg-slate-100/70 dark:bg-[#13151f]/80 backdrop-blur-xl border-none shadow-xs z-20">
-        <PlanWorkspaceTabs onOpenFleetModal={() => setFleetModalOpen(true)} />
-      </div>
 
       {/* Main Viewport wrapped in ErrorBoundary */}
       <ErrorBoundary>

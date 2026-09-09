@@ -26,6 +26,7 @@ import { exportToObsidianCanvas, exportToMermaid, exportToUniversalAgentManifest
 import { generateHeadlessCliRunner } from '../../utils/agentHandoff';
 import { SAMPLE_TOPOLOGIES } from '../../data/sampleTopologies';
 import { ThemePalettePicker } from './ThemePalettePicker';
+import { PlanWorkspaceTabs } from './PlanWorkspaceTabs';
 
 interface HeaderProps {
   onOpenGenerator: () => void;
@@ -35,6 +36,7 @@ interface HeaderProps {
   onOpenAgentSync: () => void;
   onOpenSharedContext?: () => void;
   onOpenDiagnostics?: () => void;
+  onOpenFleetModal?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({ 
@@ -44,7 +46,8 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenLibrary,
   onOpenAgentSync,
   onOpenSharedContext,
-  onOpenDiagnostics
+  onOpenDiagnostics,
+  onOpenFleetModal
 }) => {
   const viewMode = useTopologyStore(s => s.viewMode);
   const setViewMode = useTopologyStore(s => s.setViewMode);
@@ -145,10 +148,11 @@ export const Header: React.FC<HeaderProps> = ({
   }, [onOpenDiagnostics]);
 
   return (
-    <header className="h-13 px-2.5 sm:px-4 flex items-center justify-between bg-white/90 dark:bg-[#10121a]/90 backdrop-blur-2xl select-none z-30 border-none transition-colors duration-200 shadow-xs">
-      {/* Left: Clean Brand Logo & Compact 2D/3D Switcher */}
-      <div className="flex items-center gap-2 sm:gap-4">
-        <div className="flex items-center gap-1.5 sm:gap-2">
+    <header className="h-13 sm:h-14 px-2.5 sm:px-4 flex items-center justify-between bg-white/90 dark:bg-[#10121a]/90 backdrop-blur-2xl select-none z-30 border-none transition-colors duration-200 shadow-xs gap-2 sm:gap-4">
+      {/* Left: Clean Brand Logo, Compact 2D/3D Switcher, and Integrated Plan Workspace Tabs */}
+      <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
+        {/* Brand Logo */}
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           <div className="w-7 h-7 rounded-xl bg-gradient-to-br from-[#1a73e8] to-[#4285f4] flex items-center justify-center shadow-xs shrink-0">
             <GitFork size={15} className="text-white rotate-90" />
           </div>
@@ -184,16 +188,23 @@ export const Header: React.FC<HeaderProps> = ({
             <span>3D</span>
           </button>
         </div>
+
+        <div className="w-px h-5 bg-black/10 dark:bg-white/10 shrink-0 hidden md:block" />
+
+        {/* Integrated Multi-Agent Workspace Plan Tabs Ribbon */}
+        <div className="min-w-0 flex-1 flex items-center">
+          <PlanWorkspaceTabs onOpenFleetModal={onOpenFleetModal} />
+        </div>
       </div>
 
-      {/* Center: Essential Synthesizer & Coherence Diagnostic */}
-      <div className="flex items-center gap-1.5 sm:gap-2">
+      {/* Right: Health, AI Plan, Swarm Observability, Telemetry & Export Actions */}
+      <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
         {/* Coherence Health Pill (Tablet & Desktop) */}
         <button
           type="button"
           onClick={onOpenCoherence}
           title="Open Graph Coherence Diagnostic"
-          className={`hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-medium transition-all duration-150 border-none cursor-pointer shadow-xs ${
+          className={`hidden xl:flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-medium transition-all duration-150 border-none cursor-pointer shadow-xs ${
             coherenceReport.score >= 90
               ? 'bg-[#e6f4ea] text-[#137333] dark:bg-cat-mocha-green/15 dark:text-cat-mocha-green'
               : coherenceReport.score >= 70
@@ -214,10 +225,6 @@ export const Header: React.FC<HeaderProps> = ({
           <Sparkles size={13} />
           <span className="hidden sm:inline">AI Plan</span>
         </button>
-      </div>
-
-      {/* Right: Actions, History, Guide & Compact Theme Picker */}
-      <div className="flex items-center gap-1 sm:gap-1.5">
         {/* Undo / Redo (Hidden on mobile phones to conserve space) */}
         <div className="hidden sm:flex items-center gap-0.5 mr-0.5 sm:mr-1 bg-black/5 dark:bg-white/5 p-0.5 rounded-xl">
           <button

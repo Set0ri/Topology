@@ -17,9 +17,10 @@ import { PlanSummary } from '../../types/topology';
 
 interface PlanWorkspaceTabsProps {
   onOpenFleetModal?: () => void;
+  className?: string;
 }
 
-export const PlanWorkspaceTabs: React.FC<PlanWorkspaceTabsProps> = ({ onOpenFleetModal }) => {
+export const PlanWorkspaceTabs: React.FC<PlanWorkspaceTabsProps> = ({ onOpenFleetModal, className }) => {
   const plans = useTopologyStore(s => s.plans);
   const activePlanId = useTopologyStore(s => s.activePlanId);
   const plansList = useTopologyStore(s => s.plansList);
@@ -79,13 +80,13 @@ export const PlanWorkspaceTabs: React.FC<PlanWorkspaceTabsProps> = ({ onOpenFlee
   ];
 
   return (
-    <div className="flex items-center gap-1.5 px-3 py-1.5 overflow-x-auto no-scrollbar select-none z-20 transition-colors duration-200">
+    <div className={`flex items-center gap-1.5 overflow-x-auto no-scrollbar select-none z-20 py-0.5 ${className || ''}`}>
       {/* Fleet Overview Matrix Trigger */}
       <button
         type="button"
         onClick={onOpenFleetModal}
         title="Open Multi-Plan Fleet Matrix (View all concurrent agent DAGs)"
-        className={`h-7 px-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all border-none cursor-pointer shadow-elevated-xs shrink-0 ${
+        className={`h-7.5 px-2.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all border-none cursor-pointer shadow-elevated-xs shrink-0 ${
           isDark
             ? 'bg-cat-mocha-surface0/90 text-cat-mocha-text hover:bg-cat-mocha-surface1'
             : 'bg-white/95 text-slate-700 hover:bg-slate-50'
@@ -302,7 +303,7 @@ export const PlanWorkspaceTabs: React.FC<PlanWorkspaceTabsProps> = ({ onOpenFlee
             type="button"
             onClick={handleStartCreate}
             title="Create a new concurrent agent workflow plan"
-            className={`h-7 px-2 rounded-xl text-xs font-medium flex items-center gap-1 transition-all border-none cursor-pointer shrink-0 ${
+            className={`h-7.5 px-2.5 rounded-xl text-xs font-medium flex items-center gap-1 transition-all border-none cursor-pointer shrink-0 ${
               isDark
                 ? 'bg-cat-mocha-surface0/50 hover:bg-cat-mocha-surface0 text-cat-mocha-subtext0 hover:text-white'
                 : 'bg-black/5 hover:bg-black/10 text-slate-600 hover:text-slate-900'
