@@ -935,4 +935,108 @@ External AI agents operating via CLI or MCP may not pre-populate `node.context.a
 - **Ambient Glow Shadow**: Active worker pill drop shadow incorporates glowing ambient colored halos (`0 0 12px 1px ${agent.color}80, 0 3px 8px -2px rgba(0,0,0,0.25)`).
 - **Interactive Live Telemetry Popover**: Hovering the satellite node reveals the worker's active thought stream, tool invocation, role, and model engine in an elevated glass popover.
 
+---
+
+## 29. Multi-Agent Fleet Orchestration & Multi-Plan Workspace Tabs
+
+When multiple autonomous agents (e.g. Architect, Frontend, DevOps, Quality Engineer) work concurrently, each agent can own, initialize, and execute a distinct workflow DAG (`planId`) on the exact same Topology server instance without cross-contamination.
+
+```mermaid
+flowchart TD
+    subgraph Multi_Agent_Ecosystem ["Concurrent Agent Fleet"]
+        AgentA["Agent A (Architect)\nPlan: 'backend-refactor'"]
+        AgentB["Agent B (Frontend)\nPlan: 'frontend-ui'"]
+        AgentC["Agent C (DevOps)\nPlan: 'devops-infra'"]
+    end
+
+    subgraph Storage_Layer ["Server & Disk State (.topology/)"]
+        PlansRegistry[".topology/plans.json\n{ [planId]: TopologyPlanRecord }"]
+        ActivePlanPointer[".topology/active_plan.json\n{ activePlanId: 'backend-refactor' }"]
+        LegacyPlan[".topology/plan.json\n(Backwards-Compatible Mirror)"]
+        AppendLog[".topology/topology.log\n(Append-Only Multi-Plan Audit Trail)"]
+    end
+
+    subgraph Bridge_API ["Topology Bridge Server (:5173/api/topology)"]
+        GetPlans["GET /plans (Fleet Registry & Summaries)"]
+        PostPlan["POST /plan (Create / Ingest Plan with planId)"]
+        PostNode["POST /node (Auto-resolves owning plan via nodeId)"]
+        PostThought["POST /thought (Streams thought with planId beacon)"]
+        SwitchActive["POST /active-plan (Atomic Canvas Switch)"]
+        SSEStream["GET /events (Multi-Plan Realtime SSE Stream)"]
+    end
+
+    subgraph Frontend_Store ["Zustand Multi-Plan State Store"]
+        ZPlans["plans: Record<string, TopologyPlanRecord>"]
+        ZActiveId["activePlanId: string"]
+        ZSummaries["plansList: PlanSummary[]"]
+        ZCanvas["Canvas Nodes & Edges (Bound to activePlanId)"]
+    end
+
+    subgraph Visual_Surfaces ["Elevated Borderless UI"]
+        TabsRibbon["PlanWorkspaceTabs (Header Floating Glass Bar)"]
+        Beacon["Live Thought Pulsing Beacon (Background Plan Activity)"]
+        FleetModal["MultiPlanFleetModal (Multi-Agent Grid View & Switcher)"]
+        Canvas2D["2D Precision ReactFlow Canvas (Active Plan DAG)"]
+    end
+
+    AgentA -->|MCP / REST: topology_create_plan| PostPlan
+    AgentB -->|MCP / REST: topology_emit_thought| PostThought
+    AgentC -->|MCP / CLI: node scripts/topology-log.mjs| PostNode
+
+    PostPlan --> PlansRegistry
+    PostPlan --> LegacyPlan
+    PostNode --> PlansRegistry
+    PostThought --> PlansRegistry
+    SwitchActive --> ActivePlanPointer
+
+    PlansRegistry --> SSEStream
+    ActivePlanPointer --> SSEStream
+
+    SSEStream -->|SSE: plans_list_updated, active_plan_changed, thought_stream| Frontend_Store
+    Frontend_Store --> TabsRibbon
+    Frontend_Store --> FleetModal
+    Frontend_Store --> Canvas2D
+    TabsRibbon -->|User Click: switchPlan(id)| SwitchActive
+    FleetModal -->|User Click: switchPlan(id)| SwitchActive
+```
+
+### 1. Plan Registry Invariant & Fail-Open Storage
+- **Multi-Plan Persistence (`.topology/plans.json`)**: Contains a hash map keyed by `planId` where each entry is a full `TopologyPlanRecord` (`id`, `title`, `description`, `agentId`, `agentRole`, `nodes`, `edges`, `updatedAt`).
+- **Active Plan Pointer (`.topology/active_plan.json`)**: Contains `{ activePlanId: string, updatedAt: number }`.
+- **Legacy Single-Plan Mirror (`.topology/plan.json`)**: Automatically synchronized to mirror whichever plan is currently active, guaranteeing 100% backward compatibility with legacy tooling.
+- **Node Collision Safeguard (`findPlanByNodeId`)**: When external tools emit `topology_update_node` or `topology_emit_thought` without explicitly providing `planId`, the bridge searches registered plans for the target `nodeId`. If found, it routes the update to that plan; otherwise it defaults to `activePlanId`.
+
+### 2. Multi-Plan API Endpoints
+| Endpoint | Method | Purpose |
+| :--- | :--- | :--- |
+| `/api/topology/plans` | `GET` | Returns list of all registered plans, summaries, node completion counts, and active thoughts. |
+| `/api/topology/plan` | `GET` | Returns active plan (or specific plan via `?planId=<id>`). |
+| `/api/topology/plan` | `POST` | Upserts a plan with given `planId`, `agentId`, `agentRole`, and graph DAG. |
+| `/api/topology/active-plan` | `POST` | Atomically switches the active plan displayed on the canvas. |
+| `/api/topology/plan` | `DELETE` | Removes a completed plan from registry (safeguards `default` plan). |
+
+### 3. Reactive SSE Multi-Plan Telemetry
+The bridge broadcasts events over `GET /api/topology/events`:
+- `plans_list_updated`: Sent whenever a plan is added, modified, or removed. Contains full list of plan summaries.
+- `active_plan_changed`: Broadcasts `{ activePlanId: string }`.
+- `plan_updated`: Broadcasts `{ planId, plan }`.
+- `node_updated`: Broadcasts `{ planId, nodeId, status, thought, agentId, ... }`.
+- `thought_stream`: Broadcasts `{ planId, nodeId, thought, agentId, ... }`.
+
+### 4. Background Plan Thought Beacons (`PlanWorkspaceTabs.tsx`)
+When the user is viewing Plan A while Agent B streams reasoning or completes tasks on background Plan B:
+- Plan B's workspace tab displays a glowing animated **Live Beacon** with breathing motion (`scale: [1, 1.35, 1]`, `opacity: [0.7, 1, 0.7]`).
+- Hovering or clicking the tab reveals the background agent's current thought and progress metrics without interrupting the active canvas.
+- Single-click activates and mounts Plan B onto the ReactFlow canvas, preserving pan/zoom positioning and node layout.
+
+### 5. Fleet Matrix Modal (`MultiPlanFleetModal.tsx`)
+- Pressing the **Fleet Matrix** launcher button in the workspace tabs bar opens an elevated backdrop-blurred modal.
+- Provides a bird's-eye view across all agents running in the ecosystem:
+  - Agent avatar, name, and role.
+  - Plan title, description, and task completion percentage progress bar.
+  - Active thought bubble with real-time streaming badge.
+  - One-click "Switch to Canvas" button.
+  - Instant search filter by agent role, name, or plan title.
+
+
 

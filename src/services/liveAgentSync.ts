@@ -162,6 +162,32 @@ export function useLiveAgentSync() {
         setLiveSyncHeartbeat(Date.now());
       });
 
+      // 0a. Plans List Registry Updated
+      es.addEventListener('plans_list_updated', (e: MessageEvent) => {
+        if (!isSubscribed) return;
+        try {
+          const data = JSON.parse(e.data);
+          if (data && Array.isArray(data.plans)) {
+            useTopologyStore.getState().setPlansList(data.plans, data.activePlanId);
+          }
+        } catch (err) {
+          console.error('[Topology LiveSync] Failed to process plans_list_updated:', err);
+        }
+      });
+
+      // 0b. Active Plan Changed
+      es.addEventListener('active_plan_changed', (e: MessageEvent) => {
+        if (!isSubscribed) return;
+        try {
+          const data = JSON.parse(e.data);
+          if (data && data.activePlanId) {
+            useTopologyStore.getState().switchPlan(data.activePlanId);
+          }
+        } catch (err) {
+          console.error('[Topology LiveSync] Failed to process active_plan_changed:', err);
+        }
+      });
+
       // 1. Full Plan Update from External Agent
       es.addEventListener('plan_updated', (e: MessageEvent) => {
         if (!isSubscribed) return;
@@ -169,38 +195,42 @@ export function useLiveAgentSync() {
           const plan = JSON.parse(e.data);
           const rawNodes: TopologyNode[] = plan.nodes || [];
           const rawEdges: TopologyEdge[] = plan.edges || [];
-          if (rawNodes.length === 0) return;
+          const store = useTopologyStore.getState();
+          const targetPlanId = plan.id || plan.planId || store.activePlanId;
 
-          const currentDir = useTopologyStore.getState().layoutDirection || 'LR';
-          const positions = calculateDagreLayout(rawNodes, rawEdges, currentDir);
-          const alignedNodes = rawNodes.map(n => ({
-            ...n,
-            position: positions[n.id] || n.position,
-          }));
-
-          loadTopologyDirect(alignedNodes, rawEdges);
+          // Upsert into multi-plan registry
+          store.upsertPlan(plan, targetPlanId === store.activePlanId);
           setLiveSyncHeartbeat(Date.now());
 
-          const store = useTopologyStore.getState();
+          if (rawNodes.length > 0 && targetPlanId === store.activePlanId) {
+            const currentDir = store.layoutDirection || 'LR';
+            const positions = calculateDagreLayout(rawNodes, rawEdges, currentDir);
+            const alignedNodes = rawNodes.map(n => ({
+              ...n,
+              position: positions[n.id] || n.position,
+            }));
+            loadTopologyDirect(alignedNodes, rawEdges);
+          }
+
           if (store.liveSyncStatus.audioChimesEnabled) {
             chimeSynthesizer.play('start');
           }
 
-          showDesktopNotification(`🗺️ Antigravity Plan Synced`, {
-            body: `Loaded "${plan.title || 'Dynamic Plan'}" with ${rawNodes.length} tasks and ${rawEdges.length} causal edges.`,
-            tag: 'topology-plan-sync',
+          showDesktopNotification(`🗺️ Agent Plan Synced: "${plan.title || 'Dynamic Plan'}"`, {
+            body: `Agent ${plan.agentRole || 'Worker'} pushed ${rawNodes.length} tasks and ${rawEdges.length} edges.`,
+            tag: `topology-plan-${targetPlanId}`,
           });
 
           addActivityEvent({
-            agentId: 'antigravity-live',
-            agentName: 'Antigravity Agent',
-            agentRole: 'Orchestrator',
-            agentColor: '#1a73e8',
-            agentAvatar: '🤖',
+            agentId: plan.agentId || 'antigravity-live',
+            agentName: plan.agentName || plan.agentRole || 'Antigravity Agent',
+            agentRole: plan.agentRole || 'Orchestrator',
+            agentColor: plan.agentColor || '#1a73e8',
+            agentAvatar: plan.agentAvatar || '🤖',
             nodeId: rawNodes[0]?.id || 'root',
             nodeLabel: plan.title || 'Plan Synced',
             actionType: 'claimed_node',
-            detail: `External Antigravity Agent pushed workflow plan "${plan.title || 'Dynamic Plan'}".`,
+            detail: `Agent ${plan.agentRole || 'Worker'} initialized plan "${plan.title || 'Dynamic Plan'}".`,
           });
         } catch (err) {
           console.error('[Topology LiveSync] Failed to process plan_updated:', err);
@@ -212,10 +242,28 @@ export function useLiveAgentSync() {
         if (!isSubscribed) return;
         try {
           const update = JSON.parse(e.data);
-          const { nodeId, status, thought, toolName, terminalLog, outputArtifacts } = update;
+          const { planId, nodeId, status, thought, toolName, terminalLog, outputArtifacts } = update;
           if (!nodeId) return;
 
-          const currentNodes = useTopologyStore.getState().nodes;
+          const store = useTopologyStore.getState();
+          const targetPlanId = planId || store.activePlanId;
+
+          // If targeted plan is in background, update its stored state
+          if (targetPlanId) {
+            store.updatePlanNodeState(targetPlanId, nodeId, {
+              status,
+              context: {
+                outputArtifacts,
+                telemetry: {
+                  liveThought: thought,
+                  activeTool: toolName,
+                  lastUpdated: Date.now(),
+                } as any,
+              } as any,
+            });
+          }
+
+          const currentNodes = store.nodes;
           const targetNode = currentNodes.find(n => n.id === nodeId);
           if (!targetNode) return;
 
@@ -251,8 +299,6 @@ export function useLiveAgentSync() {
           const isStatusChanged = status && status !== targetNode.status;
           updateNode(nodeId, updatedNodeUpdates, { skipSnapshot: !isStatusChanged });
           setLiveSyncHeartbeat(Date.now());
-
-          const store = useTopologyStore.getState();
 
           if (isNewlyCompleted) {
             if (store.liveSyncStatus.audioChimesEnabled) chimeSynthesizer.play('complete');
@@ -300,8 +346,23 @@ export function useLiveAgentSync() {
       es.addEventListener('thought_stream', (e: MessageEvent) => {
         if (!isSubscribed) return;
         try {
-          const { nodeId, thought, toolName } = JSON.parse(e.data);
-          const target = useTopologyStore.getState().nodes.find(n => n.id === nodeId);
+          const { planId, nodeId, thought, toolName } = JSON.parse(e.data);
+          const store = useTopologyStore.getState();
+          const targetPlanId = planId || store.activePlanId;
+
+          if (targetPlanId) {
+            store.updatePlanNodeState(targetPlanId, nodeId, {
+              context: {
+                telemetry: {
+                  liveThought: thought,
+                  activeTool: toolName,
+                  lastUpdated: Date.now(),
+                } as any
+              } as any
+            });
+          }
+
+          const target = store.nodes.find(n => n.id === nodeId);
           if (target) {
             const currentTelemetry = target.context.telemetry || {
               state: 'idle' as const,

@@ -14,6 +14,8 @@ export function topologyBridgePlugin() {
   const clients = new Map();
   const topologyDir = path.resolve(process.cwd(), '.topology');
   const planFilePath = path.join(topologyDir, 'plan.json');
+  const plansFilePath = path.join(topologyDir, 'plans.json');
+  const activePlanFilePath = path.join(topologyDir, 'active_plan.json');
   const approvalsFilePath = path.join(topologyDir, 'approvals.json');
   const contextFilePath = path.join(topologyDir, 'shared_context.json');
 
@@ -46,6 +48,98 @@ export function topologyBridgePlugin() {
     } catch (err) {
       console.warn(`[Topology Bridge] Failed to write to ${filePath}:`, err);
     }
+  };
+
+  const loadAllPlans = () => {
+    let plans = readJsonFile(plansFilePath, null);
+    if (!plans || typeof plans !== 'object') {
+      plans = {};
+      const singlePlan = readJsonFile(planFilePath);
+      if (singlePlan && Array.isArray(singlePlan.nodes) && singlePlan.nodes.length > 0) {
+        const defaultId = singlePlan.id || 'default';
+        plans[defaultId] = {
+          id: defaultId,
+          title: singlePlan.title || 'Dynamic Plan',
+          description: singlePlan.description || '',
+          agentId: singlePlan.agentId || 'agent-primary',
+          agentName: singlePlan.agentName || 'Lead Orchestrator',
+          agentRole: singlePlan.agentRole || 'Orchestrator',
+          agentAvatar: singlePlan.agentAvatar || '🤖',
+          agentColor: singlePlan.agentColor || '#1a73e8',
+          nodes: singlePlan.nodes || [],
+          edges: singlePlan.edges || [],
+          createdAt: singlePlan.createdAt || Date.now(),
+          updatedAt: singlePlan.updatedAt || Date.now(),
+          status: 'active',
+          source: singlePlan.source || 'antigravity_agent',
+        };
+      }
+    }
+    return plans;
+  };
+
+  const getActivePlanId = (plans) => {
+    const activeMeta = readJsonFile(activePlanFilePath, null);
+    if (activeMeta && activeMeta.activePlanId && plans[activeMeta.activePlanId]) {
+      return activeMeta.activePlanId;
+    }
+    const keys = Object.keys(plans);
+    return keys.length > 0 ? keys[0] : 'default';
+  };
+
+  const saveAllPlans = (plans, activePlanId) => {
+    writeJsonFile(plansFilePath, plans);
+    if (activePlanId) {
+      writeJsonFile(activePlanFilePath, { activePlanId, updatedAt: Date.now() });
+      if (plans[activePlanId]) {
+        // Sync with legacy single plan file for 100% backward compatibility
+        writeJsonFile(planFilePath, plans[activePlanId]);
+      }
+    }
+  };
+
+  const getPlanSummaries = (plans) => {
+    return Object.values(plans).map((plan) => {
+      const nodes = Array.isArray(plan.nodes) ? plan.nodes : [];
+      const completed = nodes.filter((n) => n.status === 'completed').length;
+      const inProgress = nodes.filter((n) => n.status === 'in_progress').length;
+      const progressPercent = nodes.length > 0 ? Math.round((completed / nodes.length) * 100) : 0;
+      const hasActiveWork = Boolean(
+        inProgress > 0 ||
+        nodes.some((n) => n.context?.telemetry?.state === 'thinking' || n.context?.telemetry?.state === 'executing_tool')
+      );
+      const latestThought = plan.latestThought || (nodes.find((n) => n.context?.telemetry?.liveThought)?.context?.telemetry?.liveThought);
+      const activeTool = plan.activeTool || (nodes.find((n) => n.context?.telemetry?.activeTool)?.context?.telemetry?.activeTool);
+
+      return {
+        id: plan.id,
+        title: plan.title,
+        description: plan.description || '',
+        agentId: plan.agentId || 'agent',
+        agentName: plan.agentName || 'Agent',
+        agentRole: plan.agentRole || 'Worker',
+        agentAvatar: plan.agentAvatar || '🤖',
+        agentColor: plan.agentColor || '#1a73e8',
+        nodeCount: nodes.length,
+        completedCount: completed,
+        inProgressCount: inProgress,
+        progressPercent,
+        updatedAt: plan.updatedAt || Date.now(),
+        status: plan.status || 'active',
+        hasActiveWork,
+        latestThought,
+        activeTool,
+      };
+    });
+  };
+
+  const findPlanByNodeId = (plans, nodeId) => {
+    for (const [planId, plan] of Object.entries(plans)) {
+      if (Array.isArray(plan.nodes) && plan.nodes.some((n) => n.id === nodeId)) {
+        return planId;
+      }
+    }
+    return null;
   };
 
   const broadcast = (eventType, data) => {
@@ -193,10 +287,16 @@ export function topologyBridgePlugin() {
           res.write(`event: connected\ndata: ${JSON.stringify({ clientId, timestamp: Date.now() })}\n\n`);
           clients.set(clientId, res);
 
-          // If a stored plan exists, deliver it immediately to the new client
-          const existingPlan = readJsonFile(planFilePath);
-          if (existingPlan) {
-            res.write(`event: plan_updated\ndata: ${JSON.stringify(existingPlan)}\n\n`);
+          // If stored plans exist, deliver the plans list and active plan immediately
+          const allPlans = loadAllPlans();
+          const activePlanId = getActivePlanId(allPlans);
+          const summaries = getPlanSummaries(allPlans);
+
+          res.write(`event: plans_list_updated\ndata: ${JSON.stringify({ activePlanId, plans: summaries })}\n\n`);
+
+          const currentPlan = allPlans[activePlanId] || readJsonFile(planFilePath);
+          if (currentPlan) {
+            res.write(`event: plan_updated\ndata: ${JSON.stringify(currentPlan)}\n\n`);
           }
 
           // Deliver active resource locks immediately
@@ -222,6 +322,8 @@ export function topologyBridgePlugin() {
 
         // 2. Health & Status Check: /api/topology/status
         if (pathname === '/api/topology/status' && req.method === 'GET') {
+          const allPlans = loadAllPlans();
+          const activePlanId = getActivePlanId(allPlans);
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({
             ok: true,
@@ -230,6 +332,8 @@ export function topologyBridgePlugin() {
             timestamp: Date.now(),
             pid: process.pid,
             memory: process.memoryUsage(),
+            totalPlansCount: Object.keys(allPlans).length,
+            activePlanId,
           }));
           return;
         }
@@ -238,7 +342,9 @@ export function topologyBridgePlugin() {
         if (pathname === '/api/topology/diagnostics' && req.method === 'GET') {
           const activeLocks = getActiveLocks();
           const logStats = fs.existsSync(LOG_FILE) ? { exists: true, sizeBytes: fs.statSync(LOG_FILE).size } : { exists: false, sizeBytes: 0 };
-          const planData = readJsonFile(planFilePath, { nodes: [], edges: [] });
+          const allPlans = loadAllPlans();
+          const activePlanId = getActivePlanId(allPlans);
+          const currentPlan = allPlans[activePlanId] || readJsonFile(planFilePath, { nodes: [], edges: [] });
 
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({
@@ -255,41 +361,183 @@ export function topologyBridgePlugin() {
               log: logStats,
               activeLocksCount: activeLocks.length,
               activeLocks,
-              planNodesCount: (planData.nodes || []).length,
-              planEdgesCount: (planData.edges || []).length,
+              totalPlansCount: Object.keys(allPlans).length,
+              activePlanId,
+              planNodesCount: (currentPlan.nodes || []).length,
+              planEdgesCount: (currentPlan.edges || []).length,
             },
           }));
           return;
         }
 
-        // 3. Get Current Plan: /api/topology/plan
-        if (pathname === '/api/topology/plan' && req.method === 'GET') {
-          const plan = readJsonFile(planFilePath, { nodes: [], edges: [] });
+        // 3. Get All Plans: /api/topology/plans
+        if (pathname === '/api/topology/plans' && req.method === 'GET') {
+          const allPlans = loadAllPlans();
+          const activePlanId = getActivePlanId(allPlans);
+          const summaries = getPlanSummaries(allPlans);
+
           res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify(plan));
+          res.end(JSON.stringify({
+            success: true,
+            activePlanId,
+            plans: summaries,
+            allPlans,
+          }));
           return;
         }
 
-        // 4. Create / Replace Plan: /api/topology/plan
-        if (pathname === '/api/topology/plan' && req.method === 'POST') {
+        // 3b. Switch Active Plan: /api/topology/active-plan
+        if (pathname === '/api/topology/active-plan' && req.method === 'POST') {
           try {
             const data = await parseJsonBody(req);
-            const planPayload = {
-              title: data.title || 'Antigravity Dynamic Workflow',
-              description: data.description || '',
-              nodes: data.nodes || [],
-              edges: data.edges || [],
-              updatedAt: Date.now(),
-              source: data.source || 'antigravity_agent',
-            };
+            const { planId } = data;
+            if (!planId) {
+              sendError(res, 400, TOPOLOGY_ERROR_CODES.INVALID_SCHEMA, 'planId is required');
+              return;
+            }
+            const allPlans = loadAllPlans();
+            if (!allPlans[planId]) {
+              sendError(res, 404, TOPOLOGY_ERROR_CODES.NOT_FOUND, `Plan "${planId}" does not exist`);
+              return;
+            }
 
-            writeJsonFile(planFilePath, planPayload);
-            broadcast('plan_updated', planPayload);
+            saveAllPlans(allPlans, planId);
+            const summaries = getPlanSummaries(allPlans);
+
+            broadcast('active_plan_changed', { activePlanId: planId });
+            broadcast('plan_updated', allPlans[planId]);
+            broadcast('plans_list_updated', { activePlanId: planId, plans: summaries });
 
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({
               success: true,
-              message: `Plan ingested successfully with ${planPayload.nodes.length} nodes and ${planPayload.edges.length} edges.`,
+              activePlanId: planId,
+              plan: allPlans[planId],
+            }));
+          } catch (err) {
+            sendError(res, 400, TOPOLOGY_ERROR_CODES.INVALID_SCHEMA, err.message);
+          }
+          return;
+        }
+
+        // 3c. Delete Plan: /api/topology/plan (DELETE)
+        if (pathname === '/api/topology/plan' && req.method === 'DELETE') {
+          const searchParams = new URL(url, 'http://localhost').searchParams;
+          const planId = searchParams.get('planId');
+          if (!planId) {
+            sendError(res, 400, TOPOLOGY_ERROR_CODES.INVALID_SCHEMA, 'planId is required');
+            return;
+          }
+
+          const allPlans = loadAllPlans();
+          delete allPlans[planId];
+
+          let activePlanId = getActivePlanId(allPlans);
+          if (activePlanId === planId) {
+            const remaining = Object.keys(allPlans);
+            activePlanId = remaining.length > 0 ? remaining[0] : 'default';
+            if (!allPlans[activePlanId]) {
+              allPlans[activePlanId] = {
+                id: activePlanId,
+                title: 'Default Plan',
+                description: '',
+                agentRole: 'Orchestrator',
+                nodes: [],
+                edges: [],
+                createdAt: Date.now(),
+                updatedAt: Date.now(),
+                status: 'active',
+              };
+            }
+          }
+
+          saveAllPlans(allPlans, activePlanId);
+          const summaries = getPlanSummaries(allPlans);
+
+          broadcast('plans_list_updated', { activePlanId, plans: summaries });
+          broadcast('active_plan_changed', { activePlanId });
+          if (allPlans[activePlanId]) {
+            broadcast('plan_updated', allPlans[activePlanId]);
+          }
+
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true, deletedPlanId: planId, activePlanId }));
+          return;
+        }
+
+        // 3d. Get Specific or Active Plan: /api/topology/plan (GET)
+        if (pathname === '/api/topology/plan' && req.method === 'GET') {
+          const searchParams = new URL(url, 'http://localhost').searchParams;
+          const reqPlanId = searchParams.get('planId');
+          const allPlans = loadAllPlans();
+          const activePlanId = getActivePlanId(allPlans);
+          const targetPlanId = reqPlanId || activePlanId;
+          const targetPlan = allPlans[targetPlanId] || readJsonFile(planFilePath, { nodes: [], edges: [] });
+
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(targetPlan));
+          return;
+        }
+
+        // 4. Create / Replace Plan: /api/topology/plan (POST)
+        if (pathname === '/api/topology/plan' && req.method === 'POST') {
+          try {
+            const data = await parseJsonBody(req);
+            const allPlans = loadAllPlans();
+            const currentActiveId = getActivePlanId(allPlans);
+
+            // Derive planId from data or generate slug
+            const planId = data.planId || data.id || (
+              data.title
+                ? data.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')
+                : null
+            ) || currentActiveId || `plan-${Date.now()}`;
+
+            const existingPlan = allPlans[planId] || {};
+            const planPayload = {
+              id: planId,
+              title: data.title || existingPlan.title || 'Dynamic Plan',
+              description: data.description !== undefined ? data.description : (existingPlan.description || ''),
+              agentId: data.agentId || existingPlan.agentId || (data.author ? `agent-${data.author}` : 'agent-primary'),
+              agentName: data.agentName || existingPlan.agentName || data.agentRole || 'Agent',
+              agentRole: data.agentRole || existingPlan.agentRole || 'Worker',
+              agentAvatar: data.agentAvatar || existingPlan.agentAvatar || (
+                (data.agentRole || '').toLowerCase().includes('architect') ? '🧠' :
+                (data.agentRole || '').toLowerCase().includes('frontend') ? '🎨' :
+                (data.agentRole || '').toLowerCase().includes('devops') ? '⚡' :
+                (data.agentRole || '').toLowerCase().includes('security') ? '🛡️' : '🤖'
+              ),
+              agentColor: data.agentColor || existingPlan.agentColor || '#1a73e8',
+              nodes: data.nodes || existingPlan.nodes || [],
+              edges: data.edges || existingPlan.edges || [],
+              createdAt: existingPlan.createdAt || Date.now(),
+              updatedAt: Date.now(),
+              status: data.status || existingPlan.status || 'active',
+              source: data.source || existingPlan.source || 'antigravity_agent',
+              latestThought: data.latestThought || existingPlan.latestThought,
+            };
+
+            allPlans[planId] = planPayload;
+
+            // By default, make new or updated plan active unless specified makeActive === false
+            const shouldMakeActive = data.makeActive !== false;
+            const newActiveId = shouldMakeActive ? planId : currentActiveId;
+
+            saveAllPlans(allPlans, newActiveId);
+            const summaries = getPlanSummaries(allPlans);
+
+            broadcast('plan_updated', planPayload);
+            broadcast('plans_list_updated', { activePlanId: newActiveId, plans: summaries });
+            if (newActiveId !== currentActiveId) {
+              broadcast('active_plan_changed', { activePlanId: newActiveId });
+            }
+
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+              success: true,
+              message: `Plan "${planPayload.title}" (${planId}) ingested successfully with ${planPayload.nodes.length} nodes and ${planPayload.edges.length} edges.`,
+              planId,
+              activePlanId: newActiveId,
               nodeCount: planPayload.nodes.length,
               edgeCount: planPayload.edges.length,
             }));
@@ -299,29 +547,37 @@ export function topologyBridgePlugin() {
           return;
         }
 
-        // 5. Update Node Status & Telemetry: /api/topology/node
+        // 5. Update Node Status & Telemetry: /api/topology/node (POST)
         if (pathname === '/api/topology/node' && req.method === 'POST') {
           try {
             const data = await parseJsonBody(req);
-            const { nodeId, status, thought, toolName, terminalLog, outputArtifacts, progress, assignedAgent } = data;
+            const { planId: requestedPlanId, nodeId, status, thought, toolName, terminalLog, outputArtifacts, progress, assignedAgent } = data;
 
             if (!nodeId) {
               sendError(res, 400, TOPOLOGY_ERROR_CODES.INVALID_SCHEMA, 'nodeId is required');
               return;
             }
 
-            // Update in stored plan if available
-            const plan = readJsonFile(planFilePath);
-            if (plan && Array.isArray(plan.nodes)) {
-              const nodeIdx = plan.nodes.findIndex((n) => n.id === nodeId);
+            const allPlans = loadAllPlans();
+            const activePlanId = getActivePlanId(allPlans);
+            const targetPlanId = requestedPlanId || findPlanByNodeId(allPlans, nodeId) || activePlanId;
+
+            if (allPlans[targetPlanId] && Array.isArray(allPlans[targetPlanId].nodes)) {
+              const nodeIdx = allPlans[targetPlanId].nodes.findIndex((n) => n.id === nodeId);
               if (nodeIdx !== -1) {
-                const targetNode = plan.nodes[nodeIdx];
+                const targetNode = allPlans[targetPlanId].nodes[nodeIdx];
                 if (status) targetNode.status = status;
                 targetNode.updatedAt = Date.now();
                 targetNode.context = targetNode.context || {};
                 targetNode.context.telemetry = targetNode.context.telemetry || {};
-                if (thought) targetNode.context.telemetry.liveThought = thought;
-                if (toolName) targetNode.context.telemetry.activeTool = toolName;
+                if (thought) {
+                  targetNode.context.telemetry.liveThought = thought;
+                  allPlans[targetPlanId].latestThought = thought;
+                }
+                if (toolName) {
+                  targetNode.context.telemetry.activeTool = toolName;
+                  allPlans[targetPlanId].activeTool = toolName;
+                }
                 if (terminalLog) {
                   targetNode.context.telemetry.terminalLogs = [
                     ...(targetNode.context.telemetry.terminalLogs || []),
@@ -331,11 +587,13 @@ export function topologyBridgePlugin() {
                 if (outputArtifacts) {
                   targetNode.context.outputArtifacts = outputArtifacts;
                 }
-                writeJsonFile(planFilePath, plan);
+                allPlans[targetPlanId].updatedAt = Date.now();
+                saveAllPlans(allPlans, activePlanId);
               }
             }
 
             const updatePayload = {
+              planId: targetPlanId,
               nodeId,
               status,
               thought,
@@ -348,24 +606,37 @@ export function topologyBridgePlugin() {
             };
 
             broadcast('node_updated', updatePayload);
+            broadcast('plans_list_updated', { activePlanId, plans: getPlanSummaries(allPlans) });
 
             res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: true, updatedNodeId: nodeId }));
+            res.end(JSON.stringify({ success: true, planId: targetPlanId, updatedNodeId: nodeId }));
           } catch (err) {
             sendError(res, 400, TOPOLOGY_ERROR_CODES.INVALID_SCHEMA, err.message || 'Invalid JSON body');
           }
           return;
         }
 
-        // 6. Stream Live Thought: /api/topology/thought
+        // 6. Stream Live Thought: /api/topology/thought (POST)
         if (pathname === '/api/topology/thought' && req.method === 'POST') {
           try {
             const data = await parseJsonBody(req);
-            const { nodeId, thought, toolName } = data;
-            broadcast('thought_stream', { nodeId, thought, toolName, timestamp: Date.now() });
+            const { planId: requestedPlanId, nodeId, thought, toolName } = data;
+            const allPlans = loadAllPlans();
+            const activePlanId = getActivePlanId(allPlans);
+            const targetPlanId = requestedPlanId || (nodeId ? findPlanByNodeId(allPlans, nodeId) : null) || activePlanId;
+
+            if (allPlans[targetPlanId]) {
+              allPlans[targetPlanId].latestThought = thought;
+              if (toolName) allPlans[targetPlanId].activeTool = toolName;
+              allPlans[targetPlanId].updatedAt = Date.now();
+              saveAllPlans(allPlans, activePlanId);
+            }
+
+            broadcast('thought_stream', { planId: targetPlanId, nodeId, thought, toolName, timestamp: Date.now() });
+            broadcast('plans_list_updated', { activePlanId, plans: getPlanSummaries(allPlans) });
 
             res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: true }));
+            res.end(JSON.stringify({ success: true, planId: targetPlanId }));
           } catch (err) {
             sendError(res, 400, TOPOLOGY_ERROR_CODES.INVALID_SCHEMA, err.message);
           }

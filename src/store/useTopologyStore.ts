@@ -24,7 +24,9 @@ import {
   SharedContextRepository,
   NodeLock,
   TopologyLogEntry,
-  GitSyncStatus
+  GitSyncStatus,
+  TopologyPlanRecord,
+  PlanSummary
 } from '../types/topology';
 import { SAMPLE_TOPOLOGIES, DEFAULT_AGENT_SQUAD } from '../data/sampleTopologies';
 import { CANONICAL_ARCHETYPES, CanonicalArchetype } from '../data/topologyRegistry';
@@ -268,6 +270,20 @@ interface TopologyStore {
   recentLogEntries: TopologyLogEntry[];
   addLogEntry: (entry: TopologyLogEntry) => void;
   setRecentLogEntries: (entries: TopologyLogEntry[]) => void;
+
+  // Multi-Agent Multi-Plan State & Actions
+  plans: Record<string, TopologyPlanRecord>;
+  activePlanId: string;
+  plansList: PlanSummary[];
+  isFleetModalOpen: boolean;
+  setFleetModalOpen: (open: boolean) => void;
+  switchPlan: (planId: string) => void;
+  setPlansRegistry: (plans: Record<string, TopologyPlanRecord>, activeId?: string) => void;
+  setPlansList: (plansList: PlanSummary[], activeId?: string) => void;
+  upsertPlan: (plan: Partial<TopologyPlanRecord> & { id: string }, makeActive?: boolean) => void;
+  removePlan: (planId: string) => void;
+  createNewPlan: (title?: string, agentRole?: string) => string;
+  updatePlanNodeState: (planId: string, nodeId: string, updates: Partial<TopologyNode>) => void;
 }
 
 const defaultSample = SAMPLE_TOPOLOGIES[0];
@@ -287,6 +303,60 @@ const getInitialGraph = () => {
 };
 
 const initialGraph = getInitialGraph();
+
+export const computePlanSummaries = (plans: Record<string, TopologyPlanRecord>): PlanSummary[] => {
+  return Object.values(plans).map((plan) => {
+    const nodes = Array.isArray(plan.nodes) ? plan.nodes : [];
+    const completed = nodes.filter((n) => n.status === 'completed').length;
+    const inProgress = nodes.filter((n) => n.status === 'in_progress').length;
+    const progressPercent = nodes.length > 0 ? Math.round((completed / nodes.length) * 100) : 0;
+    const hasActiveWork = Boolean(
+      inProgress > 0 ||
+      nodes.some((n) => n.context?.telemetry?.state === 'thinking' || n.context?.telemetry?.state === 'executing_tool')
+    );
+    const latestThought = plan.latestThought || (nodes.find((n) => n.context?.telemetry?.liveThought)?.context?.telemetry?.liveThought);
+    const activeTool = plan.activeTool || (nodes.find((n) => n.context?.telemetry?.activeTool)?.context?.telemetry?.activeTool);
+
+    return {
+      id: plan.id,
+      title: plan.title,
+      description: plan.description || '',
+      agentId: plan.agentId || 'agent',
+      agentName: plan.agentName || 'Agent',
+      agentRole: plan.agentRole || 'Worker',
+      agentAvatar: plan.agentAvatar || '🤖',
+      agentColor: plan.agentColor || '#1a73e8',
+      nodeCount: nodes.length,
+      completedCount: completed,
+      inProgressCount: inProgress,
+      progressPercent,
+      updatedAt: plan.updatedAt || Date.now(),
+      status: plan.status || 'active',
+      hasActiveWork,
+      latestThought,
+      activeTool,
+    };
+  });
+};
+
+const initialDefaultPlan: TopologyPlanRecord = {
+  id: 'default',
+  title: defaultSample.name || 'Initial Architecture Plan',
+  description: defaultSample.description || 'Decomposed system architecture with causal dependencies',
+  agentId: 'agent-sage',
+  agentName: 'Sage (Lead Architect)',
+  agentRole: 'Architect',
+  agentAvatar: '🧠',
+  agentColor: '#1a73e8',
+  nodes: initialGraph.nodes,
+  edges: initialGraph.edges,
+  createdAt: Date.now(),
+  updatedAt: Date.now(),
+  status: 'active',
+};
+
+const initialPlans: Record<string, TopologyPlanRecord> = { default: initialDefaultPlan };
+const initialPlansList = computePlanSummaries(initialPlans);
 
 const getInitialUserTopologies = (): CanonicalArchetype[] => {
   if (typeof window === 'undefined') return [];
@@ -308,6 +378,10 @@ export const useTopologyStore = create<TopologyStore>((set, get) => {
 
   return {
     userTopologies: getInitialUserTopologies(),
+    plans: initialPlans,
+    activePlanId: 'default',
+    plansList: initialPlansList,
+    isFleetModalOpen: false,
     nodes: initialGraph.nodes,
     edges: initialGraph.edges,
     layoutDirection: initialGraph.layoutDirection,
@@ -2315,6 +2389,284 @@ export const useTopologyStore = create<TopologyStore>((set, get) => {
 
     setRecentLogEntries: (entries) => {
       set({ recentLogEntries: entries });
+    },
+
+    setFleetModalOpen: (open) => {
+      set({ isFleetModalOpen: open });
+    },
+
+    switchPlan: (targetPlanId) => {
+      const { plans, activePlanId, nodes, edges, layoutDirection } = get();
+      if (targetPlanId === activePlanId) return;
+
+      // Persist current canvas nodes and edges to current plan record
+      const updatedPlans = { ...plans };
+      if (activePlanId && updatedPlans[activePlanId]) {
+        updatedPlans[activePlanId] = {
+          ...updatedPlans[activePlanId],
+          nodes: JSON.parse(JSON.stringify(nodes)),
+          edges: JSON.parse(JSON.stringify(edges)),
+          updatedAt: Date.now(),
+        };
+      }
+
+      const targetPlan = updatedPlans[targetPlanId];
+      if (targetPlan) {
+        const targetNodes = targetPlan.nodes || [];
+        const targetEdges = targetPlan.edges || [];
+        const positions = calculateDagreLayout(targetNodes, targetEdges, layoutDirection);
+        const alignedNodes = targetNodes.map(n => ({
+          ...n,
+          position: positions[n.id] || n.position,
+        }));
+
+        set({
+          plans: updatedPlans,
+          activePlanId: targetPlanId,
+          nodes: alignedNodes,
+          edges: targetEdges,
+          plansList: computePlanSummaries(updatedPlans),
+          selectedNodeId: null,
+          selectedNodeIds: [],
+          hoveredNodeId: null,
+          subgraphStack: [],
+          history: [],
+          future: [],
+        });
+
+        // Notify bridge in background
+        if (typeof window !== 'undefined') {
+          fetch('/api/topology/active-plan', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ planId: targetPlanId }),
+          }).catch(() => {});
+        }
+      }
+    },
+
+    setPlansRegistry: (newPlans, activeId) => {
+      const { activePlanId, layoutDirection } = get();
+      const nextActiveId = activeId || activePlanId;
+      const targetPlan = newPlans[nextActiveId];
+
+      if (targetPlan && targetPlan.nodes && targetPlan.nodes.length > 0) {
+        const positions = calculateDagreLayout(targetPlan.nodes, targetPlan.edges, layoutDirection);
+        const alignedNodes = targetPlan.nodes.map(n => ({
+          ...n,
+          position: positions[n.id] || n.position,
+        }));
+        set({
+          plans: newPlans,
+          activePlanId: nextActiveId,
+          nodes: alignedNodes,
+          edges: targetPlan.edges,
+          plansList: computePlanSummaries(newPlans),
+        });
+      } else {
+        set({
+          plans: newPlans,
+          activePlanId: nextActiveId,
+          plansList: computePlanSummaries(newPlans),
+        });
+      }
+    },
+
+    setPlansList: (plansList, activeId) => {
+      set(s => ({
+        plansList,
+        activePlanId: activeId || s.activePlanId,
+      }));
+    },
+
+    upsertPlan: (planPartial, makeActive = false) => {
+      const { plans, activePlanId, layoutDirection } = get();
+      const planId = planPartial.id;
+      const existing = plans[planId] || {};
+
+      const mergedPlan: TopologyPlanRecord = {
+        id: planId,
+        title: planPartial.title || existing.title || 'Dynamic Plan',
+        description: planPartial.description !== undefined ? planPartial.description : (existing.description || ''),
+        agentId: planPartial.agentId || existing.agentId || 'agent-primary',
+        agentName: planPartial.agentName || existing.agentName || planPartial.agentRole || 'Agent',
+        agentRole: planPartial.agentRole || existing.agentRole || 'Worker',
+        agentAvatar: planPartial.agentAvatar || existing.agentAvatar || '🤖',
+        agentColor: planPartial.agentColor || existing.agentColor || '#1a73e8',
+        nodes: planPartial.nodes || existing.nodes || [],
+        edges: planPartial.edges || existing.edges || [],
+        createdAt: existing.createdAt || Date.now(),
+        updatedAt: Date.now(),
+        status: planPartial.status || existing.status || 'active',
+        source: planPartial.source || existing.source || 'antigravity_agent',
+        latestThought: planPartial.latestThought || existing.latestThought,
+        activeTool: planPartial.activeTool || existing.activeTool,
+      };
+
+      const updatedPlans = { ...plans, [planId]: mergedPlan };
+      const shouldActivate = makeActive || activePlanId === planId;
+
+      if (shouldActivate) {
+        const targetNodes = mergedPlan.nodes;
+        const targetEdges = mergedPlan.edges;
+        const positions = calculateDagreLayout(targetNodes, targetEdges, layoutDirection);
+        const alignedNodes = targetNodes.map(n => ({
+          ...n,
+          position: positions[n.id] || n.position,
+        }));
+
+        set({
+          plans: updatedPlans,
+          activePlanId: planId,
+          nodes: alignedNodes,
+          edges: targetEdges,
+          plansList: computePlanSummaries(updatedPlans),
+        });
+      } else {
+        set({
+          plans: updatedPlans,
+          plansList: computePlanSummaries(updatedPlans),
+        });
+      }
+    },
+
+    removePlan: (planId) => {
+      const { plans, activePlanId, layoutDirection } = get();
+      const updatedPlans = { ...plans };
+      delete updatedPlans[planId];
+
+      let nextActiveId = activePlanId;
+      if (activePlanId === planId) {
+        const remaining = Object.keys(updatedPlans);
+        nextActiveId = remaining.length > 0 ? remaining[0] : 'default';
+        if (!updatedPlans[nextActiveId]) {
+          updatedPlans[nextActiveId] = {
+            id: nextActiveId,
+            title: 'Default Plan',
+            description: '',
+            agentRole: 'Orchestrator',
+            nodes: [],
+            edges: [],
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+            status: 'active',
+          };
+        }
+      }
+
+      const nextPlan = updatedPlans[nextActiveId];
+      const positions = calculateDagreLayout(nextPlan.nodes, nextPlan.edges, layoutDirection);
+      const alignedNodes = nextPlan.nodes.map(n => ({
+        ...n,
+        position: positions[n.id] || n.position,
+      }));
+
+      set({
+        plans: updatedPlans,
+        activePlanId: nextActiveId,
+        nodes: alignedNodes,
+        edges: nextPlan.edges,
+        plansList: computePlanSummaries(updatedPlans),
+      });
+
+      if (typeof window !== 'undefined') {
+        fetch(`/api/topology/plan?planId=${encodeURIComponent(planId)}`, {
+          method: 'DELETE',
+        }).catch(() => {});
+      }
+    },
+
+    createNewPlan: (title?: string, agentRole: string = 'Architect') => {
+      const { plans } = get();
+      const planId = `plan-${Date.now()}`;
+      const planTitle = title || `Agent Plan ${Object.keys(plans).length + 1}`;
+
+      const newPlanNodes: TopologyNode[] = [
+        {
+          id: `root-${Date.now().toString(36).slice(-4)}`,
+          type: 'goal',
+          label: planTitle,
+          description: 'Primary objective and architectural boundaries',
+          status: 'ready',
+          priority: 'high',
+          tags: ['architecture', 'root'],
+          position: { x: 100, y: 150 },
+          context: {
+            role: agentRole as AgentRole,
+            promptTemplate: 'Decompose objective into actionable tasks',
+            toolsRequired: [],
+            inputArtifacts: [],
+            outputArtifacts: [],
+            validationCriteria: 'All invariants verified',
+          },
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        }
+      ];
+
+      const newPlan: TopologyPlanRecord = {
+        id: planId,
+        title: planTitle,
+        description: 'Multi-step autonomous workflow',
+        agentId: `agent-${agentRole.toLowerCase()}`,
+        agentName: `${agentRole} Agent`,
+        agentRole,
+        agentAvatar: agentRole === 'Architect' ? '🧠' : agentRole === 'SecurityAnalyst' ? '🛡️' : agentRole === 'FrontendArchitect' ? '🎨' : '🤖',
+        agentColor: '#1a73e8',
+        nodes: newPlanNodes,
+        edges: [],
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        status: 'active',
+      };
+
+      get().upsertPlan(newPlan, true);
+
+      if (typeof window !== 'undefined') {
+        fetch('/api/topology/plan', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(newPlan),
+        }).catch(() => {});
+      }
+
+      return planId;
+    },
+
+    updatePlanNodeState: (planId, nodeId, updates) => {
+      const { plans, activePlanId } = get();
+      const targetPlan = plans[planId];
+      if (!targetPlan || !Array.isArray(targetPlan.nodes)) return;
+
+      const nodeIdx = targetPlan.nodes.findIndex(n => n.id === nodeId);
+      if (nodeIdx === -1) return;
+
+      const updatedNode = { ...targetPlan.nodes[nodeIdx], ...updates, updatedAt: Date.now() };
+      const updatedNodes = [...targetPlan.nodes];
+      updatedNodes[nodeIdx] = updatedNode;
+
+      const updatedPlan: TopologyPlanRecord = {
+        ...targetPlan,
+        nodes: updatedNodes,
+        updatedAt: Date.now(),
+        latestThought: (updates.context?.telemetry?.liveThought as string) || targetPlan.latestThought,
+        activeTool: (updates.context?.telemetry?.activeTool as string) || targetPlan.activeTool,
+      };
+
+      const updatedPlans = { ...plans, [planId]: updatedPlan };
+
+      if (planId === activePlanId) {
+        set(s => ({
+          plans: updatedPlans,
+          nodes: s.nodes.map(n => n.id === nodeId ? { ...n, ...updates, updatedAt: Date.now() } : n),
+          plansList: computePlanSummaries(updatedPlans),
+        }));
+      } else {
+        set({
+          plans: updatedPlans,
+          plansList: computePlanSummaries(updatedPlans),
+        });
+      }
     },
   };
 });

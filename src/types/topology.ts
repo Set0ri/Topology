@@ -311,4 +311,42 @@ export interface GitSyncStatus {
   error?: string | null;
 }
 
+export interface TopologyPlanRecord {
+  id: string;
+  title: string;
+  description?: string;
+  agentId?: string;
+  agentName?: string;
+  agentRole?: string;
+  agentAvatar?: string;
+  agentColor?: string;
+  author?: string;
+  nodes: TopologyNode[];
+  edges: TopologyEdge[];
+  createdAt: number;
+  updatedAt: number;
+  status: 'active' | 'completed' | 'paused' | 'failed';
+  source?: string;
+  latestThought?: string;
+  activeTool?: string;
+}
 
+export interface PlanSummary {
+  id: string;
+  title: string;
+  description?: string;
+  agentId?: string;
+  agentName?: string;
+  agentRole?: string;
+  agentAvatar?: string;
+  agentColor?: string;
+  nodeCount: number;
+  completedCount: number;
+  inProgressCount: number;
+  progressPercent: number;
+  updatedAt: number;
+  status: 'active' | 'completed' | 'paused' | 'failed';
+  hasActiveWork?: boolean;
+  latestThought?: string;
+  activeTool?: string;
+}

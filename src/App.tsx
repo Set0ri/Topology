@@ -16,6 +16,8 @@ import { ArtifactViewerModal } from './components/modals/ArtifactViewerModal';
 import { DiagnosticsModal } from './components/modals/DiagnosticsModal';
 import { useLiveAgentSync } from './services/liveAgentSync';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
+import { PlanWorkspaceTabs } from './components/layout/PlanWorkspaceTabs';
+import { MultiPlanFleetModal } from './components/modals/MultiPlanFleetModal';
 import { Sparkles } from 'lucide-react';
 
 const TopologyGraph3D = lazy(() => import('./components/graph3d/TopologyGraph3D').then(m => ({ default: m.TopologyGraph3D })));
@@ -27,6 +29,8 @@ export const App: React.FC = () => {
   const viewMode = useTopologyStore(s => s.viewMode);
   const theme = useTopologyStore(s => s.theme);
   const setTheme = useTopologyStore(s => s.setTheme);
+  const isFleetModalOpen = useTopologyStore(s => s.isFleetModalOpen);
+  const setFleetModalOpen = useTopologyStore(s => s.setFleetModalOpen);
 
   const [isGeneratorOpen, setIsGeneratorOpen] = useState(false);
   const [isCoherenceOpen, setIsCoherenceOpen] = useState(false);
@@ -66,6 +70,11 @@ export const App: React.FC = () => {
         onOpenSharedContext={() => setIsSharedContextOpen(true)}
         onOpenDiagnostics={() => setIsDiagnosticsOpen(true)}
       />
+
+      {/* Workspace Plan Tabs Ribbon (Multi-Agent Concurrent Workflows) */}
+      <div className="bg-slate-100/70 dark:bg-[#13151f]/80 backdrop-blur-xl border-none shadow-xs z-20">
+        <PlanWorkspaceTabs onOpenFleetModal={() => setFleetModalOpen(true)} />
+      </div>
 
       {/* Main Viewport wrapped in ErrorBoundary */}
       <ErrorBoundary>
@@ -140,6 +149,12 @@ export const App: React.FC = () => {
       <DiagnosticsModal
         isOpen={isDiagnosticsOpen}
         onClose={() => setIsDiagnosticsOpen(false)}
+      />
+
+      {/* Multi-Agent Concurrent Fleet Matrix Modal */}
+      <MultiPlanFleetModal
+        isOpen={isFleetModalOpen}
+        onClose={() => setFleetModalOpen(false)}
       />
     </div>
   );

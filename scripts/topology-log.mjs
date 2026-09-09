@@ -13,8 +13,38 @@
 
 import fs from 'fs';
 import path from 'path';
+import http from 'http';
 import { acquireLock, releaseLock, appendLog, readRecentLogs, getActiveLocks, syncGitLog, LOG_FILE, TOPOLOGY_DIR } from '../mcp-server/gitLock.js';
 import { ensureBridgeRunning, getServerStatus, stopServer } from '../mcp-server/serverSupervisor.js';
+
+function postToBridge(endpoint, payload) {
+  return new Promise((resolve) => {
+    try {
+      const dataString = JSON.stringify(payload);
+      const req = http.request({
+        hostname: 'localhost',
+        port: 5173,
+        path: `/api/topology/${endpoint}`,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(dataString),
+        },
+        timeout: 1000,
+      }, (res) => {
+        let body = '';
+        res.on('data', chunk => { body += chunk; });
+        res.on('end', () => resolve({ ok: res.statusCode >= 200 && res.statusCode < 300 }));
+      });
+      req.on('error', () => resolve({ ok: false }));
+      req.on('timeout', () => { req.destroy(); resolve({ ok: false }); });
+      req.write(dataString);
+      req.end();
+    } catch {
+      resolve({ ok: false });
+    }
+  });
+}
 
 function parseArgs(args) {
   const result = { _: [] };
@@ -44,6 +74,7 @@ async function main() {
     case 'log': {
       const action = args.action || args._[1] || 'update';
       const nodeId = args.nodeId || args.node || null;
+      const planId = args.planId || args.plan || null;
       const agentId = args.agentId || args.agent || 'cli-agent';
       const agentRole = args.role || 'Worker';
       const thought = args.thought || null;
@@ -52,6 +83,7 @@ async function main() {
 
       const entry = await appendLog({
         action,
+        planId,
         nodeId,
         agentId,
         agentRole,
@@ -61,7 +93,33 @@ async function main() {
         timestamp: Date.now(),
       });
 
-      console.log(`✅ [Topology Log] Appended event [${entry.id}]: "${action}" ${nodeId ? `on node "${nodeId}"` : ''}`);
+      if (nodeId && (status || thought)) {
+        try {
+          const plansPath = path.join(TOPOLOGY_DIR, 'plans.json');
+          if (fs.existsSync(plansPath)) {
+            const plans = JSON.parse(fs.readFileSync(plansPath, 'utf8'));
+            const targetPlanId = planId || Object.keys(plans).find(pId => plans[pId].nodes?.some(n => n.id === nodeId)) || 'default';
+            if (plans[targetPlanId]) {
+              const targetNode = plans[targetPlanId].nodes?.find(n => n.id === nodeId);
+              if (targetNode) {
+                if (status) targetNode.status = status;
+                if (thought) targetNode.currentThought = thought;
+                targetNode.updatedAt = Date.now();
+                plans[targetPlanId].updatedAt = Date.now();
+                fs.writeFileSync(plansPath, JSON.stringify(plans, null, 2), 'utf8');
+              }
+            }
+          }
+        } catch { /* ignore */ }
+
+        if (status) {
+          await postToBridge('node', { planId, nodeId, status, thought, agentId, agentRole });
+        } else if (thought) {
+          await postToBridge('thought', { planId, nodeId, thought, agentId, agentRole });
+        }
+      }
+
+      console.log(`✅ [Topology Log] Appended event [${entry.id}]: "${action}" ${nodeId ? `on node "${nodeId}"` : ''}${planId ? ` in plan "${planId}"` : ''}`);
       break;
     }
 
@@ -226,6 +284,46 @@ async function main() {
       break;
     }
 
+    case 'plans': {
+      const plansFile = path.join(TOPOLOGY_DIR, 'plans.json');
+      const activeFile = path.join(TOPOLOGY_DIR, 'active_plan.json');
+      let plans = {};
+      let activePlanId = 'default';
+      try {
+        if (fs.existsSync(plansFile)) plans = JSON.parse(fs.readFileSync(plansFile, 'utf8'));
+        if (fs.existsSync(activeFile)) activePlanId = JSON.parse(fs.readFileSync(activeFile, 'utf8')).activePlanId;
+      } catch {}
+
+      const planList = Object.values(plans);
+      console.log(`\nActive Topology Workflow Plans (${planList.length}):`);
+      if (planList.length === 0) {
+        console.log('  (No plans currently registered.)\n');
+      } else {
+        planList.forEach(p => {
+          const isActive = p.id === activePlanId ? ' ⭐ [ACTIVE]' : '';
+          const nodes = p.nodes || [];
+          const completed = nodes.filter(n => n.status === 'completed').length;
+          console.log(`  - "${p.title}" [${p.id}]: ${p.agentRole || 'Worker'} (${completed}/${nodes.length} completed)${isActive}`);
+        });
+        console.log('');
+      }
+      break;
+    }
+
+    case 'switch':
+    case 'switch-plan': {
+      const targetPlanId = args.planId || args.plan || args._[1];
+      if (!targetPlanId) {
+        console.error('❌ Error: planId is required. E.g.: node scripts/topology-log.mjs switch backend-refactor');
+        process.exit(1);
+      }
+      const activeFile = path.join(TOPOLOGY_DIR, 'active_plan.json');
+      fs.writeFileSync(activeFile, JSON.stringify({ activePlanId: targetPlanId, updatedAt: Date.now() }, null, 2), 'utf8');
+      await postToBridge('active-plan', { activePlanId: targetPlanId });
+      console.log(`⭐ [Topology] Switched active canvas plan to "${targetPlanId}".`);
+      break;
+    }
+
     case 'help':
     default: {
       console.log(`
@@ -235,7 +333,8 @@ Usage:
   node scripts/topology-log.mjs health          Audit server health, log sizes, locks, and connectivity
   node scripts/topology-log.mjs server          Ensure visualizer dev server is running on http://localhost:5173
   node scripts/topology-log.mjs stop-server     Gracefully stop visualizer server process
-  node scripts/topology-log.mjs log             --action <action> [--nodeId <id>] [--agent <name>] [--thought <text>] [--status <status>]
+  node scripts/topology-log.mjs plans           List all active agent plans registered on the server
+  node scripts/topology-log.mjs log             --action <action> [--plan <planId>] [--nodeId <id>] [--agent <name>] [--thought <text>] [--status <status>]
   node scripts/topology-log.mjs lock            --nodeId <id> [--agent <name>] [--ttl <seconds>]
   node scripts/topology-log.mjs unlock          --nodeId <id> [--agent <name>]
   node scripts/topology-log.mjs locks           List all currently active leases

@@ -29,6 +29,8 @@ import {
 } from './serverSupervisor.js';
 const TOPOLOGY_DIR = path.resolve(process.cwd(), '.topology');
 const PLAN_FILE = path.join(TOPOLOGY_DIR, 'plan.json');
+const PLANS_FILE = path.join(TOPOLOGY_DIR, 'plans.json');
+const ACTIVE_PLAN_FILE = path.join(TOPOLOGY_DIR, 'active_plan.json');
 const APPROVALS_FILE = path.join(TOPOLOGY_DIR, 'approvals.json');
 const CONTEXT_FILE = path.join(TOPOLOGY_DIR, 'shared_context.json');
 
@@ -232,12 +234,16 @@ async function getFromBridge(endpoint, allowAutoStart = true) {
 const TOOLS = [
   {
     name: 'topology_create_plan',
-    description: 'Initialize or update the global workflow DAG in Topology. Pass the high-level goal and decomposed tasks/nodes with their causal dependency edges so the user can visualize live progress.',
+    description: 'Initialize or update a workflow DAG in Topology. Supports multiple concurrent plans running across different agents. Pass the planId, high-level goal, decomposed tasks/nodes, and causal dependency edges.',
     inputSchema: {
       type: 'object',
       properties: {
+        planId: { type: 'string', description: 'Unique identifier for this workflow plan (e.g. "backend-refactor", "frontend-ui", "security-audit"). If omitted, auto-generated from title.' },
         title: { type: 'string', description: 'Title of the goal or workflow plan' },
         description: { type: 'string', description: 'Overview summary of the plan' },
+        agentId: { type: 'string', description: 'Unique identifier of authoring agent (e.g. "agent-sage")' },
+        agentRole: { type: 'string', description: 'Specialist persona (e.g. "Architect", "FrontendDeveloper", "DevOps")' },
+        makeActive: { type: 'boolean', default: true, description: 'Whether to make this plan the currently visible plan on the visualizer canvas' },
         nodes: {
           type: 'array',
           items: {
@@ -276,10 +282,11 @@ const TOOLS = [
   },
   {
     name: 'topology_update_node',
-    description: 'Update a specific node\'s progress, status, active thought, tool execution, terminal logs, or emitted artifact payloads in the Topology UI.',
+    description: 'Update a specific node\'s progress, status, active thought, tool execution, terminal logs, or emitted artifact payloads in the Topology UI. Automatically routes to the correct plan if multiple plans are running.',
     inputSchema: {
       type: 'object',
       properties: {
+        planId: { type: 'string', description: 'Optional plan ID owning the node. If omitted, the server automatically resolves which plan owns the node.' },
         nodeId: { type: 'string', description: 'The ID of the node to update' },
         status: { type: 'string', enum: ['pending', 'ready', 'in_progress', 'completed', 'blocked', 'failed'] },
         thought: { type: 'string', description: 'Current live thought or reasoning step to display on the node card' },
@@ -296,6 +303,7 @@ const TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
+        planId: { type: 'string', description: 'Optional plan ID owning the node' },
         nodeId: { type: 'string', description: 'The ID of the currently active node' },
         thought: { type: 'string', description: 'Live thought or reasoning step' },
         toolName: { type: 'string', description: 'Optional name of the tool in progress' }
@@ -309,6 +317,7 @@ const TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
+        planId: { type: 'string', description: 'Optional plan ID owning the node' },
         nodeId: { type: 'string', description: 'Node ID requiring human review' },
         notes: { type: 'string', description: 'Summary of what was achieved and what the user needs to inspect or approve' },
         proposedArtifacts: { type: 'array', items: { type: 'string' }, description: 'List of files/artifacts to be verified' }
@@ -318,12 +327,33 @@ const TOOLS = [
   },
   {
     name: 'topology_get_plan',
-    description: 'Retrieve the current live Topology DAG, node execution states, and human approval decisions.',
+    description: 'Retrieve live Topology DAG plans, node execution states, and human approval decisions.',
     inputSchema: {
       type: 'object',
       properties: {
+        planId: { type: 'string', description: 'Optional specific plan ID to retrieve. If omitted, returns the active plan.' },
+        listAll: { type: 'boolean', default: false, description: 'If true, returns a summary list of all active plans running on the server.' },
         includeApprovals: { type: 'boolean', default: true }
       }
+    }
+  },
+  {
+    name: 'topology_list_plans',
+    description: 'List all running agent plans and workflows currently registered on the Topology server, showing active owners, completion progress, and latest thoughts.',
+    inputSchema: {
+      type: 'object',
+      properties: {}
+    }
+  },
+  {
+    name: 'topology_switch_plan',
+    description: 'Switch the active visible plan displayed on the Topology canvas to another registered plan ID.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        planId: { type: 'string', description: 'The ID of the plan to switch to' }
+      },
+      required: ['planId']
     }
   },
   {
@@ -442,7 +472,7 @@ async function handleToolCall(name, args = {}) {
       priority: n.priority || 'medium',
       position: { x: 80 + idx * 280, y: 120 + (idx % 2) * 60 },
       context: {
-        role: n.role || 'Worker',
+        role: n.role || args.agentRole || 'Worker',
         promptTemplate: n.description || '',
         toolsRequired: [],
         inputArtifacts: [],
@@ -464,34 +494,58 @@ async function handleToolCall(name, args = {}) {
       animated: true,
     }));
 
+    const planId = args.planId || (
+      args.title
+        ? args.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')
+        : null
+    ) || `plan-${Date.now()}`;
+
+    const agentRole = args.agentRole || 'Orchestrator';
+    const agentId = args.agentId || `agent-${agentRole.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+
     const planPayload = {
+      id: planId,
+      planId,
       title: args.title || 'Dynamic Plan',
       description: args.description || '',
+      agentId,
+      agentRole,
       nodes: formattedNodes,
       edges: formattedEdges,
+      makeActive: args.makeActive !== false,
       updatedAt: Date.now(),
     };
 
-    // 1. Fallback save to disk
+    // 1. Fallback save to disk (both multi-plan registry and legacy single file)
+    const storedPlans = readJson(PLANS_FILE, {});
+    storedPlans[planId] = planPayload;
+    writeJson(PLANS_FILE, storedPlans);
     writeJson(PLAN_FILE, planPayload);
+    if (args.makeActive !== false) {
+      writeJson(ACTIVE_PLAN_FILE, { activePlanId: planId, updatedAt: Date.now() });
+    }
+
     appendLog({
       action: 'plan_init',
-      thought: `Plan "${planPayload.title}" initialized with ${formattedNodes.length} nodes and ${formattedEdges.length} edges`,
-      payload: { title: planPayload.title, nodeCount: formattedNodes.length, edgeCount: formattedEdges.length },
+      planId,
+      thought: `Plan "${planPayload.title}" [${planId}] initialized with ${formattedNodes.length} nodes and ${formattedEdges.length} edges by ${agentRole}`,
+      payload: { planId, title: planPayload.title, nodeCount: formattedNodes.length, edgeCount: formattedEdges.length, agentRole },
     }).catch(() => {});
 
     // 2. Broadcast via bridge
     const bridgeResult = await sendToBridge('plan', planPayload);
     const bridgeNotice = bridgeResult.ok 
       ? `📡 Live synced with Topology UI on http://localhost:5173`
-      : `💾 Saved to .topology/plan.json (Topology UI offline, will load on launch)`;
+      : `💾 Saved to .topology/plans.json (Topology UI offline, will load on launch)`;
     const resilientNotice = formatResilientNotice(bridgeResult);
 
     return {
       content: [
         {
           type: 'text',
-          text: `### 🗺️ Topology Plan Initialized: "${planPayload.title}"\n\n` +
+          text: `### 🗺️ Topology Plan Initialized: "${planPayload.title}" [\`${planId}\`]\n\n` +
+                `- **Plan ID**: \`${planId}\`\n` +
+                `- **Authoring Agent**: ${agentRole} (\`${agentId}\`)\n` +
                 `- **Total Nodes**: ${formattedNodes.length}\n` +
                 `- **Total Dependencies**: ${formattedEdges.length}\n` +
                 `- **First Action**: \`${formattedNodes[0]?.label || 'Task'}\` (Status: ${formattedNodes[0]?.status || 'ready'})\n` +
@@ -514,19 +568,35 @@ async function handleToolCall(name, args = {}) {
       };
     }
 
-    const { nodeId, status, thought, toolName, terminalLog, outputArtifacts } = args;
+    const { planId, nodeId, status, thought, toolName, terminalLog, outputArtifacts } = args;
 
     // 1. Fallback update to disk
-    const stored = readJson(PLAN_FILE);
-    if (stored && Array.isArray(stored.nodes)) {
-      const target = stored.nodes.find(n => n.id === nodeId);
+    const storedPlans = readJson(PLANS_FILE, {});
+    let targetPlanKey = planId;
+    if (!targetPlanKey) {
+      // Auto-locate plan containing this node
+      for (const [k, p] of Object.entries(storedPlans)) {
+        if (Array.isArray(p.nodes) && p.nodes.some(n => n.id === nodeId)) {
+          targetPlanKey = k;
+          break;
+        }
+      }
+    }
+    if (targetPlanKey && storedPlans[targetPlanKey] && Array.isArray(storedPlans[targetPlanKey].nodes)) {
+      const target = storedPlans[targetPlanKey].nodes.find(n => n.id === nodeId);
       if (target) {
         if (status) target.status = status;
         target.updatedAt = Date.now();
         target.context = target.context || {};
         target.context.telemetry = target.context.telemetry || {};
-        if (thought) target.context.telemetry.liveThought = thought;
-        if (toolName) target.context.telemetry.activeTool = toolName;
+        if (thought) {
+          target.context.telemetry.liveThought = thought;
+          storedPlans[targetPlanKey].latestThought = thought;
+        }
+        if (toolName) {
+          target.context.telemetry.activeTool = toolName;
+          storedPlans[targetPlanKey].activeTool = toolName;
+        }
         if (terminalLog) {
           target.context.telemetry.terminalLogs = [
             ...(target.context.telemetry.terminalLogs || []),
@@ -534,14 +604,16 @@ async function handleToolCall(name, args = {}) {
           ].slice(-50);
         }
         if (outputArtifacts) target.context.outputArtifacts = outputArtifacts;
-        writeJson(PLAN_FILE, stored);
+        writeJson(PLANS_FILE, storedPlans);
+        writeJson(PLAN_FILE, storedPlans[targetPlanKey]);
       }
     }
 
     // 2. Broadcast via bridge & append to Git log
-    const bridgeResult = await sendToBridge('node', { nodeId, status, thought, toolName, terminalLog, outputArtifacts });
+    const bridgeResult = await sendToBridge('node', { planId: targetPlanKey, nodeId, status, thought, toolName, terminalLog, outputArtifacts });
     appendLog({
       action: 'node_update',
+      planId: targetPlanKey,
       nodeId,
       status,
       thought,
@@ -554,7 +626,7 @@ async function handleToolCall(name, args = {}) {
       content: [
         {
           type: 'text',
-          text: `✅ **Node Updated** [\`${nodeId}\`]: Status: \`${status || 'unchanged'}\`${thought ? ` | Thought: "${thought}"` : ''}${resilientNotice}`
+          text: `✅ **Node Updated** [\`${nodeId}\`${targetPlanKey ? ` in plan \`${targetPlanKey}\`` : ''}]: Status: \`${status || 'unchanged'}\`${thought ? ` | Thought: "${thought}"` : ''}${resilientNotice}`
         }
       ]
     };
@@ -572,16 +644,16 @@ async function handleToolCall(name, args = {}) {
       };
     }
 
-    const { nodeId, thought, toolName } = args;
-    const bridgeResult = await sendToBridge('thought', { nodeId, thought, toolName });
-    appendLog({ action: 'thought', nodeId, thought, toolName }).catch(() => {});
+    const { planId, nodeId, thought, toolName } = args;
+    const bridgeResult = await sendToBridge('thought', { planId, nodeId, thought, toolName });
+    appendLog({ action: 'thought', planId, nodeId, thought, toolName }).catch(() => {});
     const resilientNotice = formatResilientNotice(bridgeResult);
 
     return {
       content: [
         {
           type: 'text',
-          text: `💭 Telemetry thought streamed to node [\`${nodeId}\`]: "${thought}"${resilientNotice}`
+          text: `💭 Telemetry thought streamed to node [\`${nodeId}\`${planId ? ` in \`${planId}\`` : ''}]: "${thought}"${resilientNotice}`
         }
       ]
     };
@@ -599,16 +671,17 @@ async function handleToolCall(name, args = {}) {
       };
     }
 
-    const { nodeId, notes, proposedArtifacts } = args;
+    const { planId, nodeId, notes, proposedArtifacts } = args;
 
     // Update node to in_progress / awaiting approval
     const bridgeResult = await sendToBridge('node', {
+      planId,
       nodeId,
       status: 'in_progress',
       thought: `Paused at Human Review Gate: ${notes}`,
       terminalLog: `[HITL REVIEW GATE ACTIVE] Paused for human supervisor sign-off.`,
     });
-    appendLog({ action: 'approval_request', nodeId, thought: notes, payload: { proposedArtifacts } }).catch(() => {});
+    appendLog({ action: 'approval_request', planId, nodeId, thought: notes, payload: { proposedArtifacts } }).catch(() => {});
 
     // Check if already approved
     const approvals = readJson(APPROVALS_FILE, {});
@@ -637,7 +710,7 @@ async function handleToolCall(name, args = {}) {
       content: [
         {
           type: 'text',
-          text: `⏸️ **Human Review Gate Triggered** for node [\`${nodeId}\`]\n\n` +
+          text: `⏸️ **Human Review Gate Triggered** for node [\`${nodeId}\`${planId ? ` in plan \`${planId}\`` : ''}]\n\n` +
                 `- **Supervisor Notes**: ${notes}\n` +
                 `- **Artifacts to Inspect**: ${(proposedArtifacts || []).join(', ') || 'Current workspace diff'}\n` +
                 `- **Action Required**: Open [Topology](http://localhost:5173) and click the **Approve** button on card \`${nodeId}\`, or reply in chat to confirm sign-off.${offlineGuidance}`
@@ -647,11 +720,22 @@ async function handleToolCall(name, args = {}) {
   }
 
   if (name === 'topology_get_plan') {
-    // Check bridge first, fallback to disk
-    const bridgeResp = await getFromBridge('plan');
-    const plan = bridgeResp.ok ? bridgeResp.data : readJson(PLAN_FILE, { nodes: [], edges: [] });
-    const approvals = readJson(APPROVALS_FILE, {});
+    const { planId, listAll } = args;
 
+    if (listAll) {
+      return handleToolCall('topology_list_plans', {});
+    }
+
+    const endpoint = planId ? `plan?planId=${encodeURIComponent(planId)}` : 'plan';
+    const bridgeResp = await getFromBridge(endpoint);
+    let plan = bridgeResp.ok ? bridgeResp.data : null;
+
+    if (!plan) {
+      const storedPlans = readJson(PLANS_FILE, {});
+      plan = (planId && storedPlans[planId]) ? storedPlans[planId] : readJson(PLAN_FILE, { nodes: [], edges: [] });
+    }
+
+    const approvals = readJson(APPROVALS_FILE, {});
     const summary = (plan.nodes || []).map(n => {
       const approval = approvals[n.id];
       const appText = approval ? (approval.approved ? ' [APPROVED]' : ' [REJECTED]') : (n.context?.requiresHumanApproval ? ' [NEEDS APPROVAL]' : '');
@@ -664,9 +748,75 @@ async function handleToolCall(name, args = {}) {
       content: [
         {
           type: 'text',
-          text: `### 📋 Current Topology Plan: "${plan.title || 'Workspace Plan'}"\n\n` +
+          text: `### 📋 Topology Plan: "${plan.title || 'Workspace Plan'}" [\`${plan.id || planId || 'active'}\`]\n` +
+                (plan.agentRole ? `**Author**: ${plan.agentRole}\n\n` : '\n') +
                 (summary || 'No active nodes in plan.') +
                 `\n\n[Open Topology Studio](http://localhost:5173)${resilientNotice}`
+        }
+      ]
+    };
+  }
+
+  if (name === 'topology_list_plans') {
+    const bridgeResp = await getFromBridge('plans');
+    let plansList = [];
+    let activePlanId = 'default';
+
+    if (bridgeResp.ok && bridgeResp.data) {
+      plansList = bridgeResp.data.plans || [];
+      activePlanId = bridgeResp.data.activePlanId || activePlanId;
+    } else {
+      const storedPlans = readJson(PLANS_FILE, {});
+      const activeMeta = readJson(ACTIVE_PLAN_FILE, { activePlanId: 'default' });
+      activePlanId = activeMeta.activePlanId;
+      plansList = Object.values(storedPlans).map(p => ({
+        id: p.id,
+        title: p.title,
+        agentRole: p.agentRole || 'Worker',
+        nodeCount: (p.nodes || []).length,
+        completedCount: (p.nodes || []).filter(n => n.status === 'completed').length,
+        progressPercent: (p.nodes || []).length > 0 ? Math.round(((p.nodes || []).filter(n => n.status === 'completed').length / p.nodes.length) * 100) : 0,
+        status: p.status || 'active',
+        latestThought: p.latestThought,
+      }));
+    }
+
+    const formattedList = plansList.map(p => {
+      const isActive = p.id === activePlanId ? ' ⭐ (ACTIVE)' : '';
+      const thoughtText = p.latestThought ? `\n  - *Live Thought*: "${p.latestThought}"` : '';
+      return `- **${p.title}** [\`${p.id}\`]: ${p.agentRole || 'Agent'} — ${p.completedCount}/${p.nodeCount} tasks (${p.progressPercent}%)${isActive}${thoughtText}`;
+    }).join('\n\n');
+
+    const resilientNotice = formatResilientNotice(bridgeResp);
+
+    return {
+      content: [
+        {
+          type: 'text',
+          text: `### 🌐 Active Agent Plans Fleet (${plansList.length} registered)\n\n` +
+                (formattedList || 'No plans currently registered.') +
+                `\n\n> Use \`topology_get_plan({ planId: "..." })\` or \`topology_switch_plan({ planId: "..." })\` to inspect or focus a specific plan.${resilientNotice}`
+        }
+      ]
+    };
+  }
+
+  if (name === 'topology_switch_plan') {
+    const { planId } = args;
+    if (!planId) {
+      return {
+        content: [{ type: 'text', text: '⚠️ `planId` is required for `topology_switch_plan`.' }]
+      };
+    }
+
+    const bridgeResult = await sendToBridge('active-plan', { planId });
+    writeJson(ACTIVE_PLAN_FILE, { activePlanId: planId, updatedAt: Date.now() });
+
+    return {
+      content: [
+        {
+          type: 'text',
+          text: `🔄 **Active Canvas Switched** to plan [\`${planId}\`]. Visualizer will refocus this workflow.`
         }
       ]
     };
