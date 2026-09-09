@@ -1023,14 +1023,14 @@ The bridge broadcasts events over `GET /api/topology/events`:
 - `node_updated`: Broadcasts `{ planId, nodeId, status, thought, agentId, ... }`.
 - `thought_stream`: Broadcasts `{ planId, nodeId, thought, agentId, ... }`.
 
-### 4. Background Plan Thought Beacons (`PlanWorkspaceTabs.tsx`)
-When the user is viewing Plan A while Agent B streams reasoning or completes tasks on background Plan B:
-- Plan B's workspace tab displays a glowing animated **Live Beacon** with breathing motion (`scale: [1, 1.35, 1]`, `opacity: [0.7, 1, 0.7]`).
-- Hovering or clicking the tab reveals the background agent's current thought and progress metrics without interrupting the active canvas.
-- Single-click activates and mounts Plan B onto the ReactFlow canvas, preserving pan/zoom positioning and node layout.
+### 4. Integrated Top Navigation & Background Plan Beacons (`PlanWorkspaceTabs.tsx` & `Header.tsx`)
+- **Single Unified Top Navigation Bar**: `PlanWorkspaceTabs` is directly embedded into `Header.tsx` alongside the brand logo and 2D/3D switcher. This completely eliminates the secondary row, reclaims 40px of vertical canvas height, and guarantees the floating collapsible `SidebarFilter` sits cleanly below the header with 12px clearance and zero overlap.
+- **Background Activity Beacon**: When the user is viewing Plan A while Agent B streams reasoning or completes tasks on background Plan B, Plan B's workspace tab displays a glowing animated **Live Beacon** with breathing motion (`scale: [1, 1.35, 1]`, `opacity: [0.7, 1, 0.7]`).
+- **Responsive Layout**: Titles truncate gracefully (`max-w-[120px] sm:max-w-[160px] md:max-w-[200px]`), and the container scrolls horizontally (`no-scrollbar`) if many agent plans run concurrently.
+- **Hover Popover**: Hovering any tab reveals the agent role, live thought snippet, task progress bar, and close button.
 
 ### 5. Fleet Matrix Modal (`MultiPlanFleetModal.tsx`)
-- Pressing the **Fleet Matrix** launcher button in the workspace tabs bar opens an elevated backdrop-blurred modal.
+- Pressing the **Fleet** matrix launcher button in the top nav opens an elevated backdrop-blurred modal.
 - Provides a bird's-eye view across all agents running in the ecosystem:
   - Agent avatar, name, and role.
   - Plan title, description, and task completion percentage progress bar.
