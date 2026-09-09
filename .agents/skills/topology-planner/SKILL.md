@@ -23,11 +23,15 @@ This skill teaches Antigravity agents how to use the **Topology Visual Planner**
 When the Topology MCP server is configured in `mcp_config.json`, you have access to the following tools:
 
 ### 1. `topology_create_plan`
-Initializes or replaces the workflow DAG with tasks and dependencies:
+Initializes or replaces a workflow DAG with tasks and dependencies. Pass `planId`, `agentId`, and `agentRole` to create an isolated graph that runs alongside other agents' graphs without collisions:
 ```json
 {
+  "planId": "distributed-task-engine",
+  "agentId": "agent-sage",
+  "agentRole": "Architect",
   "title": "Distributed Task Engine",
   "description": "Implement rate limiting, worker queue, and API authentication",
+  "makeActive": true,
   "nodes": [
     {
       "id": "task-spec",
@@ -78,6 +82,7 @@ Initializes or replaces the workflow DAG with tasks and dependencies:
 Stream your live reasoning thoughts to the node card in real-time while you work:
 ```json
 {
+  "planId": "distributed-task-engine",
   "nodeId": "task-spec",
   "thought": "Synthesizing schema contracts and validating against zero-trust policy...",
   "toolName": "ast_analyzer"
@@ -88,6 +93,7 @@ Stream your live reasoning thoughts to the node card in real-time while you work
 Update a node's progress as you make changes:
 ```json
 {
+  "planId": "distributed-task-engine",
   "nodeId": "task-spec",
   "status": "completed",
   "outputArtifacts": ["src/types/contract.ts"],
@@ -99,16 +105,32 @@ Update a node's progress as you make changes:
 Pause execution at a Human-in-the-Loop review gate and await supervisor sign-off:
 ```json
 {
+  "planId": "distributed-task-engine",
   "nodeId": "gate-review",
   "notes": "Completed queue worker and token handling. Ready for supervisor security sign-off before proceeding to deployment.",
   "proposedArtifacts": ["src/services/queue.ts", "src/auth/token.ts"]
 }
 ```
 
-### 5. `topology_get_plan`
-Read the current DAG, node states, and whether human approval has been granted:
+### 5. `topology_list_plans`
+List all running agent plans and workflows currently registered on the Topology server:
+```json
+{}
+```
+
+### 6. `topology_switch_plan`
+Switch the visible canvas plan to another registered plan ID:
 ```json
 {
+  "planId": "distributed-task-engine"
+}
+```
+
+### 7. `topology_get_plan`
+Read a specific plan or the active plan, node states, and approval statuses:
+```json
+{
+  "planId": "distributed-task-engine",
   "includeApprovals": true
 }
 ```
@@ -205,11 +227,17 @@ Agents without direct MCP access can run commands from the project root:
 # Ensure visualizer server is running on http://localhost:5173 (auto-starts if offline)
 node scripts/topology-log.mjs server
 
+# List all active agent workflow plans
+node scripts/topology-log.mjs plans
+
+# Switch active visible canvas plan
+node scripts/topology-log.mjs switch distributed-task-engine
+
 # Acquire advisory lease
 node scripts/topology-log.mjs lock node:task-spec --agent="AgentA" --ttl=30
 
-# Append execution log entry
-node scripts/topology-log.mjs log --action="node_updated" --nodeId="task-spec" --status="in_progress"
+# Append execution log entry / update node in a specific plan
+node scripts/topology-log.mjs log --action="node_updated" --plan="distributed-task-engine" --nodeId="task-spec" --status="in_progress"
 
 # View active advisory leases
 node scripts/topology-log.mjs locks

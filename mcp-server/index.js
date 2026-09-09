@@ -231,7 +231,7 @@ async function getFromBridge(endpoint, allowAutoStart = true) {
 }
 
 // Tool Definitions
-const TOOLS = [
+export const TOOLS = [
   {
     name: 'topology_create_plan',
     description: 'Initialize or update a workflow DAG in Topology. Supports multiple concurrent plans running across different agents. Pass the planId, high-level goal, decomposed tasks/nodes, and causal dependency edges.',
