@@ -973,7 +973,7 @@ flowchart TD
     end
 
     subgraph Visual_Surfaces ["Elevated Borderless UI"]
-        TabsRibbon["PlanWorkspaceTabs (Header Floating Glass Bar)"]
+        DropdownSelector["PlanSelectorDropdown (Compact Workspace Selector)"]
         Beacon["Live Thought Pulsing Beacon (Background Plan Activity)"]
         FleetModal["MultiPlanFleetModal (Multi-Agent Grid View & Switcher)"]
         Canvas2D["2D Precision ReactFlow Canvas (Active Plan DAG)"]
@@ -993,10 +993,10 @@ flowchart TD
     ActivePlanPointer --> SSEStream
 
     SSEStream -->|SSE: plans_list_updated, active_plan_changed, thought_stream| Frontend_Store
-    Frontend_Store --> TabsRibbon
+    Frontend_Store --> DropdownSelector
     Frontend_Store --> FleetModal
     Frontend_Store --> Canvas2D
-    TabsRibbon -->|User Click: switchPlan(id)| SwitchActive
+    DropdownSelector -->|User Select: switchPlan(id)| SwitchActive
     FleetModal -->|User Click: switchPlan(id)| SwitchActive
 ```
 
@@ -1023,11 +1023,11 @@ The bridge broadcasts events over `GET /api/topology/events`:
 - `node_updated`: Broadcasts `{ planId, nodeId, status, thought, agentId, ... }`.
 - `thought_stream`: Broadcasts `{ planId, nodeId, thought, agentId, ... }`.
 
-### 4. Integrated Top Navigation & Background Plan Beacons (`PlanWorkspaceTabs.tsx` & `Header.tsx`)
-- **Single Unified Top Navigation Bar**: `PlanWorkspaceTabs` is directly embedded into `Header.tsx` alongside the brand logo and 2D/3D switcher. This completely eliminates the secondary row, reclaims 40px of vertical canvas height, and guarantees the floating collapsible `SidebarFilter` sits cleanly below the header with 12px clearance and zero overlap.
-- **Background Activity Beacon**: When the user is viewing Plan A while Agent B streams reasoning or completes tasks on background Plan B, Plan B's workspace tab displays a glowing animated **Live Beacon** with breathing motion (`scale: [1, 1.35, 1]`, `opacity: [0.7, 1, 0.7]`).
-- **Responsive Layout**: Titles truncate gracefully (`max-w-[120px] sm:max-w-[160px] md:max-w-[200px]`), and the container scrolls horizontally (`no-scrollbar`) if many agent plans run concurrently.
-- **Hover Popover**: Hovering any tab reveals the agent role, live thought snippet, task progress bar, and close button.
+### 4. Compact Workspace Dropdown & Decluttered Navigation (`PlanSelectorDropdown.tsx` & `Header.tsx`)
+- **Single Compact Dropdown**: Replaces horizontal scrolling tabs with a sleek, elevated workspace selector pill (`[🤖 Active Plan Title  3/6  ▾]`) occupying just ~240px. Zero horizontal scrollbars.
+- **Background Activity Beacon**: If any background agent is running, a subtle pulsing beacon dot animates on the trigger button.
+- **Rich Elevated Menu**: Clicking the dropdown reveals all active workflows with real-time completion stats, agent avatars, mini thought snippets, quick deletion, and an inline `+ Create New Plan` form.
+- **Decluttered Top Navigation**: Secondary tools (Swarm cockpit, Context blackboard, Live Agent sync, Telemetry HUD, Hub) are streamlined into elegant, high-density icon buttons with badges and rich "hover on appear" tooltips, restoring visual balance and generous breathing room.
 
 ### 5. Fleet Matrix Modal (`MultiPlanFleetModal.tsx`)
 - Pressing the **Fleet** matrix launcher button in the top nav opens an elevated backdrop-blurred modal.

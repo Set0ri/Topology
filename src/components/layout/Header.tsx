@@ -26,7 +26,7 @@ import { exportToObsidianCanvas, exportToMermaid, exportToUniversalAgentManifest
 import { generateHeadlessCliRunner } from '../../utils/agentHandoff';
 import { SAMPLE_TOPOLOGIES } from '../../data/sampleTopologies';
 import { ThemePalettePicker } from './ThemePalettePicker';
-import { PlanWorkspaceTabs } from './PlanWorkspaceTabs';
+import { PlanSelectorDropdown } from './PlanSelectorDropdown';
 
 interface HeaderProps {
   onOpenGenerator: () => void;
@@ -148,9 +148,9 @@ export const Header: React.FC<HeaderProps> = ({
   }, [onOpenDiagnostics]);
 
   return (
-    <header className="h-13 sm:h-14 px-2.5 sm:px-4 flex items-center justify-between bg-white/90 dark:bg-[#10121a]/90 backdrop-blur-2xl select-none z-30 border-none transition-colors duration-200 shadow-xs gap-2 sm:gap-4">
-      {/* Left: Clean Brand Logo, Compact 2D/3D Switcher, and Integrated Plan Workspace Tabs */}
-      <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
+    <header className="h-13 sm:h-14 px-2.5 sm:px-4 flex items-center justify-between bg-white/90 dark:bg-[#10121a]/90 backdrop-blur-2xl select-none z-30 border-none transition-colors duration-200 shadow-xs gap-2">
+      {/* Left: Brand Logo, Compact 2D/3D Switcher, and Plan Selector Dropdown */}
+      <div className="flex items-center gap-2 sm:gap-3 min-w-0">
         {/* Brand Logo */}
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           <div className="w-7 h-7 rounded-xl bg-gradient-to-br from-[#1a73e8] to-[#4285f4] flex items-center justify-center shadow-xs shrink-0">
@@ -189,22 +189,20 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
         </div>
 
-        <div className="w-px h-5 bg-black/10 dark:bg-white/10 shrink-0 hidden md:block" />
+        <div className="w-px h-5 bg-black/10 dark:bg-white/10 shrink-0 hidden sm:block" />
 
-        {/* Integrated Multi-Agent Workspace Plan Tabs Ribbon */}
-        <div className="min-w-0 flex-1 flex items-center">
-          <PlanWorkspaceTabs onOpenFleetModal={onOpenFleetModal} />
-        </div>
+        {/* Workspace Plan Selector Dropdown (Clean, non-scrolling) */}
+        <PlanSelectorDropdown onOpenFleetModal={onOpenFleetModal} />
       </div>
 
-      {/* Right: Health, AI Plan, Swarm Observability, Telemetry & Export Actions */}
+      {/* Right: Health, AI Plan, Minimal Swarm Observability, Telemetry & Export */}
       <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
-        {/* Coherence Health Pill (Tablet & Desktop) */}
+        {/* Coherence Health Pill */}
         <button
           type="button"
           onClick={onOpenCoherence}
-          title="Open Graph Coherence Diagnostic"
-          className={`hidden xl:flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-medium transition-all duration-150 border-none cursor-pointer shadow-xs ${
+          title={`Graph Coherence: ${coherenceReport.score}% (Click for full diagnostic report)`}
+          className={`hidden md:flex items-center gap-1 px-2 py-1 rounded-xl text-xs font-medium transition-all duration-150 border-none cursor-pointer shadow-xs ${
             coherenceReport.score >= 90
               ? 'bg-[#e6f4ea] text-[#137333] dark:bg-cat-mocha-green/15 dark:text-cat-mocha-green'
               : coherenceReport.score >= 70
@@ -213,20 +211,22 @@ export const Header: React.FC<HeaderProps> = ({
           }`}
         >
           <ShieldCheck size={13} />
-          <span>{coherenceReport.score}%</span>
+          <span className="font-semibold">{coherenceReport.score}%</span>
         </button>
 
-        {/* AI Plan Synthesizer Primary Button */}
+        {/* AI Plan Synthesizer Primary CTA */}
         <button
           type="button"
           onClick={onOpenGenerator}
+          title="Open AI Plan Synthesizer"
           className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-xl text-xs font-medium bg-[#1a73e8] hover:bg-[#1557b0] text-white shadow-xs transition-all duration-150 border-none cursor-pointer shrink-0"
         >
           <Sparkles size={13} />
-          <span className="hidden sm:inline">AI Plan</span>
+          <span className="hidden sm:inline font-semibold">AI Plan</span>
         </button>
-        {/* Undo / Redo (Hidden on mobile phones to conserve space) */}
-        <div className="hidden sm:flex items-center gap-0.5 mr-0.5 sm:mr-1 bg-black/5 dark:bg-white/5 p-0.5 rounded-xl">
+
+        {/* Undo / Redo */}
+        <div className="hidden sm:flex items-center gap-0.5 bg-black/5 dark:bg-white/5 p-0.5 rounded-xl">
           <button
             type="button"
             disabled={history.length === 0}
@@ -247,52 +247,52 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
         </div>
 
-        {/* Multi-Agent Swarm Observability Trigger */}
+        <div className="w-px h-4 bg-black/10 dark:bg-white/10 mx-0.5 hidden md:block" />
+
+        {/* Multi-Agent Swarm Observability */}
         <button
           type="button"
           onClick={() => setCockpitOpen(!isCockpitOpen)}
-          title="Open Multi-Agent Swarm Observability Cockpit"
-          className={`h-8 px-2 sm:px-2.5 rounded-xl text-xs font-medium flex items-center gap-1 sm:gap-1.5 transition-all border-none cursor-pointer shadow-xs shrink-0 ${
+          title={`Multi-Agent Swarm Observability (${globalSquad.length} active agents)`}
+          className={`h-8 px-2 rounded-xl text-xs font-medium flex items-center gap-1 transition-all border-none cursor-pointer shadow-xs shrink-0 ${
             isCockpitOpen
               ? 'bg-[#1a73e8] text-white font-semibold'
               : 'bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 text-[#202124] dark:text-[#f8fafc]'
           }`}
         >
           <Users size={13} className={isCockpitOpen ? 'text-white' : 'text-[#1a73e8] dark:text-[#8ab4f8]'} />
-          <span className="font-semibold hidden md:inline">Agents</span>
-          <span className={`px-1.5 py-0.2 rounded-md text-[10px] font-bold ${
+          <span className={`px-1.5 py-0.2 rounded-md text-[10px] font-bold font-mono ${
             isCockpitOpen ? 'bg-white/20 text-white' : 'bg-[#1a73e8]/10 text-[#1a73e8] dark:text-[#8ab4f8]'
           }`}>
             {globalSquad.length}
           </span>
         </button>
 
-        {/* Shared Context Blackboard Modal Button */}
+        {/* Shared Context Blackboard */}
         <button
           type="button"
           onClick={onOpenSharedContext}
-          title="Open Shared Agent Context Repository (Dual-Tier Blackboard)"
-          className="h-8 px-2 sm:px-2.5 rounded-xl text-xs font-medium bg-purple-500/10 hover:bg-purple-500/15 text-purple-700 dark:text-purple-300 flex items-center gap-1 sm:gap-1.5 transition-all border-none cursor-pointer shadow-xs shrink-0"
+          title={`Shared Agent Context Repository (${Object.keys(sharedContext?.global || {}).length} entries)`}
+          className="h-8 px-2 rounded-xl text-xs font-medium bg-purple-500/10 hover:bg-purple-500/15 text-purple-700 dark:text-purple-300 flex items-center gap-1 transition-all border-none cursor-pointer shadow-xs shrink-0"
         >
           <Brain size={13} className="text-purple-600 dark:text-purple-400" />
-          <span className="font-semibold hidden md:inline">Context</span>
           <span className="px-1.5 py-0.2 rounded-md text-[10px] bg-purple-500/15 text-purple-600 dark:text-purple-300 font-bold font-mono">
             {Object.keys(sharedContext?.global || {}).length}
           </span>
         </button>
 
-        {/* Antigravity Live Agent Sync Status Pill */}
+        {/* Antigravity Live Agent Sync Status Indicator */}
         <button
           type="button"
           onClick={onOpenAgentSync}
           title={
             liveSyncStatus.connected
-              ? "Agent Live Sync Active (Click for Setup & Notifications)"
+              ? "Agent Live Sync: Connected"
               : liveSyncStatus.lastErrorCode
-              ? `Agent Live Sync [${liveSyncStatus.lastErrorCode}] (Auto-reconnecting, CLI agents unblocked)`
-              : "Agent Live Sync Offline (Click to Connect)"
+              ? `Agent Live Sync [${liveSyncStatus.lastErrorCode}] (Auto-reconnecting)`
+              : "Agent Live Sync Offline"
           }
-          className={`h-8 px-2 sm:px-2.5 rounded-xl text-xs font-medium flex items-center gap-1 sm:gap-1.5 transition-all border-none cursor-pointer shadow-xs shrink-0 ${
+          className={`h-8 px-2 rounded-xl text-xs font-medium flex items-center gap-1.5 transition-all border-none cursor-pointer shadow-xs shrink-0 ${
             liveSyncStatus.connected
               ? 'bg-emerald-500/10 hover:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 font-semibold'
               : 'bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 text-[#5f6368] dark:text-[#94a3b8]'
@@ -307,33 +307,32 @@ export const Header: React.FC<HeaderProps> = ({
             }`}></span>
           </span>
           <Radio size={13} className={liveSyncStatus.connected ? 'text-emerald-500' : 'opacity-60'} />
-          <span className="font-semibold hidden lg:inline">Live Agent</span>
         </button>
 
-        {/* System Diagnostics & Telemetry HUD Button */}
+        {/* Diagnostics & Telemetry HUD */}
         <button
           type="button"
           onClick={onOpenDiagnostics}
-          title="Open System Diagnostics & Telemetry HUD (Ctrl+Shift+D)"
-          className="h-8 px-2 sm:px-2.5 rounded-xl text-xs font-medium bg-blue-500/10 hover:bg-blue-500/15 text-blue-700 dark:text-blue-300 flex items-center gap-1 sm:gap-1.5 transition-all border-none cursor-pointer shadow-xs shrink-0"
+          title="System Diagnostics & Telemetry HUD (Ctrl+Shift+D)"
+          className="h-8 w-8 rounded-xl text-xs font-medium bg-blue-500/10 hover:bg-blue-500/15 text-blue-700 dark:text-blue-300 flex items-center justify-center transition-all border-none cursor-pointer shadow-xs shrink-0"
         >
           <Activity size={13} className="text-blue-600 dark:text-blue-400" />
-          <span className="font-semibold hidden lg:inline">Telemetry</span>
         </button>
 
-        {/* Topology Hub & Archetype Library Button with Coverage Badge */}
+        {/* Topology Hub & Archetype Library */}
         <button
           type="button"
           onClick={onOpenLibrary}
-          className="h-8 px-2 sm:px-2.5 rounded-xl text-xs font-medium bg-gradient-to-r from-[#1a73e8]/10 to-[#9334e6]/10 hover:from-[#1a73e8]/15 hover:to-[#9334e6]/15 text-[#1a73e8] dark:text-[#8ab4f8] hidden sm:flex items-center gap-1 sm:gap-1.5 transition-all border-none cursor-pointer shadow-xs shrink-0"
-          title="Browse 10 Canonical Archetypes, % Coverage Map & Community Topologies"
+          className="h-8 px-2 rounded-xl text-xs font-medium bg-gradient-to-r from-[#1a73e8]/10 to-[#9334e6]/10 hover:from-[#1a73e8]/15 hover:to-[#9334e6]/15 text-[#1a73e8] dark:text-[#8ab4f8] hidden sm:flex items-center gap-1 transition-all border-none cursor-pointer shadow-xs shrink-0"
+          title="Browse 10 Canonical Archetypes & Community Topologies (80% coverage)"
         >
           <Compass size={13} className="text-[#1a73e8] dark:text-[#8ab4f8]" />
-          <span className="font-semibold hidden md:inline">Topology Hub</span>
           <span className="px-1.5 py-0.2 rounded-md text-[10px] bg-[#1a73e8]/15 text-[#1a73e8] dark:text-[#8ab4f8] font-bold">
             80%
           </span>
         </button>
+
+        <div className="w-px h-4 bg-black/10 dark:bg-white/10 mx-0.5 hidden sm:block" />
 
         {/* Hidden File Input for Import */}
         <input
