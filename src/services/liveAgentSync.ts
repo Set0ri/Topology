@@ -385,10 +385,10 @@ export function useLiveAgentSync() {
 
       es.onerror = () => {
         if (!isSubscribed) return;
-        setLiveSyncConnected(false);
+        setLiveSyncConnected(false, 'TOPOLOGY_ERR_SSE_DROPPED');
         es.close();
 
-        // Exponential backoff reconnect: 1.5s, 3s, 6s, 10s max
+        // Exponential backoff reconnect: 1.5s, 3s, 6s, 10s max (fail-open silent reconnect)
         const attempts = reconnectAttemptsRef.current;
         const delay = Math.min(10000, Math.pow(2, attempts) * 1500);
         reconnectAttemptsRef.current += 1;

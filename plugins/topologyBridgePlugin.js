@@ -50,6 +50,33 @@ export function topologyBridgePlugin() {
     });
   };
 
+  const TOPOLOGY_ERROR_CODES = {
+    BRIDGE_OFFLINE: 'TOPOLOGY_ERR_BRIDGE_OFFLINE',
+    BRIDGE_TIMEOUT: 'TOPOLOGY_ERR_BRIDGE_TIMEOUT',
+    CACHE_IO_FAILED: 'TOPOLOGY_ERR_CACHE_IO_FAILED',
+    INVALID_SCHEMA: 'TOPOLOGY_ERR_INVALID_SCHEMA',
+    CYCLIC_DEPENDENCY: 'TOPOLOGY_ERR_CYCLIC_DEPENDENCY',
+    GATE_UNATTENDED: 'TOPOLOGY_ERR_GATE_UNATTENDED',
+    CLIENT_DISCONNECTED: 'TOPOLOGY_ERR_CLIENT_DISCONNECTED',
+    SSE_DROPPED: 'TOPOLOGY_ERR_SSE_DROPPED',
+    UI_RENDER_CRASH: 'TOPOLOGY_ERR_UI_RENDER_CRASH',
+    NOT_FOUND: 'TOPOLOGY_ERR_NOT_FOUND',
+    INTERNAL_ERROR: 'TOPOLOGY_ERR_INTERNAL',
+  };
+
+  const sendError = (res, statusCode, code, message) => {
+    res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      ok: false,
+      error: {
+        code,
+        message,
+        timestamp: Date.now(),
+        resilient: true,
+      },
+    }));
+  };
+
   // Parse JSON request body helper
   const parseJsonBody = (req) => {
     return new Promise((resolve, reject) => {
@@ -173,8 +200,7 @@ export function topologyBridgePlugin() {
               edgeCount: planPayload.edges.length,
             }));
           } catch (err) {
-            res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: err.message || 'Invalid JSON body' }));
+            sendError(res, 400, TOPOLOGY_ERROR_CODES.INVALID_SCHEMA, err.message || 'Invalid JSON body');
           }
           return;
         }
@@ -186,8 +212,7 @@ export function topologyBridgePlugin() {
             const { nodeId, status, thought, toolName, terminalLog, outputArtifacts, progress, assignedAgent } = data;
 
             if (!nodeId) {
-              res.writeHead(400, { 'Content-Type': 'application/json' });
-              res.end(JSON.stringify({ error: 'nodeId is required' }));
+              sendError(res, 400, TOPOLOGY_ERROR_CODES.INVALID_SCHEMA, 'nodeId is required');
               return;
             }
 
@@ -233,8 +258,7 @@ export function topologyBridgePlugin() {
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ success: true, updatedNodeId: nodeId }));
           } catch (err) {
-            res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: err.message || 'Invalid JSON body' }));
+            sendError(res, 400, TOPOLOGY_ERROR_CODES.INVALID_SCHEMA, err.message || 'Invalid JSON body');
           }
           return;
         }
@@ -249,8 +273,7 @@ export function topologyBridgePlugin() {
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ success: true }));
           } catch (err) {
-            res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: err.message }));
+            sendError(res, 400, TOPOLOGY_ERROR_CODES.INVALID_SCHEMA, err.message);
           }
           return;
         }
@@ -269,8 +292,7 @@ export function topologyBridgePlugin() {
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ success: true, eventId: eventPayload.id }));
           } catch (err) {
-            res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: err.message }));
+            sendError(res, 400, TOPOLOGY_ERROR_CODES.INVALID_SCHEMA, err.message);
           }
           return;
         }
@@ -300,8 +322,7 @@ export function topologyBridgePlugin() {
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ success: true, nodeId, approved: isApproved, decision: approvals[nodeId].decision }));
           } catch (err) {
-            res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: err.message }));
+            sendError(res, 400, TOPOLOGY_ERROR_CODES.INVALID_SCHEMA, err.message);
           }
           return;
         }
@@ -311,8 +332,7 @@ export function topologyBridgePlugin() {
           const searchParams = new URL(url, 'http://localhost').searchParams;
           const nodeId = searchParams.get('nodeId');
           if (!nodeId) {
-            res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: 'nodeId query parameter is required' }));
+            sendError(res, 400, TOPOLOGY_ERROR_CODES.INVALID_SCHEMA, 'nodeId query parameter is required');
             return;
           }
 
@@ -338,8 +358,7 @@ export function topologyBridgePlugin() {
             const { scope = 'global', key, value, authorAgentId, authorAgentRole, nodeId } = data;
 
             if (!key) {
-              res.writeHead(400, { 'Content-Type': 'application/json' });
-              res.end(JSON.stringify({ error: 'Context "key" is required' }));
+              sendError(res, 400, TOPOLOGY_ERROR_CODES.INVALID_SCHEMA, 'Context "key" is required');
               return;
             }
 
@@ -380,8 +399,7 @@ export function topologyBridgePlugin() {
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ success: true, entry }));
           } catch (err) {
-            res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: err.message }));
+            sendError(res, 400, TOPOLOGY_ERROR_CODES.INVALID_SCHEMA, err.message);
           }
           return;
         }
@@ -414,8 +432,7 @@ export function topologyBridgePlugin() {
         }
 
         // Default 404 for unknown /api/topology routes
-        res.writeHead(404, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Endpoint not found on Topology Bridge' }));
+        sendError(res, 404, TOPOLOGY_ERROR_CODES.NOT_FOUND, 'Endpoint not found on Topology Bridge');
       });
     },
   };

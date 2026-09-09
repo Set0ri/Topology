@@ -263,7 +263,13 @@ export const Header: React.FC<HeaderProps> = ({
         <button
           type="button"
           onClick={onOpenAgentSync}
-          title={liveSyncStatus.connected ? "Agent Live Sync Active (Click for Setup & Notifications)" : "Agent Live Sync Offline (Click to Connect)"}
+          title={
+            liveSyncStatus.connected
+              ? "Agent Live Sync Active (Click for Setup & Notifications)"
+              : liveSyncStatus.lastErrorCode
+              ? `Agent Live Sync [${liveSyncStatus.lastErrorCode}] (Auto-reconnecting, CLI agents unblocked)`
+              : "Agent Live Sync Offline (Click to Connect)"
+          }
           className={`h-8 px-2 sm:px-2.5 rounded-xl text-xs font-medium flex items-center gap-1 sm:gap-1.5 transition-all border-none cursor-pointer shadow-xs shrink-0 ${
             liveSyncStatus.connected
               ? 'bg-emerald-500/10 hover:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 font-semibold'

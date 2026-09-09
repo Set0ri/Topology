@@ -98,18 +98,31 @@ export class ErrorBoundary extends Component<Props, State> {
         <div className="min-h-screen w-screen flex items-center justify-center p-6 bg-[#f8fafd] dark:bg-[#10121a] text-[#202124] dark:text-[#f8fafc] select-none transition-colors">
           <div className="w-full max-w-xl rounded-3xl p-8 bg-white dark:bg-[#181a24] shadow-elevated-2xl border-none backdrop-blur-2xl">
             {/* Error Header */}
-            <div className="flex items-center gap-4 mb-5">
+            <div className="flex items-center gap-4 mb-4">
               <div className="w-12 h-12 rounded-2xl bg-[#d93025]/10 text-[#d93025] flex items-center justify-center shadow-inner">
                 <AlertOctagon size={26} />
               </div>
-              <div>
-                <h2 className="text-lg font-bold tracking-tight text-[#202124] dark:text-[#f8fafc]">
-                  Topology Render Interrupted
-                </h2>
+              <div className="flex-1">
+                <div className="flex items-center justify-between gap-2">
+                  <h2 className="text-lg font-bold tracking-tight text-[#202124] dark:text-[#f8fafc]">
+                    Topology Render Interrupted
+                  </h2>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-[#d93025]/15 text-[#d93025] dark:text-[#f28b82]">
+                    TOPOLOGY_ERR_UI_RENDER_CRASH
+                  </span>
+                </div>
                 <p className="text-xs text-[#5f6368] dark:text-[#94a3b8] mt-0.5">
                   An unexpected computational or graph rendering error was captured.
                 </p>
               </div>
+            </div>
+
+            {/* Non-Critical Infrastructure Reassurance */}
+            <div className="p-3 rounded-2xl bg-[#1a73e8]/10 text-[#1a73e8] dark:text-[#8ab4f8] text-xs mb-4 flex items-center gap-2">
+              <span className="font-semibold text-sm">ℹ️</span>
+              <p className="text-[11px] leading-relaxed">
+                <strong>Non-Critical Companion:</strong> Topology is an observability visualizer. Your external Antigravity agents, terminal tasks, and workflow plans in <code className="bg-[#1a73e8]/20 px-1 py-0.5 rounded">.topology/</code> remain completely unblocked and intact.
+              </p>
             </div>
 
             {/* Error Message Box */}

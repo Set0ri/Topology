@@ -187,7 +187,9 @@ When executing multi-step projects, complex architectures, or long-running refac
                 <span>
                   {liveSyncStatus.connected 
                     ? 'SSE Live Bridge Connected (localhost:5173/api/topology/stream)' 
-                    : 'Bridge Disconnected (make sure Vite is running on localhost:5173)'}
+                    : liveSyncStatus.lastErrorCode
+                    ? `[${liveSyncStatus.lastErrorCode}] Bridge Disconnected (Fail-Open: Agent tasks continue unblocked)`
+                    : 'Bridge Disconnected (Fail-Open: Agent tasks continue unblocked)'}
                 </span>
               </div>
               <span className="text-[11px] font-mono opacity-70">

@@ -679,6 +679,54 @@ Waits / polls / checks approval           Topology UI shows Review Alert & Deskt
   - "Review Deliverable" opens the generated artifact in the viewer modal.
   - "Approve & Send to Squad" and "Reject" buttons immediately post to `/api/topology/approve`, persisting decisions to `.topology/approvals.json` and broadcasting back to the agent.
 
+---
+
+## 26. Fail-Open Architecture, Non-Critical Observability & Standard Error Taxonomy (`TOPOLOGY_ERR_*`)
+
+### 1. Philosophy: Observability Companion, Not Critical Infrastructure
+Topology is strictly an **observability and orchestration companion**. If the Vite dev server is offline, the port is occupied, or any network/bridge call fails, external agents **must continue executing their tasks unhindered**.
+
+```mermaid
+flowchart TD
+    subgraph Agent_Harness ["External Antigravity Agent"]
+        A[Agent Task Loop] -->|Calls Tool| MCP[Topology MCP Server]
+    end
+
+    subgraph MCP_Resilience ["MCP Stdio Server (Fail-Open Layer)"]
+        MCP --> TryBridge{Bridge Reachable?}
+        TryBridge -->|Yes| POST[POST /api/topology/*]
+        TryBridge -->|No / Timeout| Fallback[Save to .topology/*.json]
+        POST --> ReturnOK[Return 200 JSON-RPC Result]
+        Fallback --> AppendNotice[Append TOPOLOGY_ERR_* Resilient Notice]
+        AppendNotice --> ReturnOK
+    end
+
+    ReturnOK -->|Unblocked Status| A
+    A -->|Continues Execution| NextTask[Execute Core Coding Tasks]
+```
+
+### 2. Standardized Error Taxonomy (`TOPOLOGY_ERR_*`)
+
+| Error Code | Layer | Trigger Condition | Fail-Open Fallback Behavior |
+|:---|:---|:---|:---|
+| `TOPOLOGY_ERR_BRIDGE_OFFLINE` | MCP / REST | Dev server at `http://localhost:5173` is not running | Workflow state is safely persisted to `.topology/plan.json`. Agent receives `200 OK` JSON-RPC result with unblocked confirmation. |
+| `TOPOLOGY_ERR_BRIDGE_TIMEOUT` | MCP / REST | Request to bridge exceeds 1500ms timeout | Aborts HTTP request cleanly, writes to `.topology/`, returns unblocked confirmation. |
+| `TOPOLOGY_ERR_CACHE_IO_FAILED` | Filesystem | Disk read/write fails in `.topology/` | Falls back to in-memory state repository. Agent continues unblocked. |
+| `TOPOLOGY_ERR_INVALID_SCHEMA` | Validation | Missing required parameters (e.g. missing `nodeId`) | Defaults missing fields or emits non-fatal notice. Agent does not crash. |
+| `TOPOLOGY_ERR_CYCLIC_DEPENDENCY` | Graph Invariants | Cyclic edges detected in incoming plan | Ignores circular back-edge in rendering; workflow proceeds. |
+| `TOPOLOGY_ERR_GATE_UNATTENDED` | HITL Review | Review gate requested while bridge is offline | Agent receives autonomy directive: prompt supervisor in chat or proceed autonomously. |
+| `TOPOLOGY_ERR_SSE_DROPPED` | Sync Engine | Browser SSE stream disconnected | Silent exponential backoff retry (1.5s, 3s, 6s, 10s max). UI remains interactive. |
+| `TOPOLOGY_ERR_UI_RENDER_CRASH` | Frontend UI | React render tree exception caught by ErrorBoundary | Displays error code, non-critical companion notice, and 1-click "Reset to Safe Canvas". |
+| `TOPOLOGY_ERR_INTERNAL` | MCP Server | Uncaught internal exception in tool execution | Converts to non-fatal JSON-RPC result payload so agent harness is never terminated. |
+
+### 3. Human-in-the-Loop Deadlock Safeguard
+When `topology_request_approval` is invoked without an active bridge supervisor:
+1. State is recorded as pending in `.topology/approvals.json`.
+2. Instead of blocking the agent in an infinite waiting loop, the tool returns:
+   `[TOPOLOGY_ERR_GATE_UNATTENDED]: Topology UI is unattended or offline. Prompt supervisor in chat, or proceed if invariant criteria are met.`
+3. The external agent can either prompt the user directly in terminal/chat or proceed according to safety rules.
+
+
 
 
 

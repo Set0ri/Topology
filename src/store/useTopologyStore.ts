@@ -238,8 +238,9 @@ interface TopologyStore {
     activeAgents: number;
     desktopNotificationsEnabled: boolean;
     audioChimesEnabled: boolean;
+    lastErrorCode?: string | null;
   };
-  setLiveSyncConnected: (connected: boolean) => void;
+  setLiveSyncConnected: (connected: boolean, errorCode?: string | null) => void;
   setLiveSyncHeartbeat: (timestamp: number) => void;
   setDesktopNotificationsEnabled: (enabled: boolean) => void;
   setAudioChimesEnabled: (enabled: boolean) => void;
@@ -309,6 +310,7 @@ export const useTopologyStore = create<TopologyStore>((set, get) => {
       activeAgents: 1,
       desktopNotificationsEnabled: typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted',
       audioChimesEnabled: true,
+      lastErrorCode: null,
     },
     filterExecutionType: 'all',
     filterRole: 'all',
@@ -2213,9 +2215,13 @@ export const useTopologyStore = create<TopologyStore>((set, get) => {
       };
     },
 
-    setLiveSyncConnected: (connected) => {
+    setLiveSyncConnected: (connected, errorCode = null) => {
       set(s => ({
-        liveSyncStatus: { ...s.liveSyncStatus, connected }
+        liveSyncStatus: {
+          ...s.liveSyncStatus,
+          connected,
+          lastErrorCode: connected ? null : (errorCode || s.liveSyncStatus.lastErrorCode || null)
+        }
       }));
     },
 

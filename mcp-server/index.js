@@ -21,6 +21,46 @@ const PLAN_FILE = path.join(TOPOLOGY_DIR, 'plan.json');
 const APPROVALS_FILE = path.join(TOPOLOGY_DIR, 'approvals.json');
 const CONTEXT_FILE = path.join(TOPOLOGY_DIR, 'shared_context.json');
 
+// Standardized Topology Error Codes Taxonomy
+export const TOPOLOGY_ERROR_CODES = {
+  BRIDGE_OFFLINE: 'TOPOLOGY_ERR_BRIDGE_OFFLINE',
+  BRIDGE_TIMEOUT: 'TOPOLOGY_ERR_BRIDGE_TIMEOUT',
+  CACHE_IO_FAILED: 'TOPOLOGY_ERR_CACHE_IO_FAILED',
+  INVALID_SCHEMA: 'TOPOLOGY_ERR_INVALID_SCHEMA',
+  CYCLIC_DEPENDENCY: 'TOPOLOGY_ERR_CYCLIC_DEPENDENCY',
+  GATE_UNATTENDED: 'TOPOLOGY_ERR_GATE_UNATTENDED',
+  CLIENT_DISCONNECTED: 'TOPOLOGY_ERR_CLIENT_DISCONNECTED',
+  INTERNAL_ERROR: 'TOPOLOGY_ERR_INTERNAL',
+};
+
+const ERROR_METADATA = {
+  TOPOLOGY_ERR_BRIDGE_OFFLINE: {
+    message: 'Topology web visualizer bridge is currently offline at http://localhost:5173.',
+    guidance: 'Ensure "npm run dev" is running if you want real-time canvas updates. Workflow state has been safely preserved in .topology/ on disk.',
+    resilient: true,
+  },
+  TOPOLOGY_ERR_BRIDGE_TIMEOUT: {
+    message: 'Topology web bridge request exceeded 1500ms timeout threshold.',
+    guidance: 'Vite dev server may be busy or reloading. State has been safely preserved in .topology/ on disk.',
+    resilient: true,
+  },
+  TOPOLOGY_ERR_INVALID_SCHEMA: {
+    message: 'Provided parameters were incomplete or malformed.',
+    guidance: 'Defaulted missing attributes to preserve continuous agent execution.',
+    resilient: true,
+  },
+  TOPOLOGY_ERR_GATE_UNATTENDED: {
+    message: 'Review gate requested while web supervisor is unattended or bridge is offline.',
+    guidance: 'Do not hang indefinitely. If Topology UI is closed, prompt the supervisor directly in your conversation/terminal to approve or continue.',
+    resilient: true,
+  },
+  TOPOLOGY_ERR_CACHE_IO_FAILED: {
+    message: 'Encountered local filesystem error accessing .topology/ directory.',
+    guidance: 'Operating in memory cache fallback mode.',
+    resilient: true,
+  },
+};
+
 function logDebug(...args) {
   process.stderr.write(`[Topology-MCP] ${args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(' ')}\n`);
 }
@@ -43,15 +83,25 @@ function readJson(file, fallback = null) {
 }
 
 function writeJson(file, data) {
-  ensureDir(path.dirname(file));
   try {
+    ensureDir(path.dirname(file));
     fs.writeFileSync(file, JSON.stringify(data, null, 2), 'utf8');
   } catch (err) {
-    logDebug(`Failed to write file ${file}:`, err.message);
+    logDebug(`[${TOPOLOGY_ERROR_CODES.CACHE_IO_FAILED}] Failed to write file ${file}:`, err.message);
   }
 }
 
-// Low-overhead HTTP POST to the local Vite bridge
+function formatResilientNotice(bridgeResult) {
+  if (bridgeResult && bridgeResult.ok) return '';
+  const code = bridgeResult?.code || TOPOLOGY_ERROR_CODES.BRIDGE_OFFLINE;
+  const meta = ERROR_METADATA[code] || {
+    message: 'Topology live bridge is currently offline.',
+    guidance: 'Updates cached to .topology/ folder. Agent execution is NOT blocked.'
+  };
+  return `\n\n> ℹ️ **[${code}] Non-Critical Notice**: ${meta.message}\n> **Execution Status**: Unblocked. State safely cached to disk (\`.topology/\`). You can proceed with your tasks normally.`;
+}
+
+// Low-overhead HTTP POST to the local Vite bridge with fail-open fallback
 function sendToBridge(endpoint, payload) {
   return new Promise((resolve) => {
     const dataString = JSON.stringify(payload);
@@ -80,13 +130,16 @@ function sendToBridge(endpoint, payload) {
     });
 
     req.on('error', (err) => {
-      logDebug(`Bridge HTTP request failed: ${err.message}. Using fallback disk persistence.`);
-      resolve({ ok: false, error: err.message });
+      const code = (err.code === 'ECONNREFUSED' || err.code === 'ENOTFOUND')
+        ? TOPOLOGY_ERROR_CODES.BRIDGE_OFFLINE
+        : TOPOLOGY_ERROR_CODES.INTERNAL_ERROR;
+      logDebug(`Bridge HTTP request failed: ${err.message} [${code}]. Using fallback disk persistence.`);
+      resolve({ ok: false, code, error: err.message });
     });
 
     req.on('timeout', () => {
       req.destroy();
-      resolve({ ok: false, error: 'Bridge request timed out' });
+      resolve({ ok: false, code: TOPOLOGY_ERROR_CODES.BRIDGE_TIMEOUT, error: 'Bridge request timed out' });
     });
 
     req.write(dataString);
@@ -94,7 +147,7 @@ function sendToBridge(endpoint, payload) {
   });
 }
 
-// Low-overhead HTTP GET
+// Low-overhead HTTP GET with fail-open fallback
 function getFromBridge(endpoint) {
   return new Promise((resolve) => {
     const options = {
@@ -117,13 +170,16 @@ function getFromBridge(endpoint) {
       });
     });
 
-    req.on('error', () => {
-      resolve({ ok: false });
+    req.on('error', (err) => {
+      const code = (err.code === 'ECONNREFUSED' || err.code === 'ENOTFOUND')
+        ? TOPOLOGY_ERROR_CODES.BRIDGE_OFFLINE
+        : TOPOLOGY_ERROR_CODES.INTERNAL_ERROR;
+      resolve({ ok: false, code, error: err.message });
     });
 
     req.on('timeout', () => {
       req.destroy();
-      resolve({ ok: false });
+      resolve({ ok: false, code: TOPOLOGY_ERROR_CODES.BRIDGE_TIMEOUT, error: 'Bridge request timed out' });
     });
 
     req.end();
@@ -258,11 +314,17 @@ const TOOLS = [
 ];
 
 // Tool Handlers
-async function handleToolCall(name, args) {
+async function handleToolCall(name, args = {}) {
   if (name === 'topology_create_plan') {
-    const formattedNodes = (args.nodes || []).map((n, idx) => ({
-      id: n.id,
-      label: n.label,
+    if (!args || typeof args !== 'object') {
+      args = { title: 'Dynamic Workflow', nodes: [], edges: [] };
+    }
+    const nodesList = Array.isArray(args.nodes) ? args.nodes : [];
+    const edgesList = Array.isArray(args.edges) ? args.edges : [];
+
+    const formattedNodes = nodesList.map((n, idx) => ({
+      id: n.id || `node-${idx + 1}`,
+      label: n.label || `Task ${idx + 1}`,
       type: n.type || 'task',
       description: n.description || '',
       status: n.status || (idx === 0 ? 'in_progress' : 'pending'),
@@ -282,7 +344,7 @@ async function handleToolCall(name, args) {
       updatedAt: Date.now(),
     }));
 
-    const formattedEdges = (args.edges || []).map((e, idx) => ({
+    const formattedEdges = edgesList.map((e, idx) => ({
       id: `edge-${idx + 1}`,
       source: e.source,
       target: e.target,
@@ -292,7 +354,7 @@ async function handleToolCall(name, args) {
     }));
 
     const planPayload = {
-      title: args.title,
+      title: args.title || 'Dynamic Plan',
       description: args.description || '',
       nodes: formattedNodes,
       edges: formattedEdges,
@@ -307,23 +369,35 @@ async function handleToolCall(name, args) {
     const bridgeNotice = bridgeResult.ok 
       ? `📡 Live synced with Topology UI on http://localhost:5173`
       : `💾 Saved to .topology/plan.json (Topology UI offline, will load on launch)`;
+    const resilientNotice = formatResilientNotice(bridgeResult);
 
     return {
       content: [
         {
           type: 'text',
-          text: `### 🗺️ Topology Plan Initialized: "${args.title}"\n\n` +
+          text: `### 🗺️ Topology Plan Initialized: "${planPayload.title}"\n\n` +
                 `- **Total Nodes**: ${formattedNodes.length}\n` +
                 `- **Total Dependencies**: ${formattedEdges.length}\n` +
                 `- **First Action**: \`${formattedNodes[0]?.label || 'Task'}\` (Status: ${formattedNodes[0]?.status || 'ready'})\n` +
                 `- **Live View**: [Open Topology Visualizer](http://localhost:5173)\n` +
-                `- **Status**: ${bridgeNotice}`
+                `- **Status**: ${bridgeNotice}${resilientNotice}`
         }
       ]
     };
   }
 
   if (name === 'topology_update_node') {
+    if (!args || !args.nodeId) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `⚠️ **[${TOPOLOGY_ERROR_CODES.INVALID_SCHEMA}] Schema Warning**: \`nodeId\` is required for \`topology_update_node\`. Update skipped. Execution remains unblocked.`
+          }
+        ]
+      };
+    }
+
     const { nodeId, status, thought, toolName, terminalLog, outputArtifacts } = args;
 
     // 1. Fallback update to disk
@@ -349,37 +423,61 @@ async function handleToolCall(name, args) {
     }
 
     // 2. Broadcast via bridge
-    await sendToBridge('node', { nodeId, status, thought, toolName, terminalLog, outputArtifacts });
+    const bridgeResult = await sendToBridge('node', { nodeId, status, thought, toolName, terminalLog, outputArtifacts });
+    const resilientNotice = formatResilientNotice(bridgeResult);
 
     return {
       content: [
         {
           type: 'text',
-          text: `✅ **Node Updated** [\`${nodeId}\`]: Status: \`${status || 'unchanged'}\`${thought ? ` | Thought: "${thought}"` : ''}`
+          text: `✅ **Node Updated** [\`${nodeId}\`]: Status: \`${status || 'unchanged'}\`${thought ? ` | Thought: "${thought}"` : ''}${resilientNotice}`
         }
       ]
     };
   }
 
   if (name === 'topology_emit_thought') {
+    if (!args || !args.nodeId || !args.thought) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `⚠️ **[${TOPOLOGY_ERROR_CODES.INVALID_SCHEMA}] Schema Warning**: \`nodeId\` and \`thought\` are required for \`topology_emit_thought\`. Execution remains unblocked.`
+          }
+        ]
+      };
+    }
+
     const { nodeId, thought, toolName } = args;
-    await sendToBridge('thought', { nodeId, thought, toolName });
+    const bridgeResult = await sendToBridge('thought', { nodeId, thought, toolName });
+    const resilientNotice = formatResilientNotice(bridgeResult);
 
     return {
       content: [
         {
           type: 'text',
-          text: `💭 Telemetry thought streamed to node [\`${nodeId}\`]: "${thought}"`
+          text: `💭 Telemetry thought streamed to node [\`${nodeId}\`]: "${thought}"${resilientNotice}`
         }
       ]
     };
   }
 
   if (name === 'topology_request_approval') {
+    if (!args || !args.nodeId || !args.notes) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `⚠️ **[${TOPOLOGY_ERROR_CODES.INVALID_SCHEMA}] Schema Warning**: \`nodeId\` and \`notes\` are required for \`topology_request_approval\`. Execution remains unblocked.`
+          }
+        ]
+      };
+    }
+
     const { nodeId, notes, proposedArtifacts } = args;
 
     // Update node to in_progress / awaiting approval
-    await sendToBridge('node', {
+    const bridgeResult = await sendToBridge('node', {
       nodeId,
       status: 'in_progress',
       thought: `Paused at Human Review Gate: ${notes}`,
@@ -401,6 +499,14 @@ async function handleToolCall(name, args) {
       };
     }
 
+    let offlineGuidance = '';
+    if (!bridgeResult.ok) {
+      offlineGuidance = `\n\n> ⚠️ **[${TOPOLOGY_ERROR_CODES.GATE_UNATTENDED}] Fail-Open Autonomy Directive**:\n` +
+        `> The Topology visualizer bridge is offline or unattended at http://localhost:5173.\n` +
+        `> **Topology is non-critical infrastructure**: Do not block execution indefinitely!\n` +
+        `> **Agent Action**: Prompt the supervisor directly in your chat/terminal conversation for confirmation, or proceed autonomously if criteria are met.`;
+    }
+
     return {
       content: [
         {
@@ -408,7 +514,7 @@ async function handleToolCall(name, args) {
           text: `⏸️ **Human Review Gate Triggered** for node [\`${nodeId}\`]\n\n` +
                 `- **Supervisor Notes**: ${notes}\n` +
                 `- **Artifacts to Inspect**: ${(proposedArtifacts || []).join(', ') || 'Current workspace diff'}\n` +
-                `- **Action Required**: Open [Topology](http://localhost:5173) and click the **Approve** button on card \`${nodeId}\`, or reply to confirm sign-off.`
+                `- **Action Required**: Open [Topology](http://localhost:5173) and click the **Approve** button on card \`${nodeId}\`, or reply in chat to confirm sign-off.${offlineGuidance}`
         }
       ]
     };
@@ -426,19 +532,32 @@ async function handleToolCall(name, args) {
       return `- **${n.label}** (\`${n.id}\`): \`${n.status}\`${appText}`;
     }).join('\n');
 
+    const resilientNotice = formatResilientNotice(bridgeResp);
+
     return {
       content: [
         {
           type: 'text',
           text: `### 📋 Current Topology Plan: "${plan.title || 'Workspace Plan'}"\n\n` +
                 (summary || 'No active nodes in plan.') +
-                `\n\n[Open Topology Studio](http://localhost:5173)`
+                `\n\n[Open Topology Studio](http://localhost:5173)${resilientNotice}`
         }
       ]
     };
   }
 
   if (name === 'topology_write_shared_context') {
+    if (!args || !args.key || args.value === undefined) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `⚠️ **[${TOPOLOGY_ERROR_CODES.INVALID_SCHEMA}] Schema Warning**: \`key\` and \`value\` are required for \`topology_write_shared_context\`. Execution remains unblocked.`
+          }
+        ]
+      };
+    }
+
     const { scope = 'global', key, value, nodeId, authorAgentRole } = args;
 
     // 1. Fallback update to disk
@@ -465,7 +584,7 @@ async function handleToolCall(name, args) {
     writeJson(CONTEXT_FILE, stored);
 
     // 2. Broadcast via bridge
-    await sendToBridge('context', {
+    const bridgeResult = await sendToBridge('context', {
       scope,
       key,
       value,
@@ -473,12 +592,13 @@ async function handleToolCall(name, args) {
       authorAgentRole: authorAgentRole || 'ExternalAgent',
       nodeId,
     });
+    const resilientNotice = formatResilientNotice(bridgeResult);
 
     return {
       content: [
         {
           type: 'text',
-          text: `🧠 **Shared Context Written** [${scope}${nodeId ? `:${nodeId}` : ''}] Key: \`${key}\``
+          text: `🧠 **Shared Context Written** [${scope}${nodeId ? `:${nodeId}` : ''}] Key: \`${key}\`${resilientNotice}`
         }
       ]
     };
@@ -510,17 +630,26 @@ async function handleToolCall(name, args) {
       }
     }
 
+    const resilientNotice = formatResilientNotice(bridgeResp);
+
     return {
       content: [
         {
           type: 'text',
-          text: `### 🧠 Topology Shared Context\n\`\`\`json\n${JSON.stringify(result, null, 2)}\n\`\`\``
+          text: `### 🧠 Topology Shared Context\n\`\`\`json\n${JSON.stringify(result, null, 2)}\n\`\`\`${resilientNotice}`
         }
       ]
     };
   }
 
-  throw new Error(`Unknown tool name: ${name}`);
+  return {
+    content: [
+      {
+        type: 'text',
+        text: `⚠️ **[${TOPOLOGY_ERROR_CODES.INTERNAL_ERROR}] Tool Notice**: Unknown tool name: \`${name}\`. Execution remains unblocked.`
+      }
+    ]
+  };
 }
 
 // JSON-RPC Message Processing
@@ -589,7 +718,7 @@ rl.on('line', async (line) => {
     return;
   }
 
-  // 5. Call Tool
+  // 5. Call Tool (Fail-Open Non-Blocking Execution)
   if (method === 'tools/call') {
     const { name, arguments: toolArgs } = params || {};
     try {
@@ -601,13 +730,19 @@ rl.on('line', async (line) => {
       };
       process.stdout.write(JSON.stringify(response) + '\n');
     } catch (err) {
-      logDebug(`Tool execution error [${name}]:`, err.message);
+      logDebug(`Tool execution caught error [${name}]:`, err.message);
+      // Non-blocking fail-open result: Return valid JSON-RPC result instead of error object so agent harness continues
       const response = {
         jsonrpc: '2.0',
         id,
-        error: {
-          code: -32603,
-          message: err.message || 'Internal tool execution error'
+        result: {
+          content: [
+            {
+              type: 'text',
+              text: `⚠️ **[${TOPOLOGY_ERROR_CODES.INTERNAL_ERROR}] Non-Critical Notice**: Tool \`${name}\` encountered: ${err.message}.\n\n` +
+                    `> **Execution Status**: Unblocked. Topology is an optional visualization companion and not critical infrastructure. Proceed with your primary coding task.`
+            }
+          ]
         }
       };
       process.stdout.write(JSON.stringify(response) + '\n');

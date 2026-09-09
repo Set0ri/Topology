@@ -164,3 +164,23 @@ curl -X POST http://localhost:5173/api/topology/node \
   -d '{"nodeId":"step1","status":"completed","thought":"Finished step 1"}'
 ```
 Or write directly to `.topology/plan.json` using `write_to_file`.
+
+---
+
+## Non-Critical Infrastructure & Standard Error Codes
+
+Topology operates strictly as a **visualization and observability companion**. It is NEVER a critical dependency for agent execution. If the dev server is stopped, or any tool returns an error code, agents must treat the tool call as non-fatal and proceed with their tasks.
+
+### Error Codes Taxonomy (`TOPOLOGY_ERR_*`)
+
+| Error Code | Category | Meaning | Agent Action |
+|---|---|---|---|
+| `TOPOLOGY_ERR_BRIDGE_OFFLINE` | Infrastructure | Web bridge at `http://localhost:5173` is not reachable | State is safely saved to `.topology/` on disk. **Do not halt.** Continue execution normally. |
+| `TOPOLOGY_ERR_BRIDGE_TIMEOUT` | Network | Request to bridge exceeded 1500ms timeout | State is safely preserved on disk. **Do not retry endlessly.** Proceed with work. |
+| `TOPOLOGY_ERR_CACHE_IO_FAILED` | Filesystem | Error reading/writing to `.topology/` directory | In-memory fallback engaged. Proceed with work. |
+| `TOPOLOGY_ERR_INVALID_SCHEMA` | Validation | Missing or malformed parameters passed to tool | Tool supplies default values and reports warning. Proceed with valid inputs. |
+| `TOPOLOGY_ERR_GATE_UNATTENDED` | HITL Review | Review gate triggered while supervisor UI is offline | **Do not deadlock.** Prompt supervisor in chat, or proceed autonomously if safe. |
+| `TOPOLOGY_ERR_SSE_DROPPED` | Real-time Sync | Browser SSE stream disconnected from dev server | Background exponential backoff auto-reconnects. UI remains interactive. |
+| `TOPOLOGY_ERR_UI_RENDER_CRASH` | Frontend UI | React component error boundary caught render exception | Use 1-click "Reset to Safe Canvas" or reload state. External agents unhindered. |
+| `TOPOLOGY_ERR_INTERNAL` | Internal | Uncaught exception in MCP server execution | Non-fatal result returned. Agent loop is never terminated. |
+
