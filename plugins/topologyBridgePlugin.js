@@ -9,6 +9,8 @@ import {
   syncGitLog,
   LOG_FILE,
 } from '../mcp-server/gitLock.js';
+import { budgetTracker } from '../mcp-server/budgetTracker.js';
+import { councilOrchestrator } from '../mcp-server/councilOrchestrator.js';
 
 export function topologyBridgePlugin() {
   const clients = new Map();
@@ -50,7 +52,128 @@ export function topologyBridgePlugin() {
     }
   };
 
-  const loadAllPlans = () => {
+  const ensureSequentialEdges = (nodes, edges) => {
+    if (Array.isArray(edges) && edges.length > 0) return edges;
+    if (!Array.isArray(nodes) || nodes.length <= 1) return [];
+    return nodes.slice(0, -1).map((node, i) => {
+      const nextNode = nodes[i + 1];
+      const sourceId = typeof node === 'string' ? node : node.id;
+      const targetId = typeof nextNode === 'string' ? nextNode : nextNode.id;
+      return {
+        id: `edge-${sourceId}-${targetId}`,
+        source: sourceId,
+        target: targetId,
+        type: 'depends_on',
+        label: 'depends_on',
+        animated: true,
+      };
+    });
+  };
+
+  const reconcilePlans = (plans, options = {}) => {
+    if (!plans || typeof plans !== 'object') return { plans: {}, changed: false };
+    const activeLocks = options.activeLocks || getActiveLocks() || [];
+    const clientCount = options.clientCount !== undefined ? options.clientCount : clients.size;
+    const now = Date.now();
+    let hasChanges = false;
+    const cleanedPlans = {};
+
+    for (const [key, plan] of Object.entries(plans)) {
+      if (!plan || typeof plan !== 'object' || !plan.id) {
+        hasChanges = true;
+        continue;
+      }
+
+      // Ensure nodes is an array of non-null objects
+      const rawNodes = Array.isArray(plan.nodes) ? plan.nodes.filter(Boolean) : [];
+      let updatedEdges = ensureSequentialEdges(rawNodes, plan.edges);
+      let planStatus = plan.status || 'active';
+      let completedAt = plan.completedAt;
+      let pausedAt = plan.pausedAt;
+      let summary = plan.summary;
+      let activeTool = plan.activeTool;
+      let latestThought = plan.latestThought;
+
+      const completedNodesCount = rawNodes.filter(n => n.status === 'completed').length;
+      const inProgressNodes = rawNodes.filter(n => n.status === 'in_progress');
+      const allNodesCompleted = rawNodes.length > 0 && completedNodesCount === rawNodes.length;
+
+      // Check for active advisory lock leases on this plan or its nodes
+      const hasActiveLock = activeLocks.some(lock => {
+        if (!lock || !lock.resource) return false;
+        if (lock.planId === plan.id || lock.resource.includes(plan.id)) return true;
+        return rawNodes.some(n => lock.resource === `node:${n.id}` || lock.resource === n.id);
+      });
+
+      // Calculate last recorded activity timestamp
+      let lastActivityTime = plan.updatedAt || plan.createdAt || 0;
+      for (const node of rawNodes) {
+        if (node.updatedAt && node.updatedAt > lastActivityTime) lastActivityTime = node.updatedAt;
+        if (node.context?.telemetry?.lastUpdated && node.context.telemetry.lastUpdated > lastActivityTime) {
+          lastActivityTime = node.context.telemetry.lastUpdated;
+        }
+      }
+
+      const idleDurationMs = now - lastActivityTime;
+      const isRecent = idleDurationMs < 5 * 60 * 1000; // within last 5 minutes
+
+      // Rule 1: 100% completed nodes -> status MUST be 'completed'
+      if (allNodesCompleted) {
+        if (planStatus !== 'completed') {
+          planStatus = 'completed';
+          completedAt = completedAt || lastActivityTime || now;
+          summary = summary || 'All workflow plan tasks completed successfully.';
+          hasChanges = true;
+        }
+        activeTool = undefined;
+      }
+      // Rule 2: Explicit user-driven terminal states ('archived', 'abandoned') are preserved
+      else if (planStatus === 'archived' || planStatus === 'abandoned') {
+        // preserve terminal state
+      }
+      // Rule 3: Active vs Paused/Inactive reconciliation based on live connection & active execution
+      else {
+        const isActivelyWorking = hasActiveLock || (inProgressNodes.length > 0 && isRecent);
+
+        if (isActivelyWorking) {
+          if (planStatus !== 'active') {
+            planStatus = 'active';
+            pausedAt = undefined;
+            hasChanges = true;
+          }
+        } else {
+          // If no active lock and no in_progress work or idle > 5 min, mark paused
+          if (planStatus === 'active') {
+            if (inProgressNodes.length === 0 || !isRecent || clientCount === 0) {
+              planStatus = 'paused';
+              pausedAt = pausedAt || now;
+              hasChanges = true;
+            }
+          }
+        }
+      }
+
+      if (plan.edges?.length !== updatedEdges.length || plan.status !== planStatus) {
+        hasChanges = true;
+      }
+
+      cleanedPlans[plan.id] = {
+        ...plan,
+        nodes: rawNodes,
+        edges: updatedEdges,
+        status: planStatus,
+        completedAt,
+        pausedAt,
+        summary,
+        activeTool,
+        latestThought,
+      };
+    }
+
+    return { plans: cleanedPlans, changed: hasChanges };
+  };
+
+  const loadAllPlans = (autoReconcile = true) => {
     let plans = readJsonFile(plansFilePath, null);
     if (!plans || typeof plans !== 'object') {
       plans = {};
@@ -67,12 +190,30 @@ export function topologyBridgePlugin() {
           agentAvatar: singlePlan.agentAvatar || '🤖',
           agentColor: singlePlan.agentColor || '#1a73e8',
           nodes: singlePlan.nodes || [],
-          edges: singlePlan.edges || [],
+          edges: ensureSequentialEdges(singlePlan.nodes, singlePlan.edges),
           createdAt: singlePlan.createdAt || Date.now(),
           updatedAt: singlePlan.updatedAt || Date.now(),
           status: 'active',
           source: singlePlan.source || 'antigravity_agent',
         };
+      }
+    }
+
+    if (autoReconcile) {
+      const activeLocks = getActiveLocks();
+      const { plans: cleaned, changed } = reconcilePlans(plans, { activeLocks, clientCount: clients.size });
+      if (changed) {
+        plans = cleaned;
+        saveAllPlans(plans, getActivePlanId(plans));
+      } else {
+        plans = cleaned;
+      }
+    } else {
+      // Ensure all loaded plans have edges if they have multiple nodes
+      for (const p of Object.values(plans)) {
+        if (p && Array.isArray(p.nodes) && p.nodes.length > 1 && (!Array.isArray(p.edges) || p.edges.length === 0)) {
+          p.edges = ensureSequentialEdges(p.nodes, p.edges);
+        }
       }
     }
     return plans;
@@ -126,6 +267,9 @@ export function topologyBridgePlugin() {
         progressPercent,
         updatedAt: plan.updatedAt || Date.now(),
         status: plan.status || 'active',
+        completedAt: plan.completedAt,
+        summary: plan.summary,
+        artifacts: plan.artifacts,
         hasActiveWork,
         latestThought,
         activeTool,
@@ -256,6 +400,20 @@ export function topologyBridgePlugin() {
   return {
     name: 'topology-bridge-plugin',
     configureServer(server) {
+      // Occasional background plan reconciliation (every 25 seconds)
+      const periodicReconcileTimer = setInterval(() => {
+        try {
+          const allPlans = loadAllPlans(true);
+          broadcast('budget_updated', budgetTracker.getBudgetStatus());
+        } catch (err) {
+          // ignore
+        }
+      }, 25000);
+
+      server.httpServer?.on('close', () => {
+        clearInterval(periodicReconcileTimer);
+      });
+
       server.middlewares.use(async (req, res, next) => {
         const url = req.url || '';
         if (!url.startsWith('/api/topology')) {
@@ -302,6 +460,9 @@ export function topologyBridgePlugin() {
           // Deliver active resource locks immediately
           const activeLocks = getActiveLocks();
           res.write(`event: locks_updated\ndata: ${JSON.stringify(activeLocks)}\n\n`);
+
+          // Deliver live council quota budget immediately
+          res.write(`event: budget_updated\ndata: ${JSON.stringify(budgetTracker.getBudgetStatus())}\n\n`);
 
           // Heartbeat keepalive every 20s
           const heartbeatTimer = setInterval(() => {
@@ -375,6 +536,27 @@ export function topologyBridgePlugin() {
           const allPlans = loadAllPlans();
           const activePlanId = getActivePlanId(allPlans);
           const summaries = getPlanSummaries(allPlans);
+
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: true,
+            activePlanId,
+            plans: summaries,
+            allPlans,
+          }));
+          return;
+        }
+
+        // 3a-2. Clean & Reconcile All Plans: /api/topology/plans/clean (GET or POST)
+        if ((pathname === '/api/topology/plans/clean' || pathname === '/api/topology/plans/reconcile') && (req.method === 'GET' || req.method === 'POST')) {
+          const allPlans = loadAllPlans(true);
+          const activePlanId = getActivePlanId(allPlans);
+          const summaries = getPlanSummaries(allPlans);
+          broadcast('plans_list_updated', { activePlanId, plans: summaries });
+          const currentPlan = allPlans[activePlanId];
+          if (currentPlan) {
+            broadcast('plan_status_changed', { planId: activePlanId, status: currentPlan.status, plan: currentPlan });
+          }
 
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({
@@ -509,10 +691,13 @@ export function topologyBridgePlugin() {
               ),
               agentColor: data.agentColor || existingPlan.agentColor || '#1a73e8',
               nodes: data.nodes || existingPlan.nodes || [],
-              edges: data.edges || existingPlan.edges || [],
+              edges: ensureSequentialEdges(data.nodes || existingPlan.nodes || [], data.edges || existingPlan.edges || []),
               createdAt: existingPlan.createdAt || Date.now(),
               updatedAt: Date.now(),
               status: data.status || existingPlan.status || 'active',
+              completedAt: data.completedAt !== undefined ? data.completedAt : existingPlan.completedAt,
+              summary: data.summary !== undefined ? data.summary : existingPlan.summary,
+              artifacts: data.artifacts !== undefined ? data.artifacts : existingPlan.artifacts,
               source: data.source || existingPlan.source || 'antigravity_agent',
               latestThought: data.latestThought || existingPlan.latestThought,
             };
@@ -547,6 +732,211 @@ export function topologyBridgePlugin() {
           return;
         }
 
+        // 4b. Mark Plan Completed: /api/topology/plan/complete (POST)
+        if (pathname === '/api/topology/plan/complete' && req.method === 'POST') {
+          try {
+            const data = await parseJsonBody(req);
+            const allPlans = loadAllPlans();
+            const currentActiveId = getActivePlanId(allPlans);
+            const targetPlanId = data.planId || currentActiveId;
+
+            const targetPlan = allPlans[targetPlanId];
+            if (!targetPlan) {
+              sendError(res, 404, TOPOLOGY_ERROR_CODES.NOT_FOUND, `Plan "${targetPlanId}" not found.`);
+              return;
+            }
+
+            const now = Date.now();
+            targetPlan.status = 'completed';
+            targetPlan.completedAt = now;
+            targetPlan.updatedAt = now;
+            if (data.summary) {
+              targetPlan.summary = data.summary;
+              targetPlan.latestThought = data.summary;
+            }
+            if (Array.isArray(data.artifacts)) {
+              targetPlan.artifacts = data.artifacts;
+            }
+
+            // Auto-complete remaining unfinished nodes unless explicitly disabled
+            if (data.autoCompleteNodes !== false && Array.isArray(targetPlan.nodes)) {
+              targetPlan.nodes.forEach((n) => {
+                if (n.status !== 'completed') {
+                  n.status = 'completed';
+                  n.updatedAt = now;
+                }
+              });
+            }
+
+            saveAllPlans(allPlans, currentActiveId);
+            const summaries = getPlanSummaries(allPlans);
+
+            // Append to execution log
+            try {
+              await appendLog({
+                action: 'plan_completed',
+                planId: targetPlanId,
+                thought: targetPlan.summary || `Plan "${targetPlan.title}" completed successfully.`,
+                status: 'completed',
+                payload: {
+                  completedAt: now,
+                  artifacts: targetPlan.artifacts || [],
+                  summary: targetPlan.summary,
+                },
+              });
+            } catch (err) {
+              console.warn('[Topology Bridge] Failed to append log for plan_completed:', err.message);
+            }
+
+            broadcast('plan_completed', {
+              planId: targetPlanId,
+              completedAt: now,
+              summary: targetPlan.summary,
+              artifacts: targetPlan.artifacts || [],
+            });
+            broadcast('plan_updated', targetPlan);
+            broadcast('plans_list_updated', { activePlanId: currentActiveId, plans: summaries });
+
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+              success: true,
+              message: `Plan "${targetPlan.title}" (${targetPlanId}) marked as completed.`,
+              planId: targetPlanId,
+              completedAt: now,
+              summary: targetPlan.summary,
+              artifacts: targetPlan.artifacts,
+              plan: targetPlan,
+            }));
+          } catch (err) {
+            sendError(res, 400, TOPOLOGY_ERROR_CODES.INVALID_SCHEMA, err.message || 'Invalid JSON body');
+          }
+          return;
+        }
+
+        // 4c. Reactivate Completed Plan: /api/topology/plan/reactivate (POST)
+        if (pathname === '/api/topology/plan/reactivate' && req.method === 'POST') {
+          try {
+            const data = await parseJsonBody(req);
+            const allPlans = loadAllPlans();
+            const currentActiveId = getActivePlanId(allPlans);
+            const targetPlanId = data.planId || currentActiveId;
+
+            const targetPlan = allPlans[targetPlanId];
+            if (!targetPlan) {
+              sendError(res, 404, TOPOLOGY_ERROR_CODES.NOT_FOUND, `Plan "${targetPlanId}" not found.`);
+              return;
+            }
+
+            targetPlan.status = 'active';
+            targetPlan.updatedAt = Date.now();
+
+            saveAllPlans(allPlans, currentActiveId);
+            const summaries = getPlanSummaries(allPlans);
+
+            broadcast('plan_updated', targetPlan);
+            broadcast('plans_list_updated', { activePlanId: currentActiveId, plans: summaries });
+
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+              success: true,
+              message: `Plan "${targetPlan.title}" (${targetPlanId}) reactivated.`,
+              planId: targetPlanId,
+              plan: targetPlan,
+            }));
+          } catch (err) {
+            sendError(res, 400, TOPOLOGY_ERROR_CODES.INVALID_SCHEMA, err.message || 'Invalid JSON body');
+          }
+          return;
+        }
+
+        // 4d. Update Plan Lifecycle Status: /api/topology/plan/status (POST)
+        if (pathname === '/api/topology/plan/status' && req.method === 'POST') {
+          try {
+            const data = await parseJsonBody(req);
+            const allPlans = loadAllPlans();
+            const currentActiveId = getActivePlanId(allPlans);
+            const targetPlanId = data.planId || currentActiveId;
+
+            const targetPlan = allPlans[targetPlanId];
+            if (!targetPlan) {
+              sendError(res, 404, TOPOLOGY_ERROR_CODES.NOT_FOUND, `Plan "${targetPlanId}" not found.`);
+              return;
+            }
+
+            const validStatuses = ['active', 'inactive', 'paused', 'completed', 'archived', 'abandoned'];
+            const requestedStatus = data.status;
+            if (!requestedStatus || !validStatuses.includes(requestedStatus)) {
+              sendError(res, 400, TOPOLOGY_ERROR_CODES.INVALID_SCHEMA, `Status must be one of: ${validStatuses.join(', ')}`);
+              return;
+            }
+
+            const now = Date.now();
+            targetPlan.status = requestedStatus;
+            targetPlan.updatedAt = now;
+
+            if (requestedStatus === 'completed') {
+              targetPlan.completedAt = now;
+              if (data.summary) targetPlan.summary = data.summary;
+              if (Array.isArray(data.artifacts)) targetPlan.artifacts = data.artifacts;
+              if (data.autoCompleteNodes !== false && Array.isArray(targetPlan.nodes)) {
+                targetPlan.nodes.forEach(n => {
+                  if (n.status !== 'completed') {
+                    n.status = 'completed';
+                    n.updatedAt = now;
+                  }
+                });
+              }
+            } else if (requestedStatus === 'archived') {
+              targetPlan.archivedAt = now;
+            } else if (requestedStatus === 'abandoned') {
+              targetPlan.abandonedAt = now;
+              targetPlan.abandonReason = data.reason || data.summary || 'User abandoned';
+            } else if (requestedStatus === 'paused' || requestedStatus === 'inactive') {
+              targetPlan.pausedAt = now;
+            }
+
+            saveAllPlans(allPlans, currentActiveId);
+            const summaries = getPlanSummaries(allPlans);
+
+            try {
+              await appendLog({
+                action: 'plan_status_changed',
+                planId: targetPlanId,
+                status: requestedStatus,
+                thought: `Plan "${targetPlan.title}" status transitioned to ${requestedStatus}.`,
+                details: {
+                  status: requestedStatus,
+                  abandonReason: targetPlan.abandonReason,
+                  summary: targetPlan.summary,
+                },
+              });
+            } catch (err) {
+              console.warn('[Topology Bridge] Failed to append log for plan_status_changed:', err.message);
+            }
+
+            broadcast('plan_status_changed', {
+              planId: targetPlanId,
+              status: requestedStatus,
+              updatedAt: now,
+              plan: targetPlan,
+            });
+            broadcast('plan_updated', targetPlan);
+            broadcast('plans_list_updated', { activePlanId: currentActiveId, plans: summaries });
+
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+              success: true,
+              message: `Plan "${targetPlan.title}" status changed to ${requestedStatus}.`,
+              planId: targetPlanId,
+              status: requestedStatus,
+              plan: targetPlan,
+            }));
+          } catch (err) {
+            sendError(res, 400, TOPOLOGY_ERROR_CODES.INVALID_SCHEMA, err.message || 'Invalid JSON body');
+          }
+          return;
+        }
+
         // 5. Update Node Status & Telemetry: /api/topology/node (POST)
         if (pathname === '/api/topology/node' && req.method === 'POST') {
           try {
@@ -563,9 +953,10 @@ export function topologyBridgePlugin() {
             const targetPlanId = requestedPlanId || findPlanByNodeId(allPlans, nodeId) || activePlanId;
 
             if (allPlans[targetPlanId] && Array.isArray(allPlans[targetPlanId].nodes)) {
-              const nodeIdx = allPlans[targetPlanId].nodes.findIndex((n) => n.id === nodeId);
+              const planNodes = allPlans[targetPlanId].nodes;
+              const nodeIdx = planNodes.findIndex((n) => n.id === nodeId);
               if (nodeIdx !== -1) {
-                const targetNode = allPlans[targetPlanId].nodes[nodeIdx];
+                const targetNode = planNodes[nodeIdx];
                 if (status) targetNode.status = status;
                 targetNode.updatedAt = Date.now();
                 targetNode.context = targetNode.context || {};
@@ -587,8 +978,52 @@ export function topologyBridgePlugin() {
                 if (outputArtifacts) {
                   targetNode.context.outputArtifacts = outputArtifacts;
                 }
+
+                // If moving to in_progress, ensure earlier in_progress node is marked completed for single-agent flow
+                if (status === 'in_progress') {
+                  planNodes.forEach((n, idx) => {
+                    if (idx !== nodeIdx && n.status === 'in_progress') {
+                      n.status = 'completed';
+                      n.updatedAt = Date.now();
+                    }
+                  });
+                }
+
+                // If advanceNextNodeId is requested, advance next node
+                if (data.advanceNextNodeId) {
+                  const nextNode = planNodes.find(n => n.id === data.advanceNextNodeId);
+                  if (nextNode) {
+                    nextNode.status = 'in_progress';
+                    nextNode.updatedAt = Date.now();
+                  }
+                }
+
+                // Auto-complete plan if all nodes are completed (prevent hanging plans!)
+                let isPlanCompleted = false;
+                if (status === 'completed' || data.autoCompletePlan) {
+                  const allDone = planNodes.length > 0 && planNodes.every(n => n.status === 'completed');
+                  if (allDone) {
+                    allPlans[targetPlanId].status = 'completed';
+                    allPlans[targetPlanId].completedAt = Date.now();
+                    if (!allPlans[targetPlanId].summary) {
+                      allPlans[targetPlanId].summary = thought || 'All workflow plan tasks completed successfully.';
+                    }
+                    isPlanCompleted = true;
+                  }
+                }
+
                 allPlans[targetPlanId].updatedAt = Date.now();
                 saveAllPlans(allPlans, activePlanId);
+
+                if (isPlanCompleted) {
+                  broadcast('plan_status_changed', {
+                    planId: targetPlanId,
+                    status: 'completed',
+                    summary: allPlans[targetPlanId].summary,
+                    timestamp: Date.now(),
+                  });
+                  broadcast('plan_updated', allPlans[targetPlanId]);
+                }
               }
             }
 
@@ -878,6 +1313,215 @@ export function topologyBridgePlugin() {
           } catch (err) {
             sendError(res, 500, TOPOLOGY_ERROR_CODES.INTERNAL_ERROR, err.message);
           }
+          return;
+        }
+
+        // 16. Get Council Budget & Quota Status: /api/topology/council/budget (GET)
+        if (pathname === '/api/topology/council/budget' && req.method === 'GET') {
+          const budget = budgetTracker.getBudgetStatus();
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true, budget }));
+          return;
+        }
+
+        // 17. Reset Council Budget: /api/topology/council/budget/reset (POST)
+        if (pathname === '/api/topology/council/budget/reset' && req.method === 'POST') {
+          try {
+            const body = await parseJsonBody(req);
+            const budget = budgetTracker.resetBudget(body.modelId || null);
+            broadcast('budget_updated', budget);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: true, budget }));
+          } catch (err) {
+            sendError(res, 400, TOPOLOGY_ERROR_CODES.INVALID_SCHEMA, err.message);
+          }
+          return;
+        }
+
+        // 18. Spawn Multi-Model Council Session: /api/topology/council/spawn (POST)
+        if (pathname === '/api/topology/council/spawn' && req.method === 'POST') {
+          try {
+            const {
+              goal,
+              planId,
+              rounds = 3,
+              strategy = 'halt_before_limit',
+              contextFiles = [],
+              constraints = [],
+              specialists,
+              saveAdr = true,
+            } = await parseJsonBody(req);
+
+            if (!goal) {
+              sendError(res, 400, TOPOLOGY_ERROR_CODES.INVALID_SCHEMA, 'Goal is required for council deliberation.');
+              return;
+            }
+
+            broadcast('council_started', { goal, planId, rounds, strategy, timestamp: Date.now() });
+
+            const session = await councilOrchestrator.spawnCouncil({
+              goal,
+              planId,
+              rounds,
+              strategy,
+              contextFiles,
+              constraints,
+              specialists,
+              saveAdr,
+            });
+
+            const updatedBudget = budgetTracker.getBudgetStatus();
+            broadcast('budget_updated', updatedBudget);
+            broadcast('council_completed', { session, budget: updatedBudget });
+
+            // Also broadcast updated plans list
+            const allPlans = loadAllPlans();
+            const activePlanId = getActivePlanId(allPlans);
+            const summaries = getPlanSummaries(allPlans);
+            broadcast('plans_list_updated', { activePlanId, plans: summaries });
+
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: true, session, budget: updatedBudget }));
+          } catch (err) {
+            sendError(res, 500, TOPOLOGY_ERROR_CODES.INTERNAL_ERROR, err.message);
+          }
+          return;
+        }
+
+        // 19. List Council Sessions: /api/topology/council/sessions (GET)
+        if (pathname === '/api/topology/council/sessions' && req.method === 'GET') {
+          const searchParams = new URL(url, 'http://localhost').searchParams;
+          const limit = parseInt(searchParams.get('limit') || '20', 10);
+          const sessions = councilOrchestrator.listCouncilSessions(limit);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true, count: sessions.length, sessions }));
+          return;
+        }
+
+        // 20. Get Council Session Details: /api/topology/council/session (GET)
+        if (pathname.startsWith('/api/topology/council/session') && req.method === 'GET' && pathname !== '/api/topology/council/sessions') {
+          const searchParams = new URL(url, 'http://localhost').searchParams;
+          const queryId = searchParams.get('id') || searchParams.get('sessionId');
+          const pathId = pathname.replace('/api/topology/council/session/', '').replace('/api/topology/council/session', '').trim();
+          const targetId = queryId || pathId || null;
+          const session = targetId ? councilOrchestrator.getCouncilSession(targetId) : councilOrchestrator.getLastSession();
+          if (!session) {
+            sendError(res, 404, TOPOLOGY_ERROR_CODES.NOT_FOUND, `Council session not found: ${targetId || 'latest'}`);
+            return;
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true, session }));
+          return;
+        }
+
+        // 21. Generate / Export Council ADR: /api/topology/council/adr (POST or GET)
+        if (pathname === '/api/topology/council/adr' && (req.method === 'POST' || req.method === 'GET')) {
+          try {
+            const body = req.method === 'POST' ? await parseJsonBody(req) : {};
+            const searchParams = new URL(url, 'http://localhost').searchParams;
+            const sessionId = body.sessionId || searchParams.get('sessionId');
+            const title = body.title || searchParams.get('title') || undefined;
+            const saveToDisk = body.saveToDisk !== false && searchParams.get('saveToDisk') !== 'false';
+
+            const session = sessionId ? councilOrchestrator.getCouncilSession(sessionId) : councilOrchestrator.getLastSession();
+            if (!session) {
+              sendError(res, 404, TOPOLOGY_ERROR_CODES.NOT_FOUND, 'No council deliberation session found to generate ADR.');
+              return;
+            }
+
+            const adr = councilOrchestrator.generateAdrMarkdown(session, { title, saveToDisk });
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: true, adr }));
+          } catch (err) {
+            sendError(res, 500, TOPOLOGY_ERROR_CODES.INTERNAL_ERROR, err.message);
+          }
+          return;
+        }
+
+        // 22. Ingest OODA Loop Telemetry: /api/topology/loop-telemetry (POST)
+        if (pathname === '/api/topology/loop-telemetry' && req.method === 'POST') {
+          try {
+            const body = await parseJsonBody(req);
+            const { planId, telemetry, iteration } = body;
+            if (!planId) {
+              sendError(res, 400, TOPOLOGY_ERROR_CODES.INVALID_SCHEMA, 'planId is required for loop telemetry.');
+              return;
+            }
+
+            const LOOPS_FILE = path.join(topologyDir, 'ooda_loops.json');
+            const allLoops = readJsonFile(LOOPS_FILE, {});
+            
+            if (telemetry) {
+              allLoops[planId] = telemetry;
+            } else {
+              const existing = allLoops[planId];
+              const cur = (existing && Array.isArray(existing.history)) ? existing : {
+                planId,
+                totalLoopsCompleted: existing?.totalLoopsCompleted || 0,
+                currentLoop: iteration?.loopNumber || existing?.iteration?.loopNumber || 1,
+                targetMaxLoops: iteration?.totalLoops || undefined,
+                activeStage: iteration?.stage || existing?.iteration?.stage || 'observe',
+                isConverged: iteration?.status === 'converged',
+                history: existing?.iteration ? [existing.iteration] : [],
+                updatedAt: Date.now(),
+              };
+              if (iteration) {
+                cur.currentLoop = iteration.loopNumber || cur.currentLoop;
+                if (iteration.stage) cur.activeStage = iteration.stage;
+                if (iteration.status === 'converged') cur.isConverged = true;
+                if (iteration.totalLoops) cur.targetMaxLoops = iteration.totalLoops;
+                cur.updatedAt = Date.now();
+                if (!Array.isArray(cur.history)) cur.history = [];
+                cur.history.push(iteration);
+                if (iteration.stage === 'update' && (iteration.status === 'completed' || iteration.status === 'converged')) {
+                  cur.totalLoopsCompleted = Math.max(cur.totalLoopsCompleted || 0, cur.currentLoop);
+                }
+              }
+              allLoops[planId] = cur;
+            }
+            writeJsonFile(LOOPS_FILE, allLoops);
+
+            const activeLoopRecord = allLoops[planId];
+
+            // Also update plan record
+            const plans = loadAllPlans();
+            if (plans[planId]) {
+              plans[planId].oodaLoop = activeLoopRecord;
+              if (iteration?.thought) plans[planId].latestThought = iteration.thought;
+              plans[planId].updatedAt = Date.now();
+              saveAllPlans(plans);
+            }
+
+            broadcast('loop_telemetry_updated', { planId, telemetry: activeLoopRecord, iteration });
+
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: true, telemetry: activeLoopRecord }));
+          } catch (err) {
+            sendError(res, 500, TOPOLOGY_ERROR_CODES.INTERNAL_ERROR, err.message);
+          }
+          return;
+        }
+
+        // 23. Query OODA Loop Telemetry: /api/topology/loop-telemetry (GET)
+        if (pathname === '/api/topology/loop-telemetry' && req.method === 'GET') {
+          const searchParams = new URL(url, 'http://localhost').searchParams;
+          const planId = searchParams.get('planId');
+          const LOOPS_FILE = path.join(topologyDir, 'ooda_loops.json');
+          const allLoops = readJsonFile(LOOPS_FILE, {});
+
+          if (planId) {
+            const loopData = allLoops[planId];
+            if (!loopData) {
+              sendError(res, 404, TOPOLOGY_ERROR_CODES.NOT_FOUND, `No loop telemetry found for plan: ${planId}`);
+              return;
+            }
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: true, telemetry: loopData }));
+            return;
+          }
+
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true, count: Object.keys(allLoops).length, loops: allLoops }));
           return;
         }
 

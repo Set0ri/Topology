@@ -85,6 +85,7 @@ export interface AgentWorker {
   contributionRole?: 'primary' | 'reviewer' | 'critic' | 'debater' | 'auditor';
   assignedNodeId?: string;
   tools?: string[];
+  isDisconnected?: boolean;
 }
 
 export interface AgentActivityEvent {
@@ -311,6 +312,14 @@ export interface GitSyncStatus {
   error?: string | null;
 }
 
+export type PlanStatus = 
+  | 'active' 
+  | 'inactive' 
+  | 'paused' 
+  | 'completed' 
+  | 'archived' 
+  | 'abandoned';
+
 export interface TopologyPlanRecord {
   id: string;
   title: string;
@@ -325,10 +334,18 @@ export interface TopologyPlanRecord {
   edges: TopologyEdge[];
   createdAt: number;
   updatedAt: number;
-  status: 'active' | 'completed' | 'paused' | 'failed';
+  status: PlanStatus;
+  completedAt?: number;
+  archivedAt?: number;
+  abandonedAt?: number;
+  abandonReason?: string;
+  pausedAt?: number;
+  summary?: string;
+  artifacts?: string[];
   source?: string;
   latestThought?: string;
   activeTool?: string;
+  oodaLoop?: OodaLoopTelemetry;
 }
 
 export interface PlanSummary {
@@ -345,8 +362,220 @@ export interface PlanSummary {
   inProgressCount: number;
   progressPercent: number;
   updatedAt: number;
-  status: 'active' | 'completed' | 'paused' | 'failed';
+  status: PlanStatus;
+  completedAt?: number;
+  archivedAt?: number;
+  abandonedAt?: number;
+  abandonReason?: string;
+  pausedAt?: number;
+  summary?: string;
+  artifacts?: string[];
   hasActiveWork?: boolean;
   latestThought?: string;
   activeTool?: string;
+  oodaLoop?: OodaLoopTelemetry;
 }
+
+export interface ModelQuotaMetric {
+  current: number;
+  limit: number;
+  safeLimit: number;
+  percent: number;
+}
+
+export interface ModelTtr {
+  windowSeconds: number;
+  dailySeconds: number;
+  formattedWindow: string;
+  formattedDaily: string;
+}
+
+export interface ModelCostEstimate {
+  sessionCostUsd: number;
+  dailyCostUsd: number;
+  allTimeCostUsd: number;
+}
+
+export interface ModelBudgetInfo {
+  id: string;
+  name: string;
+  family: string;
+  avatar: string;
+  color: string;
+  role: string;
+  status: 'healthy' | 'approaching_limit' | 'safety_stopped' | 'throttled';
+  rpm: ModelQuotaMetric;
+  tpm: ModelQuotaMetric;
+  daily: ModelQuotaMetric;
+  ttr: ModelTtr;
+  cost?: ModelCostEstimate;
+  allTime: {
+    totalTokens: number;
+    totalRequests: number;
+  };
+}
+
+export interface CouncilBudgetReport {
+  timestamp: number;
+  safetyThreshold: number;
+  safetyReservePercent: number;
+  models: Record<string, ModelBudgetInfo>;
+  systemStatus: 'healthy' | 'approaching_limit' | 'safety_stopped';
+  totalSessionCostUsd?: number;
+  totalDailyCostUsd?: number;
+  totalAllTimeCostUsd?: number;
+}
+
+export interface CouncilAdrReport {
+  adrNumber: number;
+  title: string;
+  status: 'Proposed' | 'Accepted' | 'Superceded';
+  filePath?: string;
+  markdown: string;
+  generatedAt: number;
+}
+
+export interface CouncilSessionSummary {
+  id: string;
+  planId: string;
+  goal: string;
+  timestamp: number;
+  elapsedMs: number;
+  roundsDeliberated: number;
+  totalTokensUsed: number;
+  totalCostUsd: number;
+  hasAdr: boolean;
+  adrPath?: string;
+  consensusSummary?: string;
+}
+
+export interface CouncilContribution {
+  memberId: string;
+  originalMemberId?: string;
+  memberName: string;
+  avatar: string;
+  color: string;
+  round: number;
+  timestamp: number;
+  tokensUsed: number;
+  costUsd?: number;
+  perspective: string;
+  thought?: string;
+  proposals?: string[];
+  critiques?: string[];
+  suggestedAmendments?: string;
+  consensusSummary?: string;
+  dag?: Array<{
+    id: string;
+    label: string;
+    role: string;
+    type: string;
+    description: string;
+    status: string;
+  }>;
+  edges?: Array<{ source: string; target: string; label: string }>;
+}
+
+export interface CouncilRound {
+  round: number;
+  title: string;
+  contributions: CouncilContribution[];
+}
+
+export interface CouncilSession {
+  id?: string;
+  success: boolean;
+  stoppedEarly?: boolean;
+  reason?: string;
+  message?: string;
+  ttrSeconds?: number;
+  planId?: string;
+  goal?: string;
+  elapsedMs?: number;
+  roundsDeliberated?: number;
+  totalTokensUsed?: number;
+  timestamp?: number;
+  adrPath?: string;
+  contextFiles?: string[];
+  constraints?: string[];
+  specialists?: Record<string, string>;
+  deliberationHistory?: CouncilRound[];
+  consensus?: {
+    perspective?: string;
+    consensusSummary?: string;
+    dag?: Array<{
+      id: string;
+      label: string;
+      role: string;
+      type: string;
+      description: string;
+      status: string;
+    }>;
+    edges?: Array<{ source: string; target: string; label: string }>;
+  };
+  adr?: CouncilAdrReport;
+  estimatedCostUsd?: number;
+  budgetReport?: CouncilBudgetReport;
+}
+
+// --------------------------------------------------------------------------
+// Multi-Loop OODA / Council Iteration Cycle Types
+// --------------------------------------------------------------------------
+
+export type OodaStage =
+  | 'observe'
+  | 'understand'
+  | 'evaluate_with_council'
+  | 'adversarial_council_evaluation'
+  | 'each_member_plans'
+  | 'share_and_vote_on_plan'
+  | 'iterate_on_plan'
+  | 'propose_plan'
+  | 'update';
+
+export interface OodaMemberPlan {
+  memberId: string;
+  memberName: string;
+  avatar: string;
+  role: string;
+  proposal: string;
+  voteScore?: number; // e.g. 1-10 or percentage
+  feedback?: string;
+}
+
+export interface OodaLoopIteration {
+  loopNumber: number;            // 1-based index (e.g. 1, 2, 3...)
+  stage: OodaStage;               // current or completed stage
+  stageName?: string;             // human-readable stage label
+  thought?: string;               // agent's reasoning / findings
+  observations?: string[];        // context gathered in 'observe'
+  understandings?: string[];      // constraints/invariants analyzed in 'understand'
+  councilEvaluations?: string[];  // council evaluation findings
+  adversarialCritiques?: string[];// adversarial critiques raised
+  memberPlans?: OodaMemberPlan[]; // individual plans from each member
+  voteSummary?: string;           // result of share and vote
+  refinements?: string[];         // amendments made in iterate on plan
+  proposedPlanSummary?: string;   // proposed plan summary
+  updatesApplied?: string[];      // updates applied to the topology graph or codebase
+  metrics?: {
+    tokensUsed?: number;
+    costUsd?: number;
+    durationMs?: number;
+    consensusScorePercent?: number;
+    invariantsVerifiedCount?: number;
+  };
+  status: 'in_progress' | 'completed' | 'converged' | 'repeating';
+  timestamp: number;
+}
+
+export interface OodaLoopTelemetry {
+  planId: string;
+  totalLoopsCompleted: number;
+  currentLoop: number;
+  targetMaxLoops?: number;
+  activeStage: OodaStage;
+  isConverged: boolean;
+  history: OodaLoopIteration[];
+  updatedAt: number;
+}
+

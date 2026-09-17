@@ -1,0 +1,166 @@
+{
+  "name": "topology_emit_loop_telemetry",
+  "description": "Emit OODA / Council iteration loop telemetry across the 9 stages (observe -> understand -> evaluate_with_council -> adversarial_council_evaluation -> each_member_plans -> share_and_vote_on_plan -> iterate_on_plan -> propose_plan -> update). Tracks loop iteration count (Loop N of M), member votes, amendments, and convergence status.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "planId": {
+        "type": "string",
+        "description": "Unique workflow plan ID to attach loop telemetry to"
+      },
+      "loopNumber": {
+        "type": "number",
+        "default": 1,
+        "description": "Current 1-based loop iteration index (e.g. 1, 2, 3...)"
+      },
+      "totalLoops": {
+        "type": "number",
+        "description": "Target or total expected loops for this planning/execution cycle"
+      },
+      "stage": {
+        "type": "string",
+        "enum": [
+          "observe",
+          "understand",
+          "evaluate_with_council",
+          "adversarial_council_evaluation",
+          "each_member_plans",
+          "share_and_vote_on_plan",
+          "iterate_on_plan",
+          "propose_plan",
+          "update"
+        ],
+        "description": "The active OODA cycle stage"
+      },
+      "stageName": {
+        "type": "string",
+        "description": "Optional human-readable stage title"
+      },
+      "thought": {
+        "type": "string",
+        "description": "Active thought, reasoning, or findings emitted by the agent/council"
+      },
+      "observations": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Context observations gathered during 'observe'"
+      },
+      "understandings": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Key invariants or constraints analyzed during 'understand'"
+      },
+      "councilEvaluations": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Evaluations emitted during 'evaluate_with_council'"
+      },
+      "adversarialCritiques": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Critiques raised during 'adversarial_council_evaluation'"
+      },
+      "memberPlans": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "memberId": {
+              "type": "string"
+            },
+            "memberName": {
+              "type": "string"
+            },
+            "avatar": {
+              "type": "string"
+            },
+            "role": {
+              "type": "string"
+            },
+            "proposal": {
+              "type": "string"
+            },
+            "voteScore": {
+              "type": "number"
+            },
+            "feedback": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "memberId",
+            "memberName",
+            "proposal"
+          ]
+        },
+        "description": "Independent candidate plans from Flash, Opus, and GPT-OSS"
+      },
+      "voteSummary": {
+        "type": "string",
+        "description": "Synthesis of votes and ranking from 'share_and_vote_on_plan'"
+      },
+      "refinements": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Plan amendments made during 'iterate_on_plan'"
+      },
+      "proposedPlanSummary": {
+        "type": "string",
+        "description": "Final proposed plan summary from 'propose_plan'"
+      },
+      "updatesApplied": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Actions or DAG mutations applied during 'update'"
+      },
+      "metrics": {
+        "type": "object",
+        "properties": {
+          "tokensUsed": {
+            "type": "number"
+          },
+          "costUsd": {
+            "type": "number"
+          },
+          "durationMs": {
+            "type": "number"
+          },
+          "consensusScorePercent": {
+            "type": "number"
+          },
+          "invariantsVerifiedCount": {
+            "type": "number"
+          }
+        },
+        "description": "Telemetry metrics for this cycle"
+      },
+      "status": {
+        "type": "string",
+        "enum": [
+          "in_progress",
+          "completed",
+          "converged",
+          "repeating"
+        ],
+        "default": "in_progress",
+        "description": "Status of the loop iteration"
+      }
+    },
+    "required": [
+      "planId",
+      "stage"
+    ]
+  }
+}

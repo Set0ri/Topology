@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { useTopologyStore } from '../store/useTopologyStore';
+import { useTopologyStore, ensureSequentialEdges } from '../store/useTopologyStore';
 import { calculateDagreLayout } from '../utils/graphAlgorithms';
 import { TopologyNode, TopologyEdge, AgentActivityEvent } from '../types/topology';
 
@@ -154,12 +154,14 @@ export function useLiveAgentSync() {
         reconnectAttemptsRef.current = 0;
         setLiveSyncConnected(true);
         setLiveSyncHeartbeat(Date.now());
+        useTopologyStore.getState().fetchCouncilBudget();
       };
 
       es.addEventListener('connected', (e: MessageEvent) => {
         if (!isSubscribed) return;
         setLiveSyncConnected(true);
         setLiveSyncHeartbeat(Date.now());
+        useTopologyStore.getState().fetchCouncilBudget();
       });
 
       // 0a. Plans List Registry Updated
@@ -203,13 +205,14 @@ export function useLiveAgentSync() {
           setLiveSyncHeartbeat(Date.now());
 
           if (rawNodes.length > 0 && targetPlanId === store.activePlanId) {
-            const currentDir = store.layoutDirection || 'LR';
-            const positions = calculateDagreLayout(rawNodes, rawEdges, currentDir);
+            const currentDir = store.layoutDirection || 'TB';
+            const edges = ensureSequentialEdges(rawNodes, rawEdges);
+            const positions = calculateDagreLayout(rawNodes, edges, currentDir);
             const alignedNodes = rawNodes.map(n => ({
               ...n,
               position: positions[n.id] || n.position,
             }));
-            loadTopologyDirect(alignedNodes, rawEdges);
+            loadTopologyDirect(alignedNodes, edges);
           }
 
           if (store.liveSyncStatus.audioChimesEnabled) {
@@ -234,6 +237,71 @@ export function useLiveAgentSync() {
           });
         } catch (err) {
           console.error('[Topology LiveSync] Failed to process plan_updated:', err);
+        }
+      });
+
+      // 1b. Plan Completed Event
+      es.addEventListener('plan_completed', (e: MessageEvent) => {
+        if (!isSubscribed) return;
+        try {
+          const data = JSON.parse(e.data);
+          const { planId, summary, artifacts } = data;
+          const store = useTopologyStore.getState();
+          const targetPlan = store.plans[planId];
+          if (targetPlan) {
+            store.upsertPlan({
+              ...targetPlan,
+              status: 'completed',
+              completedAt: data.completedAt || Date.now(),
+              summary: summary || targetPlan.summary,
+              artifacts: artifacts || targetPlan.artifacts,
+            });
+          }
+
+          if (store.liveSyncStatus.audioChimesEnabled) {
+            chimeSynthesizer.play('complete');
+          }
+
+          showDesktopNotification(`🏁 Workflow Completed: "${targetPlan?.title || planId}"`, {
+            body: summary || 'All plan tasks validated and deliverables synthesized.',
+            tag: `topology-plan-completed-${planId}`,
+          });
+
+          addActivityEvent({
+            agentId: targetPlan?.agentId || 'antigravity-live',
+            agentName: targetPlan?.agentName || targetPlan?.agentRole || 'Antigravity Agent',
+            agentRole: targetPlan?.agentRole || 'Orchestrator',
+            agentColor: targetPlan?.agentColor || '#1a73e8',
+            agentAvatar: targetPlan?.agentAvatar || '🏁',
+            nodeId: 'plan-root',
+            nodeLabel: targetPlan?.title || 'Workflow Completed',
+            actionType: 'completed',
+            detail: summary || `Plan "${targetPlan?.title || planId}" completed successfully.`,
+          });
+        } catch (err) {
+          console.error('[Topology LiveSync] Failed to process plan_completed:', err);
+        }
+      });
+
+      // 1b. Plan Status Changed Event (active, inactive, paused, completed, archived, abandoned)
+      es.addEventListener('plan_status_changed', (e: MessageEvent) => {
+        if (!isSubscribed) return;
+        try {
+          const data = JSON.parse(e.data);
+          const { planId, status, plan } = data;
+          if (!planId) return;
+
+          const store = useTopologyStore.getState();
+          if (plan) {
+            store.upsertPlan(plan);
+          } else {
+            const existing = store.plans[planId];
+            if (existing) {
+              store.upsertPlan({ ...existing, status, updatedAt: Date.now() });
+            }
+          }
+        } catch (err) {
+          console.error('[Topology LiveSync] Failed to process plan_status_changed:', err);
         }
       });
 
@@ -452,6 +520,7 @@ export function useLiveAgentSync() {
           const locks = JSON.parse(e.data);
           if (Array.isArray(locks)) {
             useTopologyStore.getState().setActiveLocks(locks);
+            useTopologyStore.getState().cleanAndReconcilePlans();
           }
         } catch {
           // ignore
@@ -485,9 +554,60 @@ export function useLiveAgentSync() {
         }
       });
 
+      // 10. Council Budget & Quotas Updated
+      es.addEventListener('budget_updated', (e: MessageEvent) => {
+        if (!isSubscribed) return;
+        try {
+          const budget = JSON.parse(e.data);
+          useTopologyStore.getState().setCouncilBudget(budget);
+        } catch {
+          // ignore
+        }
+      });
+
+      // 11. Council Session Completed
+      es.addEventListener('council_completed', (e: MessageEvent) => {
+        if (!isSubscribed) return;
+        try {
+          const { session, budget } = JSON.parse(e.data);
+          if (budget) useTopologyStore.getState().setCouncilBudget(budget);
+          if (session) useTopologyStore.getState().setActiveCouncilSession(session);
+          chimeSynthesizer.play('complete');
+        } catch {
+          // ignore
+        }
+      });
+
+      // 12. OODA Loop Telemetry Updated
+      es.addEventListener('loop_telemetry_updated', (e: MessageEvent) => {
+        if (!isSubscribed) return;
+        try {
+          const { planId, telemetry } = JSON.parse(e.data);
+          const store = useTopologyStore.getState();
+          if (telemetry) {
+            if (store.activePlanId === planId) {
+              store.setActiveLoopTelemetry(telemetry);
+            }
+            const targetPlan = store.plans[planId];
+            if (targetPlan) {
+              store.upsertPlan({
+                ...targetPlan,
+                oodaLoop: telemetry,
+                latestThought: telemetry.history?.[telemetry.history.length - 1]?.thought || targetPlan.latestThought,
+                updatedAt: Date.now(),
+              });
+            }
+          }
+        } catch {
+          // ignore
+        }
+      });
+
       es.onerror = () => {
         if (!isSubscribed) return;
         setLiveSyncConnected(false, 'TOPOLOGY_ERR_SSE_DROPPED');
+        // On connection drop, clean and reconcile plans
+        useTopologyStore.getState().cleanAndReconcilePlans();
         es.close();
 
         // Exponential backoff reconnect: 1.5s, 3s, 6s, 10s max (fail-open silent reconnect)
@@ -502,10 +622,34 @@ export function useLiveAgentSync() {
       };
     }
 
+    // 1. Initial on-load cleanup and reconciliation
+    useTopologyStore.getState().cleanAndReconcilePlans();
+
     connect();
+
+    // 2. Periodic background plan cleanup and reconciliation (every 20s)
+    const periodicCleanupTimer = window.setInterval(() => {
+      if (isSubscribed) {
+        useTopologyStore.getState().cleanAndReconcilePlans();
+      }
+    }, 20000);
+
+    // 3. Reconcile on window focus / tab visibility change
+    const handleVisibilityChange = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible' && isSubscribed) {
+        useTopologyStore.getState().cleanAndReconcilePlans();
+      }
+    };
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+    }
 
     return () => {
       isSubscribed = false;
+      window.clearInterval(periodicCleanupTimer);
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+      }
       if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
       if (eventSourceRef.current) {
         eventSourceRef.current.close();

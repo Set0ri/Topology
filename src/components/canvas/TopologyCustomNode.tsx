@@ -24,12 +24,15 @@ import {
   Check,
   X,
   Code2,
+  FileText,
   Terminal,
   UserCheck,
   Copy,
   Eye,
   Brain,
-  Lock
+  Lock,
+  Activity,
+  WifiOff
 } from 'lucide-react';
 import { TopologyNode, AgentWorker } from '../../types/topology';
 import { useTopologyStore } from '../../store/useTopologyStore';
@@ -93,6 +96,8 @@ const TopologyCustomNodeComponent: React.FC<NodeProps> = ({ id, data, selected }
   const setViewingArtifact = useTopologyStore(s => s.setViewingArtifact);
   const nodeLock = useTopologyStore(s => s.activeLocks[id] || s.activeLocks['node:' + id]);
   const nodeContextCount = useTopologyStore(s => Object.keys(s.sharedContext?.nodes?.[id] || {}).length);
+  const liveSyncConnected = useTopologyStore(s => s.liveSyncStatus.connected);
+  const activePlan = useTopologyStore(s => s.plans[s.activePlanId]);
 
   const [copiedPrompt, setCopiedPrompt] = useState(false);
 
@@ -125,39 +130,75 @@ const TopologyCustomNodeComponent: React.FC<NodeProps> = ({ id, data, selected }
   const isHitlPending = node.context?.requiresHumanApproval && node.context?.approvalStatus === 'pending';
   const artifactPayloads = node.context?.artifactPayloads || {};
   const artifactList = Object.keys(artifactPayloads);
+  const outputArtifactNames = React.useMemo(() => {
+    const list = [
+      ...(node.context?.outputArtifacts || []),
+      ...Object.keys(artifactPayloads),
+    ];
+    return Array.from(new Set(list));
+  }, [node.context?.outputArtifacts, artifactPayloads]);
   const assignedAgents = node.context?.assignedAgents || [];
   const collaborationMode = node.context?.collaborationMode || (assignedAgents.length > 1 ? 'parallel_subtasks' : 'solo');
   const isMultiAgent = assignedAgents.length > 1;
 
   const isNodeActivelyWorking = node.status === 'in_progress' || isAgentActive || Boolean(nodeLock);
-  const activeGlowColor = nodeLock ? '#f59e0b' : (typeColor || '#1a73e8');
 
-  // Derive active working agents for satellite nodes (fallback to current active worker if assignedAgents is empty)
+  // Freshness tick every 3 seconds for active nodes
+  const [ticker, setTicker] = useState(0);
+  React.useEffect(() => {
+    if (!isNodeActivelyWorking) return;
+    const timer = setInterval(() => setTicker(t => t + 1), 3000);
+    return () => clearInterval(timer);
+  }, [isNodeActivelyWorking]);
+
+  // Telemetry freshness calculation: stale if in_progress or active but no updates in > 45s
+  const lastActivityTime = Math.max(
+    node.context?.telemetry?.lastUpdated || 0,
+    node.updatedAt || 0,
+    nodeLock?.acquiredAt || 0
+  );
+  const isHeartbeatStale = isNodeActivelyWorking && lastActivityTime > 0 && (Date.now() - lastActivityTime > 45000);
+  const isConnectionLost = isNodeActivelyWorking && (!liveSyncConnected || isHeartbeatStale);
+  const isHeartbeatAlive = isNodeActivelyWorking && !isConnectionLost;
+
+  const activeGlowColor = isConnectionLost 
+    ? '#94a3b8' 
+    : (nodeLock ? '#f59e0b' : (typeColor || '#1a73e8'));
+
+  // Derive active working agents for satellite nodes (only for nodes actively in progress or locked)
   const effectiveAgents: AgentWorker[] = React.useMemo(() => {
+    // A completed or pending node must NEVER show an active orbiting satellite worker!
+    if (!isNodeActivelyWorking || node.status === 'completed') {
+      return [];
+    }
+
     if (assignedAgents && assignedAgents.length > 0) {
-      return assignedAgents;
+      return assignedAgents.map(a => ({
+        ...a,
+        isDisconnected: isConnectionLost,
+      }));
     }
-    if (isNodeActivelyWorking) {
-      const role = nodeLock?.agentRole || node.context?.role || 'GeneralAgent';
-      const name = nodeLock?.agentName || nodeLock?.agentId || (node.context?.role ? `${node.context.role}` : 'Active Agent');
-      const color = nodeLock ? '#f59e0b' : '#1a73e8';
-      const avatar = nodeLock ? '🔒' : (node.context?.executionType === 'automated_script' ? '⚡' : '🤖');
-      return [
-        {
-          id: nodeLock?.agentId || `worker-${node.id}`,
-          name,
-          role,
-          avatar,
-          color,
-          modelEngine: node.context?.modelEngine || 'gemini-2.5-pro',
-          status: 'thinking',
-          currentThought: node.context?.telemetry?.liveThought || node.context?.activeThought || (nodeLock ? `Holding advisory lock: ${nodeLock.resourceKey}` : 'Actively executing task...'),
-          activeTool: node.context?.telemetry?.activeTool,
-        }
-      ];
-    }
-    return [];
-  }, [assignedAgents, isNodeActivelyWorking, nodeLock, node.context, node.id]);
+
+    const role = nodeLock?.agentRole || node.context?.role || activePlan?.agentRole || 'GeneralAgent';
+    const name = nodeLock?.agentName || (node.context?.role ? `${node.context.role}` : (activePlan?.agentName || 'Active Agent'));
+    const agentId = nodeLock?.agentId || activePlan?.agentId || 'agent-primary';
+    const color = nodeLock ? '#f59e0b' : (activePlan?.agentColor || '#1a73e8');
+    const avatar = nodeLock ? '🔒' : (node.context?.executionType === 'automated_script' ? '⚡' : (activePlan?.agentAvatar || '🤖'));
+    return [
+      {
+        id: agentId,
+        name,
+        role,
+        avatar,
+        color,
+        modelEngine: node.context?.modelEngine || 'gemini-2.5-pro',
+        status: isConnectionLost ? 'blocked' : (telemetry?.state === 'executing_tool' ? 'executing_tool' : 'thinking'),
+        currentThought: node.context?.telemetry?.liveThought || node.context?.activeThought || (nodeLock ? `Holding advisory lock: ${nodeLock.resourceKey}` : 'Actively executing task...'),
+        activeTool: node.context?.telemetry?.activeTool,
+        isDisconnected: isConnectionLost,
+      }
+    ];
+  }, [assignedAgents, isNodeActivelyWorking, nodeLock, node.context, node.status, isConnectionLost, isAgentActive, activePlan, telemetry?.state, ticker]);
 
   const handleCardClick = (e: React.MouseEvent) => {
     if (e.shiftKey || e.ctrlKey || e.metaKey) {
@@ -319,15 +360,11 @@ const TopologyCustomNodeComponent: React.FC<NodeProps> = ({ id, data, selected }
         <>
           <Handle type="target" position={Position.Top} style={{ backgroundColor: typeColor }} className={handleClasses} />
           <Handle type="source" position={Position.Bottom} style={{ backgroundColor: typeColor }} className={handleClasses} />
-          <Handle type="target" position={Position.Left} style={{ backgroundColor: typeColor }} className={handleClasses} />
-          <Handle type="source" position={Position.Right} style={{ backgroundColor: typeColor }} className={handleClasses} />
         </>
       ) : (
         <>
           <Handle type="target" position={Position.Left} style={{ backgroundColor: typeColor }} className={handleClasses} />
           <Handle type="source" position={Position.Right} style={{ backgroundColor: typeColor }} className={handleClasses} />
-          <Handle type="target" position={Position.Top} style={{ backgroundColor: typeColor }} className={handleClasses} />
-          <Handle type="source" position={Position.Bottom} style={{ backgroundColor: typeColor }} className={handleClasses} />
         </>
       )}
 
@@ -364,7 +401,9 @@ const TopologyCustomNodeComponent: React.FC<NodeProps> = ({ id, data, selected }
         transition={{ layout: { duration: 0.18, ease: 'easeOut' } }}
         className={`rounded-2xl relative overflow-hidden backdrop-blur-2xl border-none outline-none select-none transition-all duration-200 cursor-pointer ${
           isMicro ? 'w-[340px] p-4' : 'w-[316px] p-3.5 sm:p-4'
-        } ${isHovered ? '-translate-y-1' : ''}`}
+        } ${isHovered ? '-translate-y-1' : ''} ${
+          isConnectionLost ? 'opacity-70 grayscale-[60%] saturate-50' : ''
+        }`}
         style={{ 
           background, 
           boxShadow: isNodeActivelyWorking 
@@ -395,12 +434,12 @@ const TopologyCustomNodeComponent: React.FC<NodeProps> = ({ id, data, selected }
                     <div
                       key={agent.id}
                       className={`relative w-5 h-5 rounded-full flex items-center justify-center text-[10px] bg-white/95 dark:bg-[#202434] shadow-xs transition-transform hover:scale-125 hover:z-20 ${
-                        isActiveWorker ? 'animate-pulse' : ''
-                      }`}
+                        isActiveWorker && !isConnectionLost ? 'animate-pulse' : ''
+                      } ${agent.isDisconnected ? 'grayscale opacity-75' : ''}`}
                       style={{
-                        boxShadow: isActiveWorker ? `0 0 0 1.5px ${agent.color}` : `0 0 0 1px ${agent.color}80`,
+                        boxShadow: isActiveWorker && !isConnectionLost ? `0 0 0 1.5px ${agent.color}` : `0 0 0 1px ${agent.color}80`,
                       }}
-                      title={`${agent.name} (${agent.role}) - ${agent.status}: ${agent.currentThought || 'Ready'}`}
+                      title={`${agent.name} (${agent.role}) - ${agent.status}: ${agent.currentThought || 'Ready'}${agent.isDisconnected ? ' [Connection Lost]' : ''}`}
                     >
                       <span>{agent.avatar}</span>
                     </div>
@@ -411,6 +450,28 @@ const TopologyCustomNodeComponent: React.FC<NodeProps> = ({ id, data, selected }
           </div>
 
           <div className="flex items-center gap-1.5 shrink-0">
+            {/* Live Heartbeat Connected Indicator */}
+            {isHeartbeatAlive && (
+              <div 
+                className="flex items-center gap-1 px-1.5 py-0.5 rounded-lg text-[10px] font-mono font-medium bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-none shrink-0 shadow-xs"
+                title="Active Agent Connected: Live Heartbeat Active"
+              >
+                <Activity size={10} className="text-emerald-500 animate-pulse" />
+                <span className="font-semibold">Live</span>
+              </div>
+            )}
+
+            {/* Connection Lost Indicator */}
+            {isConnectionLost && (
+              <div 
+                className="flex items-center gap-1 px-1.5 py-0.5 rounded-lg text-[10px] font-mono font-medium bg-rose-500/15 text-rose-600 dark:text-rose-400 border-none shrink-0 shadow-xs"
+                title="Agent Connection Lost: No heartbeat received in >45 seconds or server bridge offline"
+              >
+                <WifiOff size={10} className="text-rose-500 animate-pulse" />
+                <span className="font-semibold">Lost Conn</span>
+              </div>
+            )}
+
             {/* Active Git Resource Lease Badge */}
             {nodeLock && (
               <div 
@@ -428,15 +489,15 @@ const TopologyCustomNodeComponent: React.FC<NodeProps> = ({ id, data, selected }
               className="relative flex h-2 w-2" 
               title={`Status: ${node.status}`}
             >
-              {(node.status === 'in_progress' || isAgentActive) && (
+              {(node.status === 'in_progress' || isAgentActive) && !isConnectionLost && (
                 <span 
                   className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-60"
                   style={{ backgroundColor: statusColor }}
                 />
               )}
               <span 
-                className="relative inline-flex rounded-full h-2 w-2" 
-                style={{ backgroundColor: statusColor }}
+                className={`relative inline-flex rounded-full h-2 w-2 ${isConnectionLost ? 'bg-slate-400' : ''}`}
+                style={{ backgroundColor: isConnectionLost ? undefined : statusColor }}
               />
             </span>
 
@@ -569,7 +630,7 @@ const TopologyCustomNodeComponent: React.FC<NodeProps> = ({ id, data, selected }
 
         {/* Micro LOD Extended Inlines: Always Visible in Micro Mode */}
         {isMicro && (
-          <div className="mt-2 pt-2 border-t border-cat-latte-surface1/60 dark:border-cat-mocha-surface0/50 space-y-2">
+          <div className="mt-2.5 p-2.5 rounded-2xl bg-black/5 dark:bg-white/5 backdrop-blur-md border-none space-y-2">
             {node.description && (
               <p className={`text-[11px] leading-relaxed line-clamp-2 ${
                 isDark ? 'text-cat-mocha-subtext0' : 'text-cat-latte-subtext0'
@@ -662,34 +723,101 @@ const TopologyCustomNodeComponent: React.FC<NodeProps> = ({ id, data, selected }
           )}
         </div>
 
+        {/* Inline HITL Human Review Gate Banner */}
+        {isHitlPending && (
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className={`my-2 p-2.5 rounded-2xl backdrop-blur-md flex items-center justify-between gap-2 border-none shadow-elevated-md transition-all ${
+              isDark ? 'bg-amber-500/15 text-amber-200' : 'bg-amber-500/15 text-amber-900'
+            }`}
+          >
+            <div className="flex items-center gap-2 min-w-0">
+              <ShieldAlert size={15} className="text-amber-400 shrink-0 animate-pulse" />
+              <div className="min-w-0">
+                <div className="text-[11px] font-bold tracking-tight">Review Gate</div>
+                <div className="text-[9px] opacity-75 font-mono truncate">Awaiting human sign-off</div>
+              </div>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  approveNode(id);
+                }}
+                className="px-2.5 py-1 rounded-xl text-[10px] font-bold bg-emerald-500 hover:bg-emerald-600 text-white flex items-center gap-1 transition-all duration-200 hover:scale-105 active:scale-95 border-none cursor-pointer shadow-sm"
+                title="Approve node and resume execution"
+              >
+                <Check size={12} strokeWidth={2.5} />
+                <span>Approve</span>
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  rejectNode(id);
+                }}
+                className="px-2.5 py-1 rounded-xl text-[10px] font-bold bg-rose-500 hover:bg-rose-600 text-white flex items-center gap-1 transition-all duration-200 hover:scale-105 active:scale-95 border-none cursor-pointer shadow-sm"
+                title="Reject node"
+              >
+                <X size={12} strokeWidth={2.5} />
+                <span>Reject</span>
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Multi-Agent & Autonomous Active Thought Telemetry */}
         {(node.status === 'in_progress' || isAgentActive) && (
-          <div className="my-1.5 space-y-1">
+          <div className="my-2 space-y-1.5 border-none">
             {assignedAgents.length > 0 ? (
               assignedAgents.map((agent) => (
                 <div
                   key={agent.id}
-                  className={`p-1.5 rounded-xl flex items-center gap-1.5 text-[10px] backdrop-blur-md transition-all shadow-xs ${
+                  className={`p-2 rounded-2xl text-[10px] backdrop-blur-md transition-all duration-300 border-none shadow-xs ${
                     isDark ? 'bg-[#181a24]/90 text-[#f8fafc]' : 'bg-slate-100/90 text-[#202124]'
                   }`}
                 >
-                  <span className="shrink-0 text-xs">{agent.avatar}</span>
-                  <span className="font-semibold shrink-0" style={{ color: agent.color }}>
-                    {agent.name}:
-                  </span>
-                  <span className="font-mono truncate opacity-85">
+                  <div className="flex items-center justify-between gap-1.5 mb-1">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className="shrink-0 text-xs">{agent.avatar}</span>
+                      <span className="font-semibold shrink-0" style={{ color: agent.color }}>
+                        {agent.name}
+                      </span>
+                    </div>
+                    {agent.activeTool && (
+                      <span className="px-1.5 py-0.5 rounded-lg text-[9px] font-mono bg-blue-500/20 text-blue-400 shrink-0">
+                        {agent.activeTool}
+                      </span>
+                    )}
+                  </div>
+                  <p className={`font-mono text-[10px] leading-relaxed transition-all duration-300 ${
+                    isHovered ? 'line-clamp-4' : 'line-clamp-1'
+                  } opacity-90`}>
                     {agent.currentThought || (agent.status === 'thinking' ? 'Synthesizing...' : 'Executing...')}
-                  </span>
+                  </p>
                 </div>
               ))
             ) : (
-              <div className={`p-2 rounded-xl flex items-center gap-2 text-[11px] backdrop-blur-md ${
+              <div className={`p-2 rounded-2xl backdrop-blur-md transition-all duration-300 border-none ${
                 isDark ? 'bg-cat-mocha-surface0/80 text-cat-mocha-yellow' : 'bg-cat-latte-surface0 text-cat-latte-yellow'
               }`}>
-                <Zap size={12} className="animate-bounce shrink-0" />
-                <span className="font-mono text-[10px] truncate">
-                  {telemetry?.liveThought || 'Agent reasoning...'}
-                </span>
+                <div className="flex items-center justify-between gap-1.5 mb-1">
+                  <div className="flex items-center gap-1.5">
+                    <Zap size={12} className="animate-bounce shrink-0 text-amber-400" />
+                    <span className="text-[10px] font-semibold uppercase tracking-wider opacity-70 font-mono">
+                      {telemetry?.state === 'executing_tool' ? `Tool: ${telemetry?.activeTool || 'Running'}` : 'Live Thought'}
+                    </span>
+                  </div>
+                  {isHovered && (
+                    <span className="text-[9px] font-mono opacity-60">stream</span>
+                  )}
+                </div>
+                <p className={`font-mono text-[10px] leading-relaxed transition-all duration-300 ${
+                  isHovered ? 'line-clamp-4' : 'line-clamp-1'
+                } text-cat-mocha-text/90 dark:text-cat-mocha-text/90`}>
+                  {telemetry?.liveThought || node.context?.activeThought || 'Agent actively synthesizing next step...'}
+                </p>
               </div>
             )}
           </div>
@@ -747,6 +875,55 @@ const TopologyCustomNodeComponent: React.FC<NodeProps> = ({ id, data, selected }
                   )}
                 </div>
               </div>
+
+              {/* Deliverable Artifact Chips */}
+              {outputArtifactNames.length > 0 && (
+                <div className="pt-1.5 space-y-1 border-none">
+                  <div className="flex items-center gap-1 text-[10px] uppercase font-mono tracking-wider opacity-65">
+                    <FileText size={10} className="text-cat-mocha-mauve" />
+                    <span>Deliverables ({outputArtifactNames.length}):</span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {outputArtifactNames.slice(0, 3).map((artName) => (
+                      <button
+                        key={artName}
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const existingPayload = node.context?.artifactPayloads?.[artName];
+                          setViewingArtifact({
+                            artifact: existingPayload || {
+                              name: artName,
+                              content: `# ${artName}\n\nDeliverable generated by **${node.label}**.\n\nPath: \`${artName}\`\nStatus: ${node.status}\nNode ID: \`${id}\``,
+                              mimeType: artName.endsWith('.ts') ? 'text/typescript' : (artName.endsWith('.json') ? 'application/json' : 'text/markdown'),
+                              sizeBytes: 512,
+                              updatedAt: node.updatedAt || Date.now(),
+                              authorRole: node.context?.role || 'Agent',
+                              description: `Deliverable artifact for ${node.label}`,
+                            },
+                            nodeId: id,
+                            nodeLabel: node.label,
+                          });
+                        }}
+                        className={`flex items-center gap-1 px-2 py-0.5 rounded-xl text-[10px] font-mono transition-all duration-200 cursor-pointer border-none shadow-xs hover:scale-105 active:scale-95 ${
+                          isDark
+                            ? 'bg-cat-mocha-surface0/90 hover:bg-cat-mocha-mauve/20 text-cat-mocha-mauve'
+                            : 'bg-cat-latte-surface0 hover:bg-cat-latte-mauve/20 text-cat-latte-mauve'
+                        }`}
+                        title={`Click to inspect deliverable: ${artName}`}
+                      >
+                        <Code2 size={10} className="shrink-0 text-cat-mocha-teal" />
+                        <span className="truncate max-w-[120px]">{artName.split('/').pop()}</span>
+                      </button>
+                    ))}
+                    {outputArtifactNames.length > 3 && (
+                      <span className="text-[9px] font-mono opacity-50 px-1">
+                        +{outputArtifactNames.length - 3} more
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* Micro-Action Dock */}
               <div className="flex items-center justify-between gap-1.5 pt-2 pb-0.5">

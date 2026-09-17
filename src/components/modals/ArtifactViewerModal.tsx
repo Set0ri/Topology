@@ -101,8 +101,8 @@ export const ArtifactViewerModal: React.FC = () => {
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className={`p-5 flex items-center justify-between gap-4 border-b ${
-          isDark ? 'border-white/10' : 'border-black/5'
+        <div className={`p-5 flex items-center justify-between gap-4 border-none shadow-xs ${
+          isDark ? 'bg-cat-mocha-base/30' : 'bg-gray-50/50'
         }`}>
           <div className="flex items-center gap-3 min-w-0">
             <div className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 ${
@@ -190,8 +190,8 @@ export const ArtifactViewerModal: React.FC = () => {
         </div>
 
         {/* HITL Review Action Footer */}
-        <div className={`p-4 flex flex-col md:flex-row items-center justify-between gap-3 border-t ${
-          isDark ? 'border-white/10 bg-cat-mocha-base/40' : 'border-black/5 bg-gray-50/60'
+        <div className={`p-4 flex flex-col md:flex-row items-center justify-between gap-3 border-none shadow-inner ${
+          isDark ? 'bg-cat-mocha-base/50' : 'bg-gray-50/80'
         }`}>
           {actionDoneMsg ? (
             <div className="flex items-center gap-2 text-emerald-500 font-semibold text-xs py-1 animate-in fade-in">

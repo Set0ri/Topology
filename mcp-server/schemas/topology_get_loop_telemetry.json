@@ -1,0 +1,13 @@
+{
+  "name": "topology_get_loop_telemetry",
+  "description": "Inspect OODA loop telemetry, current iteration count, active stage, and historical progression for a specific plan or the active plan.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "planId": {
+        "type": "string",
+        "description": "Optional plan ID to inspect. If omitted, returns loop telemetry for the active visible canvas plan."
+      }
+    }
+  }
+}

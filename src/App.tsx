@@ -17,6 +17,8 @@ import { DiagnosticsModal } from './components/modals/DiagnosticsModal';
 import { useLiveAgentSync } from './services/liveAgentSync';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { MultiPlanFleetModal } from './components/modals/MultiPlanFleetModal';
+import { CouncilMonitorModal } from './components/council/CouncilMonitorModal';
+import { OodaLoopTelemetryModal } from './components/council/OodaLoopTelemetryModal';
 import { Sparkles } from 'lucide-react';
 
 const TopologyGraph3D = lazy(() => import('./components/graph3d/TopologyGraph3D').then(m => ({ default: m.TopologyGraph3D })));
@@ -43,6 +45,7 @@ export const App: React.FC = () => {
   useEffect(() => {
     setTheme(theme);
     if (typeof window !== 'undefined') {
+      (window as any).useTopologyStore = useTopologyStore;
       const hasSeenTutorial = localStorage.getItem('topology_tutorial_seen_v1');
       if (!hasSeenTutorial) {
         setIsTutorialOpen(true);
@@ -151,6 +154,12 @@ export const App: React.FC = () => {
         isOpen={isFleetModalOpen}
         onClose={() => setFleetModalOpen(false)}
       />
+
+      {/* Multi-Model Council & Gemini Ultra Quotas Modal */}
+      <CouncilMonitorModal />
+
+      {/* OODA Iteration Loop Telemetry Modal */}
+      <OodaLoopTelemetryModal />
     </div>
   );
 };

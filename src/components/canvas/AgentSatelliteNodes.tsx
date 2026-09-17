@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Users, Bot, Sparkles, ChevronRight, Activity, Cpu } from 'lucide-react';
+import { Users, Bot, Sparkles, ChevronRight, Activity, Cpu, WifiOff } from 'lucide-react';
 import { AgentWorker } from '../../types/topology';
 import { useTopologyStore } from '../../store/useTopologyStore';
 
@@ -45,7 +45,8 @@ export const AgentSatelliteNodes: React.FC<AgentSatelliteNodesProps> = ({
     >
       {/* Individual Satellite Worker Badges */}
       {visibleAgents.map((agent) => {
-        const isActive = agent.status === 'thinking' || agent.status === 'executing_tool' || agent.status === 'debating';
+        const isDisconnected = Boolean(agent.isDisconnected);
+        const isActive = (agent.status === 'thinking' || agent.status === 'executing_tool' || agent.status === 'debating') && !isDisconnected;
         const isHovered = hoveredAgentId === agent.id;
 
         return (
@@ -62,32 +63,43 @@ export const AgentSatelliteNodes: React.FC<AgentSatelliteNodesProps> = ({
               type="button"
               onClick={(e) => handleInspectAgent(e, agent.id)}
               className={`flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-medium shadow-elevated-sm backdrop-blur-md transition-all duration-200 hover:scale-105 border-none cursor-pointer select-none ${
-                isDark
+                isDisconnected
+                  ? isDark
+                    ? 'bg-cat-mocha-surface0/70 text-cat-mocha-subtext0 opacity-75 grayscale'
+                    : 'bg-slate-200/90 text-slate-500 opacity-75 grayscale'
+                  : isDark
                   ? 'bg-cat-mocha-surface0/95 text-cat-mocha-text hover:bg-cat-mocha-surface1'
                   : 'bg-white/95 text-cat-latte-text hover:bg-cat-latte-surface0'
               }`}
               style={{
-                boxShadow: isActive
+                boxShadow: isDisconnected
+                  ? 'none'
+                  : isActive
                   ? `0 0 12px 1px ${agent.color}80, 0 3px 8px -2px rgba(0,0,0,0.25)`
                   : '0 2px 5px -1px rgba(0,0,0,0.12)',
               }}
+              title={isDisconnected ? `${agent.name} (${agent.role}) - Agent Connection Lost / Stale Heartbeat` : `${agent.name} (${agent.role}) - Active`}
             >
               <span className="text-xs leading-none">{agent.avatar}</span>
               <span className="max-w-[65px] truncate font-semibold">{agent.name}</span>
 
-              {/* Status beacon dot */}
-              <span className="relative flex h-1.5 w-1.5 ml-0.5">
-                {isActive && (
+              {/* Status beacon dot or disconnected WifiOff icon */}
+              {isDisconnected ? (
+                <WifiOff size={10} className="text-rose-400 ml-0.5 animate-pulse shrink-0" />
+              ) : (
+                <span className="relative flex h-1.5 w-1.5 ml-0.5">
+                  {isActive && (
+                    <span
+                      className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75"
+                      style={{ backgroundColor: agent.color }}
+                    />
+                  )}
                   <span
-                    className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75"
+                    className="relative inline-flex rounded-full h-1.5 w-1.5"
                     style={{ backgroundColor: agent.color }}
                   />
-                )}
-                <span
-                  className="relative inline-flex rounded-full h-1.5 w-1.5"
-                  style={{ backgroundColor: agent.color }}
-                />
-              </span>
+                </span>
+              )}
             </button>
 
             {/* Hover on Appear: Rich Agent Card */}
@@ -99,6 +111,14 @@ export const AgentSatelliteNodes: React.FC<AgentSatelliteNodesProps> = ({
                     : 'bg-white/95 text-cat-latte-text'
                 }`}
               >
+                {/* Disconnected Warning Banner if connection lost */}
+                {isDisconnected && (
+                  <div className="p-1.5 rounded-xl text-[10px] font-medium mb-2 flex items-center gap-1.5 bg-rose-500/15 text-rose-600 dark:text-rose-400">
+                    <WifiOff size={12} className="shrink-0" />
+                    <span>Agent connection lost (&gt;45s heartbeat stale)</span>
+                  </div>
+                )}
+
                 <div className="flex items-center justify-between gap-2 mb-1.5">
                   <div className="flex items-center gap-1.5 min-w-0">
                     <span className="text-base">{agent.avatar}</span>
@@ -110,11 +130,11 @@ export const AgentSatelliteNodes: React.FC<AgentSatelliteNodesProps> = ({
                   <span
                     className="px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider shrink-0"
                     style={{
-                      backgroundColor: `${agent.color}20`,
-                      color: agent.color,
+                      backgroundColor: isDisconnected ? 'rgba(239, 68, 68, 0.15)' : `${agent.color}20`,
+                      color: isDisconnected ? '#ef4444' : agent.color,
                     }}
                   >
-                    {agent.status}
+                    {isDisconnected ? 'Disconnected' : agent.status}
                   </span>
                 </div>
 
@@ -183,7 +203,7 @@ export const AgentSatelliteNodes: React.FC<AgentSatelliteNodesProps> = ({
                   : 'bg-white/95 text-cat-latte-text'
               }`}
             >
-              <div className="flex items-center justify-between mb-2 pb-1.5 border-b border-white/10 dark:border-black/10">
+              <div className="flex items-center justify-between mb-2 px-2 py-1.5 rounded-xl bg-black/5 dark:bg-white/5 border-none">
                 <div className="flex items-center gap-1.5 font-bold text-xs">
                   <Sparkles size={12} className="text-purple-400" />
                   <span>Assigned Agents ({agents.length})</span>

@@ -1,0 +1,23 @@
+{
+  "name": "topology_get_council_budget",
+  "description": "Inspect live quota allocations, RPM/TPM usage, daily counts, sliding window TTR countdowns, and estimated USD cost for the Gemini Ultra multi-model council (Gemini 3.8 Flash, Claude 4.6 Opus, GPT-OSS 120b).",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "modelId": {
+        "type": "string",
+        "enum": [
+          "gemini-3.8-flash",
+          "claude-4.6-opus",
+          "gpt-oss-120b"
+        ],
+        "description": "Filter report to a specific model ID"
+      },
+      "reset": {
+        "type": "boolean",
+        "default": false,
+        "description": "Set true to reset usage metrics"
+      }
+    }
+  }
+}

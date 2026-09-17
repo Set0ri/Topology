@@ -279,14 +279,61 @@ export const TopologyGraph3D: React.FC = () => {
 
   // Custom 3D Node Object (Theme-Aware Sphere, Halo & Frosted Label with Geometry/Material Pooling)
   const nodeThreeObject = useCallback((node: any) => {
-    const group = new THREE.Group();
     const typeColor = getNodeTypeColor(node.type, theme);
     const isSelected = node.id === selectedNodeId;
+    const labelText = node.label || 'Node';
+
+    // If node already has a cached THREE.Group, update in place to avoid GC churn
+    if (node.__cachedGroup) {
+      const group = node.__cachedGroup;
+      const sphere = group.getObjectByName('sphere') as THREE.Mesh;
+      if (sphere) {
+        sphere.geometry = isSelected ? sphereGeoSelected : sphereGeoNormal;
+        sphere.material = getCachedMaterial(typeColor, isSelected, isLight);
+      }
+
+      // Manage halo visibility
+      let halo = group.getObjectByName('halo') as THREE.Mesh;
+      const shouldHaveHalo = isSelected || node.status === 'in_progress';
+      if (shouldHaveHalo) {
+        if (!halo) {
+          halo = new THREE.Mesh(
+            isSelected ? haloGeoSelected : haloGeoNormal,
+            getCachedHaloMaterial(typeColor, isLight)
+          );
+          halo.name = 'halo';
+          group.add(halo);
+        } else {
+          halo.geometry = isSelected ? haloGeoSelected : haloGeoNormal;
+          halo.material = getCachedHaloMaterial(typeColor, isLight);
+        }
+      } else if (halo) {
+        group.remove(halo);
+      }
+
+      // Manage label sprite (update text & theme color if changed)
+      const sprite = group.getObjectByName('label_sprite');
+      if (group.__cachedLabel !== labelText || group.__cachedIsLight !== isLight) {
+        if (sprite) group.remove(sprite);
+        const newSprite = getCachedSpriteText(labelText, isLight);
+        newSprite.name = 'label_sprite';
+        group.add(newSprite);
+        group.__cachedLabel = labelText;
+        group.__cachedIsLight = isLight;
+      }
+
+      return group;
+    }
+
+    const group = new THREE.Group() as any;
+    group.__cachedLabel = labelText;
+    group.__cachedIsLight = isLight;
 
     // Node Sphere using pooled geometry and cached material
     const sphereGeo = isSelected ? sphereGeoSelected : sphereGeoNormal;
     const sphereMat = getCachedMaterial(typeColor, isSelected, isLight);
     const sphere = new THREE.Mesh(sphereGeo, sphereMat);
+    sphere.name = 'sphere';
     group.add(sphere);
 
     // Outer Halo for Selected or Active Nodes
@@ -294,13 +341,16 @@ export const TopologyGraph3D: React.FC = () => {
       const haloGeo = isSelected ? haloGeoSelected : haloGeoNormal;
       const haloMat = getCachedHaloMaterial(typeColor, isLight);
       const halo = new THREE.Mesh(haloGeo, haloMat);
+      halo.name = 'halo';
       group.add(halo);
     }
 
-    // Floating Text Sprite Label (pooled from texture cache)
-    const sprite = getCachedSpriteText(node.label || 'Node', isLight);
+    // Floating Text Sprite Label (cached per node)
+    const sprite = getCachedSpriteText(labelText, isLight);
+    sprite.name = 'label_sprite';
     group.add(sprite);
 
+    node.__cachedGroup = group;
     return group;
   }, [theme, isLight, selectedNodeId]);
 
@@ -331,6 +381,43 @@ export const TopologyGraph3D: React.FC = () => {
   const linkColor = isLight ? 'rgba(148, 163, 184, 0.5)' : 'rgba(166, 173, 200, 0.35)';
   const particleColor = isLight ? '#1a73e8' : '#89dceb';
 
+  // 3D Keyboard shortcuts for fluid navigation
+  useEffect(() => {
+    const handle3DKeys = (e: KeyboardEvent) => {
+      const activeEl = document.activeElement as HTMLElement | null;
+      const activeTag = activeEl?.tagName.toLowerCase();
+      if (
+        activeTag === 'input' || 
+        activeTag === 'textarea' || 
+        activeTag === 'select' || 
+        activeEl?.isContentEditable
+      ) return;
+
+      // Suppress 3D hotkeys if any full-screen modal is currently mounted
+      const openModal = document.querySelector('.fixed.inset-0.z-50:not([data-spotlight="true"])');
+      if (openModal || activeEl?.closest('.fixed.inset-0.z-50:not([data-spotlight="true"])')) return;
+
+      if (e.key === 'Escape') {
+        selectNode(null);
+      } else if (e.key === '+' || e.key === '=') {
+        handleZoomIn();
+      } else if (e.key === '-' || e.key === '_') {
+        handleZoomOut();
+      } else if (e.key === '0' || e.key === 'r' || e.key === 'R') {
+        if (fgRef.current && nodes.length > 0) {
+          fgRef.current.zoomToFit(900, 60);
+        }
+      } else if (e.key === 'c' || e.key === 'C') {
+        setIsAutoRotating(prev => !prev);
+      } else if (e.key === '2') {
+        setViewMode('2d');
+      }
+    };
+
+    window.addEventListener('keydown', handle3DKeys);
+    return () => window.removeEventListener('keydown', handle3DKeys);
+  }, [nodes.length, selectNode, setViewMode]);
+
   return (
     <div 
       ref={containerRef} 
@@ -344,6 +431,10 @@ export const TopologyGraph3D: React.FC = () => {
         graphData={graphData}
         backgroundColor={bgColor}
         nodeThreeObject={nodeThreeObject}
+        warmupTicks={35}
+        cooldownTicks={120}
+        d3VelocityDecay={0.3}
+        d3AlphaDecay={0.028}
         nodeLabel={(node: any) => {
           const assigned = node.context?.assignedAgents || [];
           const agentString = assigned.length > 0 
@@ -459,12 +550,16 @@ export const TopologyGraph3D: React.FC = () => {
       </div>
 
       {/* Floating 3D Navigation Guide Tip */}
-      <div className="absolute bottom-4 left-4 px-3 py-1.5 rounded-xl bg-white/85 dark:bg-[#181a24]/85 backdrop-blur-xl text-[#5f6368] dark:text-[#94a3b8] text-xs shadow-elevated-md pointer-events-none flex items-center gap-2">
-        <span>Orbit: <strong className="text-[#202124] dark:text-[#f8fafc] font-medium">Left Drag</strong></span>
+      <div className="absolute bottom-4 left-4 px-3 py-1.5 rounded-xl bg-white/85 dark:bg-[#181a24]/85 backdrop-blur-xl text-[#5f6368] dark:text-[#94a3b8] text-xs shadow-elevated-md pointer-events-none flex items-center gap-2 border-none">
+        <span>Orbit: <strong className="text-[#202124] dark:text-[#f8fafc] font-medium">Drag</strong></span>
         <span>•</span>
         <span>Pan: <strong className="text-[#202124] dark:text-[#f8fafc] font-medium">Right Drag</strong></span>
         <span>•</span>
-        <span>Zoom: <strong className="text-[#202124] dark:text-[#f8fafc] font-medium">Scroll</strong></span>
+        <span>Zoom: <strong className="text-[#202124] dark:text-[#f8fafc] font-medium">Scroll / [+/-]</strong></span>
+        <span>•</span>
+        <span>Rotate: <strong className="text-[#202124] dark:text-[#f8fafc] font-medium">[C]</strong></span>
+        <span>•</span>
+        <span>2D View: <strong className="text-[#202124] dark:text-[#f8fafc] font-medium">[2]</strong></span>
       </div>
     </div>
   );

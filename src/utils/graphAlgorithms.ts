@@ -167,12 +167,43 @@ export function getCausalPath(targetNodeId: string, edges: TopologyEdge[]): Caus
 export function calculateDagreLayout(
   nodes: TopologyNode[],
   edges: TopologyEdge[],
-  direction: 'LR' | 'TB' = 'LR'
+  direction: 'LR' | 'TB' = 'TB'
 ): { [id: string]: { x: number; y: number } } {
+  if (!nodes || nodes.length === 0) return {};
+
+  const isVertical = direction === 'TB';
+  const nodeWidth = isVertical ? 310 : 330;
+  const nodeHeight = isVertical ? 160 : 175;
+
+  // When there are no edges, Dagre places all nodes in rank 0 horizontally side-by-side.
+  // In vertical direction ('TB'), arrange disconnected nodes into a clean vertical column.
+  if (!edges || edges.length === 0) {
+    const positions: { [id: string]: { x: number; y: number } } = {};
+    const startX = 60;
+    const startY = 60;
+    if (isVertical) {
+      const stepY = nodeHeight + 80;
+      nodes.forEach((n, idx) => {
+        positions[n.id] = {
+          x: startX,
+          y: startY + idx * stepY,
+        };
+      });
+    } else {
+      const stepX = nodeWidth + 90;
+      nodes.forEach((n, idx) => {
+        positions[n.id] = {
+          x: startX + idx * stepX,
+          y: startY,
+        };
+      });
+    }
+    return positions;
+  }
+
   const dagreGraph = new dagre.graphlib.Graph();
   dagreGraph.setDefaultEdgeLabel(() => ({}));
   
-  const isVertical = direction === 'TB';
   dagreGraph.setGraph({
     rankdir: direction,
     nodesep: isVertical ? 65 : 120,
@@ -180,9 +211,6 @@ export function calculateDagreLayout(
     marginx: isVertical ? 30 : 50,
     marginy: isVertical ? 30 : 50
   });
-
-  const nodeWidth = isVertical ? 310 : 330;
-  const nodeHeight = isVertical ? 160 : 175;
 
   nodes.forEach(n => {
     dagreGraph.setNode(n.id, { width: nodeWidth, height: nodeHeight });

@@ -5,7 +5,7 @@ Whenever executing multi-step projects, complex architectures, or long-running r
 2. **Multi-Plan Fleet Execution**: Each agent can register its own dedicated plan by passing `planId`, `agentId`, and `agentRole` to `topology_create_plan`. Multiple agents run concurrent graphs side-by-side on the same server without clashing.
 3. **Initialize the Plan in Topology**: Call `topology_create_plan` with decomposed nodes and causal dependency edges so the user can visualize progress on http://localhost:5173.
 4. **Stream Live Reasoning**: Before executing significant actions or tools, emit your active thought using `topology_emit_thought` (or `topology_update_node`). Include your `planId` and `agentRole`.
-5. **Report Status Continuously**: When starting work on a task, set `status: "in_progress"`; when finishing, set `status: "completed"` and pass output artifacts.
+5. **Report Status & Complete Tasks**: When starting work on a task, set `status: "in_progress"`. When finishing, call `topology_complete_node` (or `node scripts/topology-log.mjs complete-node --nodeId <id>`). It marks the task completed, attaches output artifacts, auto-advances to the next pending node, and automatically marks the entire plan completed once all nodes are finished—preventing hanging plans.
 6. **Switch & Inspect Plans**: List active plans across all agents with `topology_list_plans` (or `node scripts/topology-log.mjs plans`). Switch the displayed canvas plan using `topology_switch_plan` (or `node scripts/topology-log.mjs switch <planId>`).
 7. **Human-in-the-Loop Review Gates**: If a step requires user verification or breaking change sign-off, invoke `topology_request_approval`. The user can inspect the canvas and approve it directly to unblock execution.
 8. **Shared Blackboard Knowledge**: For cross-agent coordination, write architectural decisions, DB schemas, or contracts to `topology_write_shared_context`, and read them with `topology_read_shared_context`.
@@ -47,7 +47,10 @@ node scripts/topology-log.mjs switch backend-refactor
 node scripts/topology-log.mjs lock node:step-1 --agent="AgentA" --ttl=30
 
 # Append execution log entry / update plan node
-node scripts/topology-log.mjs log --action="node_updated" --plan="backend-refactor" --nodeId="step-1" --status="completed"
+node scripts/topology-log.mjs log --action="node_updated" --plan="backend-refactor" --nodeId="step-1" --status="in_progress"
+
+# Complete node and advance to next pending step
+node scripts/topology-log.mjs complete-node --nodeId="step-1" --plan="backend-refactor" --summary="Implemented API contracts"
 
 # Release advisory lock
 node scripts/topology-log.mjs unlock node:step-1 --agent="AgentA"

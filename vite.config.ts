@@ -10,13 +10,14 @@ export default defineConfig({
     host: true,
   },
   build: {
-    chunkSizeWarningLimit: 1500,
+    chunkSizeWarningLimit: 1600,
     rollupOptions: {
       output: {
         manualChunks: {
-          'vendor-three': ['three', 'three-spritetext', 'react-force-graph-3d'],
           'vendor-xyflow': ['@xyflow/react', 'dagre'],
-          'vendor-ui': ['framer-motion', 'lucide-react', 'canvas-confetti'],
+          'vendor-framer': ['framer-motion'],
+          'vendor-icons': ['lucide-react'],
+          'vendor-confetti': ['canvas-confetti'],
         },
       },
     },

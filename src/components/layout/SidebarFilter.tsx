@@ -15,7 +15,7 @@ import { useTopologyStore } from '../../store/useTopologyStore';
 import { NodeStatus, NodeType, ExecutionType } from '../../types/topology';
 
 export const SidebarFilter: React.FC = () => {
-  const [isCollapsed, setIsCollapsed] = useState(() => typeof window !== 'undefined' ? window.innerWidth < 768 : false);
+  const [isCollapsed, setIsCollapsed] = useState(true);
   const searchQuery = useTopologyStore(s => s.searchQuery);
   const setSearchQuery = useTopologyStore(s => s.setSearchQuery);
   const filterStatus = useTopologyStore(s => s.filterStatus);

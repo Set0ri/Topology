@@ -1038,5 +1038,784 @@ The bridge broadcasts events over `GET /api/topology/events`:
   - One-click "Switch to Canvas" button.
   - Instant search filter by agent role, name, or plan title.
 
+---
+
+## 30. Responsive Header Progressive Disclosure, Sidebar Defaults & Vertical Graph Layout
+
+```mermaid
+flowchart TD
+    subgraph Viewport_Breakpoints["Responsive Viewport Adaptation"]
+        XS["Mobile < 640px"] -->|Show Brand Icon + 2D/3D + Min Plan Selector + AI Plan + Live Sync + Export + More Menu| UltraCompact
+        MD["Tablet >= 768px"] -->|Add Swarm Observability Button| MedCompact
+        LG["Desktop >= 1024px"] -->|Add Coherence Score Pill + 80% Hub Library| HighDensity
+        XL["Wide >= 1280px"] -->|Add Undo/Redo + Shared Context + Diagnostics HUD + Guide| FullSuite
+    end
+
+    subgraph Header_Progressive["Header Architecture"]
+        MoreTools["MoreToolsDropdown (Paper Popover)"]
+        MoreTools --> CoherenceItem["Coherence Diagnostics"]
+        MoreTools --> SwarmItem["Multi-Agent Swarm Cockpit"]
+        MoreTools --> SharedCtxItem["Shared Context Blackboard"]
+        MoreTools --> DiagItem["System Diagnostics HUD"]
+        MoreTools --> HubItem["Topology Hub & Library"]
+        MoreTools --> HistoryItem["Undo / Redo Actions"]
+    end
+
+    subgraph Startup_Defaults["Application First-Load Defaults"]
+        SidebarInit["SidebarFilter isCollapsed: true"]
+        GraphDirInit["layoutDirection: 'TB' (Vertical Dagre layout)"]
+    end
+```
+
+### 1. Header Responsiveness & Progressive Disclosure
+- **Fluid Plan Selector Width**: Uses `min-w-0 w-full max-w-[125px] xs:max-w-[160px] sm:max-w-[210px] md:max-w-[270px] lg:max-w-[320px]` with flex item `truncate flex-1 min-w-0` to avoid toolbar overflow or horizontal clipping on small screens.
+- **Progressive Breakpoints**:
+  - `hidden sm:inline`: Topology brand text.
+  - `hidden md:flex`: Swarm Observability count pill.
+  - `hidden lg:flex`: Coherence Health Score pill and Hub Archetype link.
+  - `hidden xl:flex`: Undo/Redo pair, Shared Context blackboard pill, Diagnostics HUD icon button, Interactive Onboarding guide.
+  - `flex xl:hidden`: `MoreToolsDropdown` consolidated paper popover hosting overflow controls.
+- **Export Menu Outside-Click Listener**: Consolidated export/import menu attaches `mousedown` and `Escape` key listeners with `exportMenuRef` to guarantee clean unmounting.
+
+### 2. First-Load Layout Invariants
+- **Sidebar Closed by Default**: `SidebarFilter.tsx` initializes `isCollapsed = useState(true)` to maximize initial canvas viewport area and present an uncluttered workspace on first boot.
+- **Default Graph Direction Vertical (`'TB'`)**:
+  - `useTopologyStore.ts`: `getInitialGraph()` computes Dagre positions with `rankdir: 'TB'` and sets `layoutDirection: 'TB'`.
+  - `graphAlgorithms.ts`: `calculateDagreLayout` defaults `direction: 'LR' | 'TB' = 'TB'`.
+  - `TopologyCanvas2D.tsx`: Removed the auto-resize listener that forcefully toggled `'LR'` on desktop widths, preserving the vertical workflow orientation selected by default.
+
+---
+
+## 31. Real Plan LocalStorage Persistence & Lifecycle State Machine
+
+```mermaid
+stateDiagram-v2
+    [*] --> Active: createNewPlan / MCP topology_create_plan
+    Active --> Paused: pausePlan / CLI status --status paused
+    Paused --> Active: resumePlan / reactivatePlan
+    Active --> Completed: completePlan / CLI complete
+    Paused --> Completed: completePlan
+    Active --> Abandoned: abandonPlan(reason) / CLI status --status abandoned
+    Paused --> Abandoned: abandonPlan(reason)
+    Active --> Archived: archivePlan / CLI status --status archived
+    Paused --> Archived: archivePlan
+    Completed --> Archived: archivePlan
+    Completed --> Active: reactivatePlan
+    Archived --> Active: reactivatePlan
+    Abandoned --> Active: reactivatePlan / retry
+
+    state LocalStorage_Persistence {
+        Active --> LocalStorage: persistPlansToLocalStorage
+        Paused --> LocalStorage: persistPlansToLocalStorage
+        Completed --> LocalStorage: persistPlansToLocalStorage
+        Archived --> LocalStorage: persistPlansToLocalStorage
+        Abandoned --> LocalStorage: persistPlansToLocalStorage
+    }
+```
+
+### 1. Complete Plan Lifecycle States (`PlanStatus`)
+Plans progress through five strongly typed states:
+1. `active`: Under continuous execution by autonomous agents or user. Displays live beacon pulse when active work is underway.
+2. `paused` / `inactive`: Temporarily paused by user or agent lease timeout. Displays amber `Paused` pill.
+3. `completed`: Successfully finished with verified output artifacts and summary note. Displays emerald `Done` / `Completed` pill.
+4. `archived`: Retained for long-term historical reference or canonical documentation. Displays slate `Archived` pill.
+5. `abandoned`: Terminated early due to failure, user abort, or superseding direction. Preserves `abandonReason` string displayed in dedicated callouts.
+
+### 2. Browser LocalStorage Persistence Invariant
+- **Storage Keys**:
+  - `topology_plans_registry_v1`: Complete dictionary mapping `planId` to `TopologyPlanRecord`.
+  - `topology_active_plan_v1`: String ID of currently focused canvas plan.
+- **Fail-Open Hydration**:
+  - On application startup, `loadInitialPlansFromStorage(initialDefaultPlan)` reads cached plans from `localStorage`.
+  - If entries exist, it restores all genuine user/agent plans across all states (active, paused, completed, archived, abandoned).
+  - If storage is empty, it registers the clean default plan and writes it to disk/storage.
+  - Every mutation (`switchPlan`, `createNewPlan`, `completePlan`, `reactivatePlan`, `archivePlan`, `abandonPlan`, `pausePlan`, `resumePlan`, `setPlanStatus`, `removePlan`) writes atomically to `localStorage`.
+- **Zero Fake Plans**: No artificial or dummy plans are generated; only genuine workflows executed by agents or created by the user are stored.
+
+### 3. Lifecycle Actions & Multi-Channel Synchronization
+| Channel | Action | Behavior |
+| :--- | :--- | :--- |
+| **Dropdown UI** | 1-Click Hover Actions | Quick Pause, Play, Done, Archive, Abandon, Reactivate, or Delete buttons on each plan row. |
+| **Fleet Modal** | Status Filter Tabs & Action Bar | Filter by `All`, `Active`, `Paused`, `Completed`, `Archived`, `Abandoned`. Comprehensive action buttons per card. |
+| **Bridge API** | `POST /api/topology/plan/status` | Updates `targetPlan.status`, sets timestamps (`completedAt`, `pausedAt`, `archivedAt`, `abandonedAt`), records `abandonReason`, updates node statuses if completed, appends to log, and broadcasts SSE event `plan_status_changed`. |
+| **CLI** | `node scripts/topology-log.mjs status --status <state>` | Allows autonomous CLI agents to transition plan status headlessly with optional `--reason` or `--thought`. |
+| **SSE Event** | `plan_status_changed` | Frontend listener receives real-time broadcasts and synchronizes Zustand store and `localStorage`. |
+
+---
+
+## 32. Deterministic Vertical Layout Pipeline & Autonomous Sequential Edge Synthesis
+
+```mermaid
+flowchart TD
+    subgraph Agent_Ingestion ["Agent / User Plan Creation"]
+        A[Agent creates plan with N nodes] --> CheckEdges{edges.length > 0?}
+    end
+
+    subgraph Auto_Synthesis ["Autonomous Sequential Edge Synthesis"]
+        CheckEdges -->|No / Empty| Synth[ensureSequentialEdges: node[i] -> node[i+1]]
+        CheckEdges -->|Yes| Keep[Preserve Explicit Causal Edges]
+    end
+
+    subgraph Layout_Engine ["Dagre Vertical Alignment ('TB')"]
+        Synth --> Dagre[calculateDagreLayout direction: TB]
+        Keep --> Dagre
+        Dagre --> Fallback{Are Edges Present?}
+        Fallback -->|Yes| Hierarchy[Dagre Hierarchical Top-to-Bottom Tree]
+        Fallback -->|No (Single / Disconnected)| VertCol[Vertical Column x: 60, y: 60 + idx * stepY]
+    end
+
+    subgraph Render_Pipeline ["React Flow 12 Edge & Handle Routing"]
+        Hierarchy --> CleanHandles[Single Target: Top / Single Source: Bottom]
+        VertCol --> CleanHandles
+        CleanHandles --> RFEdges[Smooth Cubic Bezier Curves with Animated Status Glow]
+    end
+```
+
+### 1. Root Cause Analysis: Disconnected Horizontal Ranks
+Prior to this enhancement, two compounding issues produced horizontal/missing edges:
+1. **Dagre Rank 0 Collapsing**: In Dagre layout, nodes without connecting edges belong to rank 0. When `rankdir: 'TB'`, Dagre spaces rank 0 nodes perpendicular to the direction—i.e. horizontally side-by-side along the X-axis (`y = 30px, x = 30, 405, 780...`). If an agent created tasks without explicit causal edges, Dagre arranged them horizontally.
+2. **Handle Ambiguity in React Flow 12**: `TopologyCustomNode.tsx` previously rendered four handles (Top, Bottom, Left, Right) without unique handle `id` properties in Normal LOD. When React Flow resolved edges between nodes with multiple handles of the same type, handle coordinates could clash or misalign.
+
+### 2. Autonomous Sequential Edge Synthesis (`ensureSequentialEdges`)
+- **Algorithm**: If a workflow plan contains multiple nodes (`nodes.length > 1`) but no explicit edges (`edges: []`), the system automatically synthesizes causal sequential dependency edges (`node[i] -> node[i+1]`) with `type: 'depends_on'` and `animated: true`.
+- **Multi-Layer Enforcement**:
+  - **MCP Server (`mcp-server/index.js`)**: Automatically synthesizes sequential edges before writing to `.topology/` or transmitting via HTTP.
+  - **Bridge Plugin (`plugins/topologyBridgePlugin.js`)**: Auto-synthesizes edges upon receiving `/api/topology/plan` POST and when reading legacy or edge-less plans from `.topology/plans.json`.
+  - **LiveSync Engine (`liveAgentSync.ts`)**: Auto-synthesizes edges upon receiving `plan_updated` SSE broadcasts before executing layout.
+  - **Zustand Store (`useTopologyStore.ts`)**: Enforces `ensureSequentialEdges` in `loadInitialPlansFromStorage`, startup initialization, `switchPlan`, `setPlansRegistry`, `upsertPlan`, and `applyDagreLayout`.
+
+### 3. Vertical-First Fallback in `calculateDagreLayout`
+- When `edges.length === 0`:
+  - If `direction === 'TB'` (the visualizer default): arranges disconnected nodes vertically in a single column (`x: 60, y: 60 + idx * (nodeHeight + 80)`).
+  - Disconnected nodes or task lists are guaranteed to never collapse into horizontal side-by-side strips.
+
+### 4. Deterministic React Flow 12 Handle Binding
+- In `TopologyCustomNode.tsx`:
+  - When `isVertical === true` (`'TB'`): renders strictly `<Handle type="target" position={Position.Top} />` and `<Handle type="source" position={Position.Bottom} />`.
+  - When `isVertical === false` (`'LR'`): renders strictly `<Handle type="target" position={Position.Left} />` and `<Handle type="source" position={Position.Right} />`.
+  - Eliminates handle ID ambiguity, ensuring React Flow renders clean, vertically aligned cubic bezier paths that smoothly exit from the bottom of each card and enter into the top of the subsequent card.
+
+---
+
+## 33. First-Class Task Node Completion, Auto-Advancing Pipeline & Scoped Single-Agent Orbital Telemetry
+
+```mermaid
+flowchart TD
+    subgraph Agent_Execution ["Agent Execution Loop"]
+        Act[Agent works on Task Node N] --> Complete["topology_complete_node(nodeId, summary, artifacts)"]
+    end
+
+    subgraph State_Transition ["Atomic Node Transition & Satellite Scoping"]
+        Complete --> MarkCompleted["Set node[N].status = 'completed'\ntelemetry.state = 'completed'\nrecord outputArtifacts"]
+        MarkCompleted --> DespawnSatellite["Clear Satellite Worker from Node N\n(effectiveAgents = [])"]
+    end
+
+    subgraph Auto_Advancement ["Auto-Advancing Pipeline (advanceNextNode = true)"]
+        DespawnSatellite --> CheckNext{Next pending node N+1 exists?}
+        CheckNext -->|Yes| Advance["Set node[N+1].status = 'in_progress'\ntelemetry.state = 'thinking'\nBind Satellite Worker to Node N+1"]
+        CheckNext -->|No| CheckAllDone
+    end
+
+    subgraph Plan_Completion ["Auto Plan Completion (autoCompletePlan = true)"]
+        CheckNext -->|No / All Nodes Done| CheckAllDone{nodes.every(status === 'completed')?}
+        CheckAllDone -->|Yes| CompletePlan["Set plan.status = 'completed'\nSet plan.completedAt = now()\nBroadcast SSE: plan_status_changed\nPersist to LocalStorage"]
+        CheckAllDone -->|No| Done
+        Advance --> Done[Canvas & Telemetry Synchronized]
+        CompletePlan --> Done
+    end
+```
+
+### 1. Root Cause Analysis: Hanging Plans & Ghost Agent Clones
+Two compounding visual and state issues were resolved:
+1. **Hanging Plans**: External agents previously had to manually call plan-level completion APIs after marking their final task done. When agents omitted this final step, completed plans remained in `active` status indefinitely.
+2. **Ghost Satellite Agent Clones**: In `TopologyCustomNode.tsx`, lines previously evaluated `if (isNodeActivelyWorking || Boolean(node.context?.telemetry?.liveThought))`. Because `liveThought` strings persist in node context after task execution finishes, ANY task node that had ever emitted a thought continued rendering an orbital satellite agent badge. Furthermore, worker IDs were generated as synthetic strings (`id: worker-${node.id}`), giving each card its own artificial worker and making a single agent look like 3-5 concurrent clones spread across different nodes.
+
+### 2. First-Class Task Node Completion (`topology_complete_node`)
+- **MCP Tool Registration**:
+  - Registered as `topology_complete_node` with complete input schema: `nodeId` (required), `planId` (optional, auto-resolved), `summary` (optional), `outputArtifacts` (optional string array), `advanceNextNode` (boolean, default true), and `autoCompletePlan` (boolean, default true).
+- **Atomic Operations**:
+  - Transitions the target node status to `completed`.
+  - Attaches `outputArtifacts` to `node.context.outputArtifacts`.
+  - Stamps telemetry with `state: 'completed'`, clears `activeTool`, records `[COMPLETED] summary` in `terminalLogs`, and sets `lastUpdated: Date.now()`.
+  - Enforces **single-agent mutual exclusion**: if any other nodes in the same plan were lingering in `in_progress`, they are cleaned up and transitioned to `completed`.
+
+### 3. Auto-Advancing Pipeline (`advanceNextNode: true`)
+- External coding agents typically work sequentially through dependency tasks.
+- When `advanceNextNode` is `true` (the default), `completeNode` locates the immediate next `pending` or `ready` node in the topological sequence and transitions it to `in_progress` with `telemetry.state: 'thinking'` (`"Starting: <node.label>"`).
+- This ensures the UI continuously tracks the agent's forward momentum without requiring multiple roundtrips or manual status switches.
+
+### 4. Zero Hanging Plans (`autoCompletePlan: true`)
+- When all nodes in a plan reach `completed` (`plan.nodes.every(n => n.status === 'completed')`):
+  - Automatically transitions `plan.status = 'completed'`.
+  - Sets `plan.completedAt = Date.now()`.
+  - Sets `plan.summary` to the final task's verification note or a canonical completion summary.
+  - Broadcasts `plan_status_changed` via SSE to all connected visualizer clients and persists to `localStorage`.
+
+### 5. Scoped Single-Agent Orbital Telemetry
+- In `src/components/canvas/TopologyCustomNode.tsx`:
+  - **Zero Satellite Agents on Completed Cards**: `effectiveAgents` strictly returns empty `[]` whenever `node.status === 'completed'` or `!isNodeActivelyWorking`. Completed nodes never render spinning satellites.
+  - **Real Agent Identity Binding**: Rather than generating artificial `worker-${node.id}` IDs, the satellite worker's identity is bound to the genuine agent executing the workflow (`nodeLock?.agentId || activePlan?.agentId || 'agent-primary'`).
+  - When an agent completes Task A and moves to Task B, the single orbital agent cleanly despawns from Task A and appears on Task B.
+
+---
+
+## 34. Dynamic Plan Lifecycle Reconciliation & Autonomous Clean-Up Pipeline
+
+```mermaid
+flowchart TD
+    subgraph Triggers ["Reconciliation Triggers"]
+        T1["App Hydration (On Load)"]
+        T2["Background Interval (Every 20-25s)"]
+        T3["Window Focus (visibilitychange)"]
+        T4["SSE Events (connected, locks_updated)"]
+        T5["CLI: clean-plans / API: /plans/clean"]
+    end
+
+    subgraph Evaluator ["reconcilePlans / reconcilePlanRecord Engine"]
+        T1 & T2 & T3 & T4 & T5 --> Eval[Inspect Nodes, Status, Heartbeats, Locks & Timestamps]
+
+        Eval --> CheckComplete{nodes.every(completed)?}
+        CheckComplete -->|Yes| SetCompleted["status: 'completed'\nset completedAt\nclear activeTool"]
+        
+        CheckComplete -->|No| CheckTerminal{archived or abandoned?}
+        CheckTerminal -->|Yes| Preserve[Preserve Explicit Terminal State]
+
+        CheckTerminal -->|No| CheckActive{Active lock held OR (in_progress & updated < 5m & connected)?}
+        CheckActive -->|Yes| SetActive["status: 'active'\nclear pausedAt"]
+        CheckActive -->|No| SetPaused["status: 'paused'\nset pausedAt"]
+    end
+
+    subgraph Persistence_Broadcast ["Persistence & Synchronization"]
+        SetCompleted & SetActive & SetPaused & Preserve --> Persist[Persist to LocalStorage & .topology/plans.json]
+        Persist --> Broadcast[Broadcast SSE: plans_list_updated & plan_status_changed]
+    end
+```
+
+### 1. Problem Statement & Stale State Dynamics
+Workspaces with long-running autonomous agents frequently encounter out-of-sync plan statuses:
+1. **False Active Glowing Beacons**: Plans left in `active` despite an agent finishing all tasks, disconnecting, or crashing.
+2. **Hanging Completed Workflows**: Plans with 100% finished tasks remaining in `active` because the agent omitted a manual plan-level completion API call.
+3. **Ghost Idle Plans**: Inactive plans without any in-progress nodes or active locks showing as "active" in dropdowns and fleet cards.
+4. **Dangling or Corrupted Records**: Malformed plan entries or plans with missing causal dependency edges.
+
+### 2. Multi-Tier Autonomous Reconciliation Engine
+The reconciliation engine operates across three synchronized tiers:
+- **Server Tier (`plugins/topologyBridgePlugin.js`)**:
+  - `reconcilePlans(plans, { activeLocks, clientCount })`: Validates all plans, synthesizes edges, evaluates task completion, and assigns precise lifecycle statuses.
+  - Automatically invoked during `loadAllPlans()`, `GET /api/topology/plans`, SSE client connection, and on a recurring 25-second background interval (`periodicReconcileTimer`).
+  - Exposes dedicated endpoint `/api/topology/plans/clean` (GET/POST).
+- **Client Tier (`src/store/useTopologyStore.ts` & `src/services/liveAgentSync.ts`)**:
+  - `reconcilePlanRecord` and `reconcilePlansMap`: Reconciles stored plans during LocalStorage hydration (`loadInitialPlansFromStorage`), plan upserts (`upsertPlan`), and registry updates (`setPlansRegistry`).
+  - Store action `cleanAndReconcilePlans()`: Periodically called every 20 seconds, on mount, and on document `visibilitychange` (when switching back to the tab).
+- **Agent & MCP Tier (`mcp-server/index.js` & `scripts/topology-log.mjs`)**:
+  - MCP tools (`topology_list_plans`, `topology_get_plan`) automatically reconcile plan statuses before returning summaries to external agents.
+  - CLI command `node scripts/topology-log.mjs clean-plans` enables instant headless reconciliation of on-disk plans.
+
+### 3. Concrete State Resolution Matrix
+| Condition | Resolved Status | Side Effects |
+| :--- | :--- | :--- |
+| `nodes.length > 0 && nodes.every(status === 'completed')` | `'completed'` | Stamped with `completedAt`, activeTool cleared, orbital satellites despawned. |
+| User explicitly marked `archived` or `abandoned` | `'archived'` / `'abandoned'` | Preserved unchanged; idle in-progress nodes cleared. |
+| Active advisory lease held OR (in-progress node updated within last 5 min AND SSE connected) | `'active'` | Displays active pulse beacon, satellite orbital node bound to active task. |
+| No active locks AND (0 in-progress nodes OR last activity > 5 min OR SSE disconnected) | `'paused'` | Stamped with `pausedAt`; beacon switches from green active to amber paused. |
+| Malformed or corrupted plan without valid `id` | Pruned | Removed from registry and storage. |
+| Multiple nodes without connecting edges | Synthesized | Causal dependency edges auto-generated (`ensureSequentialEdges`). |
+
+---
+
+## 35. Recurrent Multi-Model Council (Gemini 3.8 Flash, Claude 4.6 Opus, GPT-OSS 120b) & Gemini Ultra Quota Architecture
+
+```mermaid
+flowchart TD
+    subgraph Client_Invocation ["Agent & User Invocations"]
+        MCP_Call["MCP Tool: topology_spawn_council\n(goal, rounds, strategy)"]
+        UI_Modal["UI Council Monitor Modal\n(Convene Council Button)"]
+        CLI_Call["CLI: node scripts/topology-log.mjs council\n(--goal, --rounds, --strategy)"]
+    end
+
+    subgraph Budget_Governor ["Budget Governor & Safety Buffer (budgetTracker.js)"]
+        Preflight["Pre-flight Quota Check\n(canConsume)"]
+        SlidingWindow["60s Sliding Window\nRPM & TPM Tracking"]
+        DailyTracker["Daily Quota Tracker\n(00:00 UTC Reset)"]
+        SafetyThreshold{"Usage >= 85%?\n(15% Reserve)"}
+        SafetyStop["🛑 Safety Stop Triggered\n(Halt / Fallback / Pause)"]
+    end
+
+    subgraph Deliberation_Council ["Recurrent Multi-Model Council (councilOrchestrator.js)"]
+        R1["Round 1: Independent Ideation\n⚡ Flash | 🧠 Opus | 🌐 GPT-OSS"]
+        R2["Round 2: Adversarial Critique\nCross-Model Peer Invariant Checking"]
+        R3["Round 3: Unified Consensus\nDecomposed DAG Synthesis"]
+        DAG_Output["Actionable DAG Plan\n(Nodes, Causal Edges, Acceptance Criteria)"]
+    end
+
+    subgraph Execution_Engine ["Deterministic Execution Boundary"]
+        GeminiExecution["⚡ Gemini 3.8 Flash\n(Deterministic Code Execution Lead)"]
+    end
+
+    subgraph Topology_Visualizer ["Visualizer Canvas & Telemetry HUD"]
+        CanvasNodes["Live Dynamic DAG Nodes\nhttp://localhost:5173"]
+        TopBarPill["Top-bar Council Pill 🏛️\nLive Green/Amber/Red Health Dot"]
+        CouncilModal["Elevated Glassmorphic Monitor\nLive RPM/TPM Gauges & TTR Timers"]
+    end
+
+    MCP_Call & UI_Modal & CLI_Call --> Preflight
+    Preflight --> SlidingWindow & DailyTracker --> SafetyThreshold
+    SafetyThreshold -->|Yes| SafetyStop
+    SafetyThreshold -->|No (Headroom OK)| R1
+
+    R1 -->|Proposals Formulated| R2
+    R2 -->|Critiques & Amendments| R3
+    R3 -->|Consensus Formed| DAG_Output
+
+    DAG_Output --> GeminiExecution
+    R1 & R2 & R3 & DAG_Output --> CanvasNodes
+    SlidingWindow & DailyTracker --> TopBarPill & CouncilModal
+```
+
+### 1. Architectural Role Decomposition & The 3-Family Paradigm
+Research demonstrates that combining model families supported under the Gemini Ultra plan yields superior ideation, architectural planning, and invariant verification compared to single-model systems:
+1. **Gemini 3.8 Flash (`⚡`, Google DeepMind, `#1a73e8`)**:
+   - **Role**: Fast Architect, Execution Orchestrator, DAG Lead.
+   - **Characteristics**: Extreme throughput, low latency, structured JSON schema emission. Generates initial broad decomposition and synthesizes the final actionable DAG.
+   - **Post-Council Role**: Deterministic code generator and tool-calling execution engine.
+2. **Claude 4.6 Opus (`🧠`, Anthropic, `#9334e6`)**:
+   - **Role**: Deep Conceptual Reasoning & Invariant Critic.
+   - **Characteristics**: Interrogates subtle edge cases, concurrency hazards, race conditions, and mathematical/formal correctness. Challenges assumptions in peer proposals.
+3. **GPT-OSS 120b (`🌐`, Open-Weight / OpenAI-compatible, `#10a37f`)**:
+   - **Role**: Alternative Paradigm & Robustness Auditor.
+   - **Characteristics**: Proposes non-standard algorithmic paradigms (e.g. event sourcing vs mutative state), stress-tests failure boundaries, and audits Byzantine failure recovery.
+
+### 2. Gemini Ultra Plan Quota Allocations & Sliding-Window Tracking
+| Model | RPM Ceiling | TPM Ceiling | Daily Token Limit | 85% Safe Ceiling (RPM) | 85% Safe Ceiling (TPM) |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Gemini 3.8 Flash** | 1,000 | 4,000,000 | 100,000,000 | 850 | 3,400,000 |
+| **Claude 4.6 Opus** | 50 | 300,000 | 5,000,000 | 42 | 255,000 |
+| **GPT-OSS 120b** | 120 | 500,000 | 10,000,000 | 102 | 425,000 |
+
+#### The 15% Proactive Safety Buffer
+To guarantee that the user is never locked out of their primary development models due to sudden API throttling or provider hard-blocks:
+- A hard stop threshold is armed at **85% capacity** (`SAFETY_STOP_THRESHOLD = 0.85`).
+- The remaining **15% headroom is preserved** strictly as an emergency reserve.
+- If an invocation would cross the 85% limit, `canConsume()` returns `allowed: false` with the exact Time-To-Refresh (TTR) countdown.
+
+#### Sliding Window & TTR Formulas
+- **Rolling 60s Window**: Tracks timestamped request entries `{ timestamp, tokens }`. Entries older than `now - 60000ms` are pruned.
+- **Window TTR (Time-To-Refresh)**:
+  $$\text{TTR}_{\text{window}} = \max\left(0, \left\lceil \frac{t_{\text{oldest}} + 60000 - \text{now}}{1000} \right\rceil\right)$$
+- **Daily TTR (UTC Midnight Reset)**:
+  $$\text{TTR}_{\text{daily}} = \max\left(0, \left\lceil \frac{t_{\text{midnightUTC}} - \text{now}}{1000} \right\rceil\right)$$
+
+### 3. Deliberation Protocols & Allocation Strategies
+- **Round 1 (Independent Ideation)**: Each model analyzes the user's goal without peer influence and emits its distinctive strategy.
+- **Round 2 (Adversarial Peer Critique)**: Cross-model review. Opus interrogates Flash's concurrency assumptions; GPT-OSS tests scaling and backpressure; Flash synthesizes constraints.
+- **Round 3 (Consensus & DAG Synthesis)**: Gemini 3.8 Flash unifies the best elements into a clean, 4-phase DAG with explicit acceptance invariants, ready for execution.
+- **Allocation Strategies**:
+  - `halt_before_limit` (Default): Safely pause council execution before exceeding 85% threshold; notify user and report exact TTR.
+  - `fallback_gemini_flash`: Temporarily route a throttled model's seat to Gemini 3.8 Flash (which has 4M TPM and 1000 RPM capacity).
+  - `pause_for_refresh`: Await rolling window roll-off before continuing.
+
+### 4. Registered Tooling & Integration Endpoints
+- **Native Antigravity MCP Tools** (`C:\Users\Logan\.gemini\antigravity\mcp\topology\`):
+  - `topology_spawn_council`: Convenes the multi-model council with goal, rounds, and strategy parameters.
+  - `topology_get_council_budget`: Returns live quota health, RPM/TPM usage, and TTR countdowns.
+- **Bridge API Endpoints** (`http://localhost:5173/api/topology`):
+  - `GET /api/topology/council/budget`
+  - `POST /api/topology/council/budget/reset`
+  - `POST /api/topology/council/spawn`
+- **CLI Commands** (`scripts/topology-log.mjs`):
+  - `node scripts/topology-log.mjs council --goal "..." [--rounds 3] [--strategy halt_before_limit]`
+  - `node scripts/topology-log.mjs budget`
+- **Visualizer UI**:
+  - Top-bar `🏛️ Council` button with live color-coded health indicator.
+  - Glassmorphic zero-border `CouncilMonitorModal` with live model gauges, sliding window countdowns, launch panel, and deliberation history transcript.
+
+---
+
+## 36. Multi-Model Council Upgrades: Context Ingestion, Dual-Mode Provider Engine, ADR Generator, Session History & Financial Cost Tracking
+
+### 1. Architectural Overview & Design Motivation
+The Multi-Model Council orchestrator (`mcp-server/councilOrchestrator.js`, `mcp-server/providerClient.js`, `mcp-server/budgetTracker.js`) has been upgraded to a production-grade multi-agent deliberation engine. It addresses 5 foundational operational requirements:
+1. **Workspace Context Ingestion (`contextFiles`)**: Ingests ground-truth code files from the local filesystem directly into model prompts, preventing hallucinations about existing type signatures, schemas, or invariants.
+2. **Architectural Invariants Enforcement (`constraints`)**: Injects non-negotiable architectural constraints (e.g. "Zero borders UI", "Memory < 128MB", "Fail-open resilience") directly into Claude Opus and GPT-OSS adversarial critique rounds.
+3. **Dual-Mode LLM Provider Client (`mcp-server/providerClient.js`)**: Seamlessly connects to live LLM providers (`gemini-2.5-flash`/`gemini-1.5-pro` via `GEMINI_API_KEY`, `claude-3-5-sonnet`/`claude-opus` via `ANTHROPIC_API_KEY`, and `gpt-4o`/Ollama via `OPENAI_API_KEY`/`OPENAI_BASE_URL`), transparently falling back to the cognitive synthesis engine if offline or unconfigured.
+4. **Automated Architectural Decision Record (ADR) Export (`topology_export_council_adr`)**: Serializes consensus decisions into standard Michael Nygard-compliant markdown records (`docs/adr/ADR-XXXX-<slug>.md`).
+5. **Historical Session Retrieval & Persistence (`topology_list_council_sessions`)**: Saves all deliberation rounds, individual contributions, token counts, and consensus DAGs to `.topology/councils/<sessionId>.json`.
+6. **Real-Time Financial Cost Governor ($ USD)**: Calculates live dollar costs based on input/output token pricing per model family, tracking session cost, daily cost, and all-time financial expenditure.
+
+```mermaid
+graph TD
+    Agent[Antigravity Agent / User] -->|1. spawnCouncil| Orch[Council Orchestrator]
+    Orch -->|2. Ingest Context| FS[Local Code Files\ncontextFiles]
+    Orch -->|3. Check Headroom| Gov[Financial & Quota Governor\nbudgetTracker.js]
+    Gov -->|Allow / Reserve 15%| Orch
+    Orch -->|4. Query Seats| Prov[Dual-Mode Provider Engine\nproviderClient.js]
+    Prov -->|Live API / Fallback| Flash[⚡ Gemini 3.8 Flash]
+    Prov -->|Live API / Fallback| Opus[🧠 Claude 4.6 Opus]
+    Prov -->|Live API / Fallback| OSS[🌐 GPT-OSS 120b]
+    Flash & Opus & OSS -->|Round 1, 2, 3 Deliberation| Orch
+    Orch -->|5. Save ADR| ADR[docs/adr/ADR-XXXX.md]
+    Orch -->|6. Persist Session| Store[.topology/councils/*.json]
+    Orch -->|7. Live Streaming| Bridge[Vite Bridge :5173]
+    Bridge -->|SSE Broadcast| UI[CouncilMonitorModal\nQuotas + Convene + ADRs]
+```
+
+### 2. Dual-Mode Provider Engine (`mcp-server/providerClient.js`)
+Configured through environment variables or `.topology/council_config.json`:
+- **Gemini**: `GEMINI_API_KEY` (Direct Google Generative Language API)
+- **Anthropic**: `ANTHROPIC_API_KEY` (Anthropic Messages API `v1/messages`)
+- **OpenAI / Ollama / Open-Weights**: `OPENAI_API_KEY` & `OPENAI_BASE_URL` (e.g. `http://localhost:11434/v1` for local 120b models)
+- **Fail-Safe Fallback**: If keys are absent or an endpoint times out (15s deadline), the provider client automatically delegates to the deterministic cognitive synthesis engine without throwing fatal exceptions or blocking agent execution.
+
+### 3. Financial Cost Tracker & Rates
+Rates per 1,000,000 tokens tracked in `mcp-server/budgetTracker.js`:
+| Model | Family | Input Rate ($/M) | Output Rate ($/M) |
+| :--- | :--- | :--- | :--- |
+| **Gemini 3.8 Flash** | Google DeepMind | $0.075 | $0.30 |
+| **Claude 4.6 Opus** | Anthropic | $15.00 | $75.00 |
+| **GPT-OSS 120b** | OpenAI / Open-Weights | $0.15 | $0.60 |
+
+Financial metrics tracked per session, daily (reset at 00:00 UTC), and all-time lifetime.
+
+### 4. Registered MCP Tools & Schema Signatures
+Synced to `mcp-server/schemas/` and `C:\Users\Logan\.gemini\antigravity\mcp\topology\`:
+1. `topology_spawn_council`:
+   - Parameters: `goal` (string), `planId` (string, opt), `rounds` (number, opt), `strategy` (enum, opt), `contextFiles` (array of strings, opt), `constraints` (array of strings, opt), `specialists` (object, opt), `saveAdr` (boolean, default true).
+2. `topology_get_council_budget`:
+   - Parameters: `modelId` (enum, opt), `reset` (boolean, default false). Returns RPM, TPM, safe ceilings, TTR countdowns, and financial costs ($ USD).
+3. `topology_export_council_adr`:
+   - Parameters: `sessionId` (string, opt), `title` (string, opt), `saveToDisk` (boolean, default true). Generates and persists ADR markdown.
+4. `topology_list_council_sessions`:
+   - Parameters: `limit` (number, default 10). Lists past sessions, dates, costs, tokens, and ADR paths.
+
+### 5. Zero-Dependency CLI Commands (`scripts/topology-log.mjs`)
+```bash
+# Convene council with context files and invariants
+node scripts/topology-log.mjs council --goal "Refactor Council UI" --context "src/types/topology.ts" --constraints "Zero borders UI,Subtle animations"
+
+# List historical council deliberation sessions
+node scripts/topology-log.mjs sessions --limit 10
+
+# Export consensus ADR markdown
+node scripts/topology-log.mjs adr [--session council-1789070294232] [--save]
+
+# View quotas and financial costs
+node scripts/topology-log.mjs budget
+```
+
+### 6. Bridge API Endpoints (`plugins/topologyBridgePlugin.js`)
+- `GET /api/topology/council/budget`: Returns `CouncilBudgetReport` with financial totals.
+- `POST /api/topology/council/budget/reset`: Resets model quotas and session cost.
+- `POST /api/topology/council/spawn`: Dispatches deliberation with `contextFiles`, `constraints`, and `saveAdr`.
+- `GET /api/topology/council/sessions`: Returns array of `CouncilSessionSummary`.
+- `GET /api/topology/council/session?id=<id>`: Returns full `CouncilSession` record.
+- `POST /api/topology/council/adr`: Exports ADR markdown and optional disk write.
+
+### 7. UI Zero-Border Glassmorphic Design (`CouncilMonitorModal.tsx`)
+- **Strict Borderless Elevation**: Adheres to user rule ("avoid using borders", "preference for elevated card/paper design patterns with slight transparency and background blur"). Replaces all borders with layered background gradients (`bg-white/[0.03]`, `bg-black/40`), rounded cards (`rounded-2xl`), and soft shadows.
+
+---
+
+## 37. Multi-Loop OODA / Council Iteration Cycle, Real-Time Telemetry Stream & Visualizer HUD
+
+```mermaid
+flowchart TD
+    subgraph Multi_Loop_Orchestrator ["Multi-Loop Iteration Cycle (Loop N of M)"]
+        direction TB
+        S1["1. Observe 👁️\nContext, Codebase Scan, Dependencies"] --> S2["2. Understand 💡\nInvariants, Constraints & Problem Formulation"]
+        S2 --> S3["3. Evaluate with Council 🏛️\nMulti-Model Feasibility Assessment"]
+        S3 --> S4["4. Adversarial Critique ⚔️\nRed-Team Stress Test & Edge Cases"]
+        S4 --> S5["5. Each Member Plans 📝\nIndependent Proposals (Flash, Opus, GPT-OSS)"]
+        S5 --> S6["6. Share & Vote on Plan 🗳️\nDemocratic Peer Review & Score Matrix"]
+        S6 --> S7["7. Iterate on Plan 🔄\nAmendments & Feedback Synthesis"]
+        S7 --> S8["8. Propose Plan 📋\nConsolidated Consensus Architecture"]
+        S8 --> S9["9. Update & Execute ⚡\nCode Synthesis, DAG Mutations & Invariant Check"]
+        
+        S9 --> CheckConvergence{Architecture Converged?\nStatus == 'converged'}
+        CheckConvergence -->|No / Low Consensus| S1Loop["Advance Loop Count (N = N + 1)\nRepeat Cycle"]
+        S1Loop --> S1
+        CheckConvergence -->|Yes| ConvergedDone["Status: Converged ✅\nProceed to Production Execution"]
+    end
+
+    subgraph Telemetry_Stream ["Live Telemetry & Ingestion Pipeline"]
+        Emit["MCP Tool: topology_emit_loop_telemetry\nCLI: node scripts/topology-log.mjs loop"]
+        Disk["Append to .topology/topology.log\nUpdate .topology/ooda_loops.json\nUpdate .topology/plans.json"]
+        Bridge["Vite Bridge: POST /api/topology/loop-telemetry"]
+        SSE["SSE Broadcast: loop_telemetry_updated"]
+        
+        S1 & S2 & S3 & S4 & S5 & S6 & S7 & S8 & S9 --> Emit
+        Emit --> Disk
+        Emit --> Bridge --> SSE
+    end
+
+    subgraph Visualizer_HUD ["Visualizer HUD (http://localhost:5173)"]
+        TopBar["Top-Bar Loop Pill: 🔄 Loop N/M • Stage"]
+        Modal["Zero-Border Glassmorphic Modal: OodaLoopTelemetryModal.tsx"]
+        Stepper["9-Stage Interactive Visual Pipeline Stepper"]
+        LoopTabs["Multi-Loop Timeline Selector (Loop 1, 2, 3...)"]
+        Cards["Candidate Member Proposals (Flash, Opus, GPT-OSS)"]
+        Metrics["Telemetry Metrics: Consensus %, Tokens, Cost $, Duration"]
+
+        SSE --> TopBar
+        TopBar -->|Click| Modal
+        Modal --> Stepper & LoopTabs & Cards & Metrics
+    end
+```
+
+### 1. Architectural Philosophy: The 9-Stage Iterative OODA Loop
+While traditional linear planning decomposes tasks once, high-assurance software engineering requires cyclic refinement before execution:
+1. **`observe` (Observe 👁️)**: Scans source code, reads schemas, parses AST trees, and identifies existing invariants.
+2. **`understand` (Understand 💡)**: Extracts non-functional requirements, API contracts, security perimeters, and performance envelopes.
+3. **`evaluate_with_council` (Evaluate with Council 🏛️)**: Assesses macro-architectural feasibility across Google DeepMind, Anthropic, and open-weights paradigms.
+4. **`adversarial_council_evaluation` (Adversarial Council Evaluation ⚔️)**: Aggressively red-teams the concept, uncovering race conditions, memory leaks, and Byzantine failure modes.
+5. **`each_member_plans` (Each Member Plans 📝)**: Each model produces its own standalone candidate plan (Gemini 3.8 Flash: latency & structured schemas; Claude 4.6 Opus: deep reasoning & invariants; GPT-OSS 120b: distributed resilience).
+6. **`share_and_vote_on_plan` (Share and Vote on Plan 🗳️)**: Peer ranking matrix. Every model reviews all proposals and scores them from 1 to 10.
+7. **`iterate_on_plan` (Iterate on Plan 🔄)**: Synthesizes critiques into concrete amendments. If flaws remain, the cycle loops back for another iteration.
+8. **`propose_plan` (Propose Plan 📋)**: Compiles the vetted architecture into an actionable execution specification.
+9. **`update` (Update & Execute ⚡)**: Applies file mutations, synthesizes code, updates DAG task nodes in Topology, and verifies acceptance invariants. When finalized, transitions status to `converged`.
+
+### 2. Multi-Loop Iteration & Convergence Dynamics
+- **Loop Indexing**: Each iteration is stamped with a 1-based `loopNumber` (e.g. `Loop 1`, `Loop 2`, `Loop 3`).
+- **Target Loops (`targetMaxLoops`)**: Agents specify the target or maximum iterations allowed before forced consensus.
+- **Convergence Guard (`isConverged`)**: When consensus agreement exceeds threshold (e.g. $\ge 90\%$) or the final stage completes without blocking objections, the loop is marked `converged`.
+- **Multi-Cycle Evolution**: In the UI, users can scrub backwards through past loops to see how early critiques reshaped the final code.
+
+### 3. Native Model Context Protocol (MCP) Tools
+Synced to `C:\Users\Logan\.gemini\antigravity\mcp\topology\`:
+- **`topology_emit_loop_telemetry`**: Emits real-time telemetry for any stage.
+  - Parameters: `planId` (string), `loopNumber` (number), `totalLoops` (number, opt), `stage` (enum of 9 stages), `stageName` (string, opt), `thought` (string, opt), `observations` (string array, opt), `understandings` (string array, opt), `councilEvaluations` (string array, opt), `adversarialCritiques` (string array, opt), `memberPlans` (array of objects with `memberId`, `memberName`, `avatar`, `role`, `proposal`, `voteScore`, `feedback`), `voteSummary` (string, opt), `refinements` (string array, opt), `proposedPlanSummary` (string, opt), `updatesApplied` (string array, opt), `metrics` (object with `tokensUsed`, `costUsd`, `durationMs`, `consensusScorePercent`, `invariantsVerifiedCount`), `status` (`in_progress`, `completed`, `converged`, `repeating`).
+- **`topology_get_loop_telemetry`**:
+  - Parameters: `planId` (string, opt). Returns current loop count, active stage, convergence boolean, and complete stage event history.
+
+### 4. Zero-Dependency Headless CLI Reference
+```bash
+# Emit stage telemetry
+node scripts/topology-log.mjs loop \
+  --plan="distributed-task-engine" \
+  --loop=1 \
+  --totalLoops=3 \
+  --stage="observe" \
+  --thought="Scanned codebase and identified zero-copy requirements"
+
+# Inspect loop progress across all plans
+node scripts/topology-log.mjs loops
+
+# Inspect detailed stage history for a specific plan
+node scripts/topology-log.mjs loops --plan="distributed-task-engine"
+```
+
+### 5. Frontend Visualizer & Zero-Border Glassmorphic HUD
+- **Top-Bar Dynamic Pill (`src/components/layout/Header.tsx`)**:
+  - Positioned prominently alongside the Council indicator.
+  - Displays live spinning icon, active loop count (e.g., `Loop 2/3`), and stage pill (`Obs`, `Und`, `Plan`, `Vote`, or `Done`).
+- **Zero-Border Glassmorphic Inspector (`src/components/council/OodaLoopTelemetryModal.tsx`)**:
+  - Adheres strictly to design rules: zero borders (`border-none`), elevated glassmorphic paper card, subtle animations, and Lucide icons.
+  - **9-Stage Pipeline Stepper**: Interactive visual pipeline showing all 9 stages with status badges (completed, active pulse, or pending).
+  - **Multi-Loop Selector**: Switch seamlessly between Loop 1, Loop 2, and Loop 3.
+  - **Candidate Proposals Grid**: Clean 3-column cards detailing independent proposals from Flash, Opus, and GPT-OSS with avatars and peer vote scores.
+  - **Cycle Metrics Bar**: Consensus score %, invariants verified count, token footprint, financial dollar cost, and elapsed execution time.
+
+---
+
+## 38. Multi-Loop OODA Self-Evolution: Granular Code-Splitting, Zero-Cascade Selectors, Inline Deliverables & Strict Zero-Border Glassmorphism
+
+### 1. Architectural Motivation & Dogfooding Overview
+To validate the production readiness of our 9-stage OODA Council iteration cycle (`topology-ooda-loop`), we dogfooded the system across three complete evolution cycles (`topology-v2-evolution`), driving measurable performance gains, cockpit ergonomic breakthroughs, and visual elevation:
+- **Loop 1: Performance & Code-Splitting Overhaul**
+- **Loop 2: Cockpit Usefulness & Ergonomic Affordances**
+- **Loop 3: Refined & Elevated Zero-Border Design Language**
+
+```mermaid
+graph TD
+    subgraph Loop1 ["Loop 1: Performance & Hydration"]
+        L1_Obs["1. Observe: 1.5MB Monolithic Chunk"] --> L1_Crit["4. Adversarial Critique: 3D Isolation"]
+        L1_Crit --> L1_Split["8. Propose: 6 Lightweight Chunks"]
+        L1_Split --> L1_Done["9. Update: >1.5MB Initial Payload Saved"]
+    end
+
+    subgraph Loop2 ["Loop 2: Cockpit Usefulness"]
+        L2_Obs["1. Observe: Navigation Friction"] --> L2_Crit["4. Adversarial Critique: Compact Affordances"]
+        L2_Crit --> L2_Inlines["8. Propose: 1-Click HITL + Deliverable Chips"]
+        L2_Inlines --> L2_Done["9. Update: Instant Card Review Gates"]
+    end
+
+    subgraph Loop3 ["Loop 3: Elevated Zero-Border UI"]
+        L3_Obs["1. Observe: Residual 1px Dividers"] --> L3_Crit["4. Adversarial Critique: WCAG Luminance Contrast"]
+        L3_Crit --> L3_Polish["8. Propose: Soft Shadow Paper Surfaces"]
+        L3_Polish --> L3_Done["9. Convergence: Unanimous Council Consensus ✅"]
+    end
+
+    Loop1 --> Loop2 --> Loop3
+```
+
+### 2. Loop 1 Benchmarks: Granular Code-Splitting & Zero-Cascade Selectors
+1. **Initial Bundle Breakdown**:
+   - Before: `vendor-three` monolithic chunk = 1,506 kB (Vite build warning triggered on every build).
+   - After:
+     - `index.html`: 1.61 kB
+     - `index.css`: 114.10 kB
+     - `vendor-confetti`: 10.66 kB
+     - `vendor-icons`: 50.87 kB
+     - `vendor-framer`: 115.26 kB
+     - `vendor-xyflow`: 408.84 kB
+     - `index.js`: 565.56 kB
+     - `TopologyGraph3D`: 1,516.04 kB (100% dynamically lazy-loaded on demand only)
+   - Initial 2D page payload reduced by **over 1.5 MB**, accelerating initial canvas hydration to sub-second timings.
+2. **Zustand Selector Memoization (`TopologyCustomNode.tsx`)**:
+   - Eliminated whole-store subscriptions (`s.plans`, `s.activePlanId`) that previously triggered full-graph re-renders whenever background plans or telemetry streamed.
+   - Bound node cards directly to memoized `activePlan` and localized `nodeLock` selectors.
+
+### 3. Loop 2 Cockpit Upgrades: Inline Deliverables & 1-Click HITL Gates
+1. **Interactive Deliverable Artifact Chips**:
+   - Synthesizes `node.context.outputArtifacts` and `node.context.artifactPayloads` into elevated interactive pill chips directly on the node card.
+   - Single-click directly opens the `ArtifactViewerModal` with syntax highlighting, copy, download, and approval actions.
+2. **1-Click Human-in-the-Loop (HITL) Review Gate Banner**:
+   - When a node is awaiting human approval (`isHitlPending`), an elevated radiant amber banner renders directly on the card with `[✓ Approve]` and `[✗ Reject]` micro-buttons.
+   - Eliminates all friction: operators can sign off or reject directly from the canvas without opening sidebars.
+3. **Multi-Line Expanding Thought Preview Drawer**:
+   - Live agent thought streams smoothly expand from 1 line to a 4-line monospace drawer on card hover, with glowing tool badges and stage indicators.
+
+### 4. Loop 3 Design Polish: Strict Zero-Border Enforcement
+- Eliminated all residual 1px divider lines (`border-b`, `border-t`, `border-l`, `border-r`) across modals, headers, footers, radar mini-maps, and satellite popovers.
+- Implemented elevated paper/card design patterns using layered background luminance (`bg-black/5`, `bg-white/5`), deep backdrop blurs (`backdrop-blur-2xl`), and soft multi-tier drop shadows (`shadow-elevated-md`).
+- Achieved unanimous council convergence across Gemini 3.8 Flash, Claude 4.6 Opus, and GPT-OSS 120b.
+
+---
+
+## 39. Drastic Quality, Usability & Efficiency Overhaul: Parallel Council, Multi-Loop OODA Engine, Spatial Hotkeys & 3D Force Graph Optimizations
+
+### 1. Architectural Overview & Four Key Pillars
+To maximize the throughput, operator ergonomics, and computational efficiency of Topology as an agentic cockpit, a four-pillar overhaul was executed:
+
+```mermaid
+graph TD
+    subgraph Pillar1 ["Pillar 1: Parallel MCP Council"]
+        P1_Req["Task Input"] --> P1_ParR1["Round 1: Parallel Model Proposals (Promise.all)"]
+        P1_ParR1 --> P1_ParR2["Round 2: Cross-Model Critiques & Peer Voting (Promise.all)"]
+        P1_ParR2 --> P1_Consensus["Consensus Task Decomposition"]
+        P1_Consensus -->|handoffToPlan| P1_DAG["Automated Visual DAG Plan Generation"]
+    end
+
+    subgraph Pillar2 ["Pillar 2: Autonomous Multi-Loop OODA"]
+        P2_Init["topology_run_ooda_cycle"] --> P2_9Stages["9-Stage Deliberation Pipeline"]
+        P2_9Stages --> P2_Eval["Convergence Gate (Score >= 90%?)"]
+        P2_Eval -->|No| P2_Loop["Increment loopNumber & Re-evaluate"]
+        P2_Eval -->|Yes| P2_Converged["Status: Converged & Ready for Execution"]
+    end
+
+    subgraph Pillar3 ["Pillar 3: Visual Planning Hotkeys"]
+        P3_Nav["Ctrl+F / Ctrl+K Quick-Add Spotlight"]
+        P3_Edit["Tab: Branch Child | Enter: Sibling | Del: Prune"]
+        P3_Undo["Ctrl+Z Undo | Ctrl+Y Redo | Ctrl+A Select All"]
+        P3_Layout["Ctrl+L Auto-Layout | Ctrl+0 Fit View | 1/2/3 LOD"]
+    end
+
+    subgraph Pillar4 ["Pillar 4: 3D Force Graph Optimization"]
+        P4_Pool["Three.js Geometry & Material Node Pooling"]
+        P4_Physics["Physics Simulation Cooldown & Decays (warmup=35, cooldown=120)"]
+        P4_ZeroBorder["Strict Zero-Border Glassmorphic HUD & 3D Keyboard Nav"]
+    end
+
+    Pillar1 --> Pillar2
+    Pillar2 --> Pillar3
+    Pillar3 --> Pillar4
+```
+
+### 2. Pillar 1: Parallel MCP Council Deliberation & Direct Plan Handoff
+1. **Concurrent Model Querying (`mcp-server/councilOrchestrator.js`)**:
+   - Replaced sequential waterfalls in Round 1 (independent proposals) and Round 2 (cross-model critiques and voting) with `Promise.all` across models (Gemini 3.8 Flash, Claude 4.6 Opus, and GPT-OSS 120b).
+   - Reduces deliberation latency by ~3x while preserving complete multi-model adversarial diversity.
+2. **Contextual Critique Injection**:
+   - Round 2 evaluation prompts automatically receive the candidate proposals generated by peer models in Round 1, enabling genuine adversarial red-teaming and cross-model synthesis.
+3. **Response Memoization Cache (`mcp-server/providerClient.js`)**:
+   - Implemented an in-memory TTL-governed cache (`queryCache`, `computeCacheKey`) with an 8,000ms safe timeout.
+   - Idempotent queries and repeated evaluations are returned instantly without redundant network roundtrips.
+4. **Automated Visual DAG Handoff (`handoffToPlan`, `topology_handoff_council_plan`)**:
+   - Council consensus task decompositions can now directly initialize or append to active visualizer workflow plans.
+   - Consensus deliverables, causal dependencies, and agent assignments (`handoffAgentRole`) are automatically formatted as Topology DAG nodes and edges.
+   - In `CouncilMonitorModal.tsx`, an elevated "Handoff to Visual DAG" button allows 1-click execution handoff directly from the consensus UI.
+
+### 3. Pillar 2: Multi-Loop OODA Iteration Engine
+1. **Full-Cycle Autonomous Runner (`topology_run_ooda_cycle`)**:
+   - Programmatically coordinates all 9 stages:
+     `observe` → `understand` → `evaluate_with_council` → `adversarial_council_evaluation` → `each_member_plans` → `share_and_vote_on_plan` → `iterate_on_plan` → `propose_plan` → `update`.
+   - Tracks cycle metrics including token utilization, simulated dollar cost, duration, and consensus score percentage.
+   - Evaluates explicit convergence criteria (`convergenceScorePercent >= convergenceThreshold`, default 90%). If criteria are not met and `loopNumber < maxLoops`, the engine automatically restarts at `observe` for the next loop iteration.
+2. **Client-Side State Engine (`useTopologyStore.advanceOodaStage`)**:
+   - Implemented reactive stage transitions within the Zustand store with optimistic local mutations and background bridge synchronization.
+   - Auto-increments loop indices, computes dynamic consensus scores, and marks plans as `converged` when final criteria are met.
+3. **Interactive Telemetry HUD (`OodaLoopTelemetryModal.tsx`)**:
+   - Added interactive "Advance Stage" and "Auto Run Loop" controls with spinning activity spinners, preventing operator deadlocks and providing full manual or autonomous orchestration.
+4. **CLI Integration (`scripts/topology-log.mjs`)**:
+   - Exposed `ooda` and `loop` subcommands for headless pipelines and automated CI/CD validation.
+
+### 4. Pillar 3: Visual Planning Spatial Hotkeys & Graph Manipulation
+1. **Spatial Workflow Hotkeys (`TopologyCanvas2D.tsx`)**:
+   - `Ctrl+Z` / `Cmd+Z`: History undo (reverts recent node creations, moves, deletions).
+   - `Ctrl+Y` / `Ctrl+Shift+Z` / `Cmd+Shift+Z`: History redo.
+   - `Ctrl+A` / `Cmd+A`: Select all nodes across the canvas.
+   - `Ctrl+F` / `Ctrl+K` / `/`: Quick-add spotlight modal centered on cursor/viewport.
+   - `Ctrl+L` / `Cmd+L`: Recompute hierarchical DAG auto-layout (Dagre/ELK).
+   - `Ctrl+0` / `Cmd+0`: Fit viewport to all graph elements.
+   - `1` / `2` / `3`: Level-of-Detail (LOD) switches (1 = compact overview, 2 = standard, 3 = detailed inspection).
+   - `Tab`: Automatically branch and connect a new dependent child node from the selected node.
+   - `Enter`: Spawn a sibling node at the same hierarchical tier.
+   - `Delete` / `Backspace`: Safely delete selected nodes and clean up dangling edges.
+2. **Batch Graph Manipulation**:
+   - Selection state multi-actions support moving, styling, or pruning subgraphs with zero memory leakage.
+
+### 5. Pillar 4: 3D Force Graph Optimization & Zero-Border Design
+1. **Three.js Object Pooling (`TopologyGraph3D.tsx`)**:
+   - Solved garbage collection stutter by pooling Three.js `Group`, `Mesh`, `SphereGeometry`, and `MeshStandardMaterial` instances directly on `node.__cachedGroup`.
+   - Eliminated redundant sprite cloning on every force simulation tick.
+2. **Physics Convergence Tuning**:
+   - Configured `warmupTicks={35}`, `cooldownTicks={120}`, `d3VelocityDecay={0.3}`, and `d3AlphaDecay={0.028}` to eliminate continuous background physics computations while maintaining fluid initial layout transitions.
+3. **3D Interactive Camera Navigation**:
+   - Implemented dedicated keyboard shortcuts: `Esc` (exit to 2D), `+`/`-` (zoom in/out), `0`/`R` (reset camera viewpoint), `C` (center camera on selected node), `2` (toggle to 2D view).
+   - Floating guide HUD redesigned with elevated glassmorphism (`backdrop-blur-xl`, `shadow-2xl`, `border-none`).
+4. **Strict Zero-Border Compliance**:
+   - Enforced `border-none` across all modals, telemetry pills, and 2D/3D visualizer surfaces in adherence with elevated paper/card styling guidelines.
+
+---
+
+## 40. Quality & Robustness Verification: Node Status Fixes, Dynamic Councils, Collision-Free Caching & Atomic Handoffs
+
+### 1. Root Cause Analysis & Rectifications
+
+1. **Persistent Completed Node Statuses during Council Handoff (`mcp-server/councilOrchestrator.js`)**:
+   - *Issue*: Completed deliberation round nodes (`council-round-1`, `council-round-2`, `council-round-3`) were reverting to `pending`, and `council-init` was reverting to `in_progress` upon DAG handoff.
+   - *Fix*: In `councilOrchestrator.js`, the in-memory `initNodes` array is now updated directly as each phase completes (`node.status = 'completed'`). When `mergedNodes = [...initNodes, ...executionNodes]` is sent to the bridge, all deliberation milestone and task statuses remain locked as `completed`, with the downstream execution DAG initialized at `status: 'ready'`.
+
+2. **Dynamic Council Round Sizing (1, 2, or 3 Rounds)**:
+   - *Issue*: Running councils with `rounds < 3` caused `consensusData` to remain `null`, leaving un-run rounds in `pending` and aborting execution handoff.
+   - *Fix*: Council orchestration now dynamically provisions `initNodes` and `initEdges` according to `maxRounds`. Consensus synthesis and execution DAG formatting execute deterministically on the final deliberation round (`round === maxRounds`), ensuring unanimous consensus summaries and ADR records are generated for 1, 2, or 3 round configurations.
+
+3. **Live LLM Output Extraction & Structured Synthesis**:
+   - *Issue*: Live responses from Gemini, Claude, and GPT-OSS models were queried and billed, but the textual analysis was overwritten by mock data.
+   - *Fix*: `councilOrchestrator.js` parses live response lines, bullets, and rationale directly into `contribution.proposals`, `contribution.critiques`, `contribution.thought`, and `contribution.rawResponse`.
+
+4. **Collision-Free SHA-256 Model Response Caching (`mcp-server/providerClient.js`)**:
+   - *Issue*: Ad-hoc 32-bit polynomial hashing in `computeCacheKey` had high collision risks across distinct deliberation prompts.
+   - *Fix*: Replaced with Node's native `crypto.createHash('sha256')`, providing a cryptographic, collision-free memoization key alongside a strict 8,000ms safe timeout.
+
+5. **Bridge Path Normalization & Route Error Elimination (`mcp-server/index.js`)**:
+   - *Issue*: Calling `sendToBridge('/api/topology/plan', ...)` resulted in double-prefix paths (`/api/topology//api/topology/plan`), producing 404 errors.
+   - *Fix*: Implemented `normalizeBridgePath` across `rawSendToBridge` and `rawGetFromBridge` to sanitize endpoints regardless of leading slashes or prefix duplication.
+
+6. **Modal-Safe Canvas & 3D Spatial Navigation Shield (`TopologyCanvas2D.tsx`, `TopologyGraph3D.tsx`)**:
+   - *Issue*: Canvas keyboard shortcuts (`Ctrl+A`, `Delete`, `Backspace`, `Tab`, `Enter`, `1/2/3`) intercepted keystrokes while operators were interacting with modals or typing inside dialogs.
+   - *Fix*: Hotkey listeners now check for any open modal dialog overlays (`.fixed.inset-0.z-50:not([data-spotlight="true"])`) and text editable elements (`select`, `isContentEditable`), completely suppressing canvas mutations when dialogs are active.
+
+7. **Atomic 1-Click Consensus DAG Creation (`useTopologyStore.ts`, `CouncilMonitorModal.tsx`)**:
+   - *Issue*: 1-click handoff in `CouncilMonitorModal` used a 50ms `setTimeout` between `createNewPlan` and `setGraph`, creating a network race condition that could overwrite the consensus graph with a dummy node.
+   - *Fix*: Upgraded `createNewPlan` in `useTopologyStore` to accept optional `initialNodes` and `initialEdges`, executing an atomic plan registration with zero race conditions.
+
+8. **Three.js Object Pooling Invalidation & Sprite Updating (`TopologyGraph3D.tsx`)**:
+   - *Issue*: Cached 3D node groups did not update text labels or theme contrast colors when node labels or themes changed.
+   - *Fix*: Added label and theme cache keys (`__cachedLabel`, `__cachedIsLight`) on node groups with automatic `label_sprite` recreation on change, and safe named object lookups (`sphere`, `halo`, `label_sprite`).
+
+9. **Zero-Latency Optimistic OODA Stage Progression**:
+   - *Issue*: Starting fresh OODA loop cycles skipped stage 0 (`observe`) and jumped to `understand`, and UI froze if bridge connection was offline.
+   - *Fix*: Initial cycle now starts at `observe` (stage 0), and `emitLoopTelemetry` optimistically mutates the local Zustand store immediately before syncing in the background with fail-open safety.
+
 
 

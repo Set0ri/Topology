@@ -1,0 +1,22 @@
+{
+  "name": "topology_export_council_adr",
+  "description": "Export the consensus of a council deliberation session into a standardized Architectural Decision Record (ADR) Markdown document, optionally written to docs/adr/.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "sessionId": {
+        "type": "string",
+        "description": "Optional session ID or plan ID of the council deliberation. Defaults to the most recent session."
+      },
+      "title": {
+        "type": "string",
+        "description": "Optional override title for the ADR document"
+      },
+      "saveToDisk": {
+        "type": "boolean",
+        "default": true,
+        "description": "Whether to write the generated ADR Markdown file to docs/adr/ in the workspace"
+      }
+    }
+  }
+}

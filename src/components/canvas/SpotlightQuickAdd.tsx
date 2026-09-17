@@ -150,6 +150,7 @@ export const SpotlightQuickAdd: React.FC<SpotlightQuickAddProps> = ({
     <AnimatePresence>
       {isOpen && (
         <div 
+          data-spotlight="true"
           className="fixed inset-0 z-50 bg-black/20 backdrop-blur-[2px]"
           onClick={onClose}
         >

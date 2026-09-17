@@ -1,0 +1,14 @@
+{
+  "name": "topology_list_council_sessions",
+  "description": "Query, list, and search previous council deliberation sessions, their synthesized consensus architectures, token footprints, and ADR files.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "limit": {
+        "type": "number",
+        "default": 10,
+        "description": "Maximum number of recent sessions to retrieve"
+      }
+    }
+  }
+}

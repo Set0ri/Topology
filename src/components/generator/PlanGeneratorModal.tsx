@@ -184,7 +184,7 @@ export const PlanGeneratorModal: React.FC<PlanGeneratorModalProps> = ({ isOpen, 
       ];
 
       // Auto-layout with current layout direction
-      const currentDir = useTopologyStore.getState().layoutDirection || 'LR';
+      const currentDir = useTopologyStore.getState().layoutDirection || 'TB';
       const layoutPositions = calculateDagreLayout(nodes, edges, currentDir);
       const alignedNodes = nodes.map(n => ({
         ...n,

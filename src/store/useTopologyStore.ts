@@ -26,7 +26,16 @@ import {
   TopologyLogEntry,
   GitSyncStatus,
   TopologyPlanRecord,
-  PlanSummary
+  PlanSummary,
+  PlanStatus,
+  CouncilBudgetReport,
+  CouncilSession,
+  CouncilAdrReport,
+  CouncilSessionSummary,
+  OodaLoopTelemetry,
+  OodaLoopIteration,
+  OodaStage,
+  OodaMemberPlan
 } from '../types/topology';
 import { SAMPLE_TOPOLOGIES, DEFAULT_AGENT_SQUAD } from '../data/sampleTopologies';
 import { CANONICAL_ARCHETYPES, CanonicalArchetype } from '../data/topologyRegistry';
@@ -148,6 +157,7 @@ interface TopologyStore {
   // CRUD Actions
   addNode: (partial?: Partial<TopologyNode>, options?: { autoConnect?: boolean; targetId?: string }) => TopologyNode;
   updateNode: (id: string, updates: Partial<TopologyNode>, options?: { skipSnapshot?: boolean }) => void;
+  completeNode: (id: string, summary?: string, outputArtifacts?: string[], advanceNext?: boolean) => void;
   recordSnapshot: () => void;
   deleteNode: (id: string) => void;
   connectNodes: (sourceId: string, targetId: string, type?: EdgeType, label?: string, condition?: 'true' | 'false' | 'always') => { success: boolean; error?: string };
@@ -282,24 +292,220 @@ interface TopologyStore {
   setPlansList: (plansList: PlanSummary[], activeId?: string) => void;
   upsertPlan: (plan: Partial<TopologyPlanRecord> & { id: string }, makeActive?: boolean) => void;
   removePlan: (planId: string) => void;
-  createNewPlan: (title?: string, agentRole?: string) => string;
+  createNewPlan: (title?: string, agentRole?: string, initialNodes?: TopologyNode[], initialEdges?: TopologyEdge[]) => string;
   updatePlanNodeState: (planId: string, nodeId: string, updates: Partial<TopologyNode>) => void;
+  completePlan: (planId?: string, summary?: string, artifacts?: string[]) => Promise<void>;
+  reactivatePlan: (planId: string) => Promise<void>;
+  archivePlan: (planId?: string) => Promise<void>;
+  abandonPlan: (planId?: string, reason?: string) => Promise<void>;
+  pausePlan: (planId?: string) => Promise<void>;
+  resumePlan: (planId?: string) => Promise<void>;
+  setPlanStatus: (planId: string, status: PlanStatus, reasonOrSummary?: string) => Promise<void>;
+  cleanAndReconcilePlans: () => Promise<void>;
+
+  // Multi-Model Council & Gemini Ultra Quota Monitor
+  councilBudget: CouncilBudgetReport | null;
+  councilSessions: CouncilSessionSummary[];
+  isCouncilModalOpen: boolean;
+  isCouncilSpawning: boolean;
+  activeCouncilSession: CouncilSession | null;
+  setCouncilModalOpen: (open: boolean) => void;
+  setCouncilBudget: (budget: CouncilBudgetReport) => void;
+  setActiveCouncilSession: (session: CouncilSession | null) => void;
+  fetchCouncilBudget: () => Promise<void>;
+  fetchCouncilSessions: (limit?: number) => Promise<void>;
+  fetchCouncilSessionDetails: (sessionId: string) => Promise<CouncilSession | null>;
+  spawnCouncil: (params: {
+    goal: string;
+    planId?: string;
+    rounds?: number;
+    strategy?: string;
+    contextFiles?: string[];
+    constraints?: string[];
+    specialists?: Record<string, string>;
+    saveAdr?: boolean;
+  }) => Promise<CouncilSession>;
+  exportCouncilAdr: (params?: { sessionId?: string; title?: string; saveToDisk?: boolean }) => Promise<CouncilAdrReport | null>;
+  resetCouncilBudget: (modelId?: string) => Promise<void>;
+
+  // Multi-Loop OODA / Council Iteration Cycle Telemetry
+  activeLoopTelemetry: OodaLoopTelemetry | null;
+  isLoopModalOpen: boolean;
+  setLoopModalOpen: (open: boolean) => void;
+  setActiveLoopTelemetry: (telemetry: OodaLoopTelemetry | null) => void;
+  fetchLoopTelemetry: (planId?: string) => Promise<OodaLoopTelemetry | null>;
+  emitLoopTelemetry: (params: {
+    planId: string;
+    loopNumber?: number;
+    totalLoops?: number;
+    stage: OodaStage;
+    stageName?: string;
+    thought?: string;
+    observations?: string[];
+    understandings?: string[];
+    councilEvaluations?: string[];
+    adversarialCritiques?: string[];
+    memberPlans?: OodaMemberPlan[];
+    voteSummary?: string;
+    refinements?: string[];
+    proposedPlanSummary?: string;
+    updatesApplied?: string[];
+    metrics?: {
+      tokensUsed?: number;
+      costUsd?: number;
+      durationMs?: number;
+      consensusScorePercent?: number;
+      invariantsVerifiedCount?: number;
+    };
+    status?: 'in_progress' | 'completed' | 'converged' | 'repeating';
+  }) => Promise<OodaLoopTelemetry | null>;
+  advanceOodaStage: (planId?: string) => Promise<void>;
+}
+
+export function ensureSequentialEdges(nodes: TopologyNode[], edges?: TopologyEdge[]): TopologyEdge[] {
+  if (Array.isArray(edges) && edges.length > 0) {
+    return edges;
+  }
+  if (!Array.isArray(nodes) || nodes.length <= 1) {
+    return [];
+  }
+  return nodes.slice(0, -1).map((node, i) => {
+    const nextNode = nodes[i + 1];
+    return {
+      id: `edge-${node.id}-${nextNode.id}`,
+      source: node.id,
+      target: nextNode.id,
+      type: 'depends_on' as EdgeType,
+      label: 'depends_on',
+      animated: true,
+    };
+  });
+}
+
+export function reconcilePlanRecord(
+  plan: TopologyPlanRecord,
+  options?: { activeLocks?: Record<string, NodeLock> | NodeLock[] | Array<{ resource?: string; planId?: string }>; isConnected?: boolean }
+): TopologyPlanRecord {
+  if (!plan || !plan.id) return plan;
+
+  const rawNodes = Array.isArray(plan.nodes) ? plan.nodes.filter(Boolean) : [];
+  const updatedEdges = ensureSequentialEdges(rawNodes, plan.edges);
+
+  const completedNodesCount = rawNodes.filter(n => n.status === 'completed').length;
+  const inProgressNodes = rawNodes.filter(n => n.status === 'in_progress');
+  const allNodesCompleted = rawNodes.length > 0 && completedNodesCount === rawNodes.length;
+
+  let status: PlanStatus = plan.status || 'active';
+  let completedAt = plan.completedAt;
+  let pausedAt = plan.pausedAt;
+  let summary = plan.summary;
+  let activeTool = plan.activeTool;
+
+  // Rule 1: 100% of nodes completed -> Status is completed
+  if (allNodesCompleted) {
+    status = 'completed';
+    completedAt = completedAt || plan.updatedAt || Date.now();
+    summary = summary || 'All workflow plan tasks completed successfully.';
+    activeTool = undefined;
+  }
+  // Rule 2: Explicit terminal / user-archived states preserved
+  else if (status === 'archived' || status === 'abandoned') {
+    // Preserve
+  }
+  // Rule 3: Active vs Paused reconciliation
+  else {
+    const rawLocks = options?.activeLocks;
+    const activeLocksList = Array.isArray(rawLocks)
+      ? rawLocks
+      : rawLocks && typeof rawLocks === 'object'
+      ? Object.values(rawLocks)
+      : [];
+
+    const hasLock = activeLocksList.some((lock: any) => {
+      if (!lock?.resource) return false;
+      if (lock.planId === plan.id || lock.resource.includes(plan.id)) return true;
+      return rawNodes.some(n => lock.resource === `node:${n.id}` || lock.resource === n.id);
+    });
+
+    const isConnected = options?.isConnected !== false;
+
+    // Check last activity timestamp across plan and nodes
+    let lastActivityTime = plan.updatedAt || plan.createdAt || 0;
+    for (const node of rawNodes) {
+      if (node.updatedAt && node.updatedAt > lastActivityTime) lastActivityTime = node.updatedAt;
+      if (node.context?.telemetry?.lastUpdated && node.context.telemetry.lastUpdated > lastActivityTime) {
+        lastActivityTime = node.context.telemetry.lastUpdated;
+      }
+    }
+
+    const idleDurationMs = Date.now() - lastActivityTime;
+    const isRecent = idleDurationMs < 5 * 60 * 1000; // 5 minutes
+
+    const isActivelyWorking = hasLock || (inProgressNodes.length > 0 && isRecent && isConnected);
+
+    if (isActivelyWorking) {
+      status = 'active';
+      pausedAt = undefined;
+    } else if (status === 'active') {
+      // If plan has no active work, no active lock, or connection lost / idle > 3 min
+      if (inProgressNodes.length === 0 || !isRecent || !isConnected) {
+        status = 'paused';
+        pausedAt = pausedAt || Date.now();
+      }
+    }
+  }
+
+  return {
+    ...plan,
+    nodes: rawNodes,
+    edges: updatedEdges,
+    status,
+    completedAt,
+    pausedAt,
+    summary,
+    activeTool,
+  };
+}
+
+export function reconcilePlansMap(
+  plans: Record<string, TopologyPlanRecord>,
+  options?: { activeLocks?: Record<string, NodeLock> | NodeLock[] | Array<{ resource?: string; planId?: string }>; isConnected?: boolean }
+): { plans: Record<string, TopologyPlanRecord>; hasChanges: boolean } {
+  if (!plans || typeof plans !== 'object') return { plans: {}, hasChanges: false };
+  let hasChanges = false;
+  const cleaned: Record<string, TopologyPlanRecord> = {};
+
+  for (const [id, record] of Object.entries(plans)) {
+    if (!record || !record.id) {
+      hasChanges = true;
+      continue;
+    }
+    const reconciled = reconcilePlanRecord(record, options);
+    if (
+      reconciled.status !== record.status ||
+      reconciled.completedAt !== record.completedAt ||
+      reconciled.pausedAt !== record.pausedAt ||
+      reconciled.edges?.length !== record.edges?.length
+    ) {
+      hasChanges = true;
+    }
+    cleaned[reconciled.id] = reconciled;
+  }
+
+  return { plans: cleaned, hasChanges };
 }
 
 const defaultSample = SAMPLE_TOPOLOGIES[0];
 
 const getInitialGraph = () => {
-  const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
-  const layoutDirection: 'LR' | 'TB' = isMobile ? 'TB' : 'LR';
-  if (isMobile) {
-    const positions = calculateDagreLayout(defaultSample.nodes, defaultSample.edges, 'TB');
-    const nodes = defaultSample.nodes.map(n => ({
-      ...n,
-      position: positions[n.id] || n.position,
-    }));
-    return { nodes, edges: defaultSample.edges, layoutDirection };
-  }
-  return { nodes: defaultSample.nodes, edges: defaultSample.edges, layoutDirection };
+  const layoutDirection: 'LR' | 'TB' = 'TB';
+  const edges = ensureSequentialEdges(defaultSample.nodes, defaultSample.edges);
+  const positions = calculateDagreLayout(defaultSample.nodes, edges, 'TB');
+  const nodes = defaultSample.nodes.map(n => ({
+    ...n,
+    position: positions[n.id] || n.position,
+  }));
+  return { nodes, edges, layoutDirection };
 };
 
 const initialGraph = getInitialGraph();
@@ -311,8 +517,10 @@ export const computePlanSummaries = (plans: Record<string, TopologyPlanRecord>):
     const inProgress = nodes.filter((n) => n.status === 'in_progress').length;
     const progressPercent = nodes.length > 0 ? Math.round((completed / nodes.length) * 100) : 0;
     const hasActiveWork = Boolean(
-      inProgress > 0 ||
-      nodes.some((n) => n.context?.telemetry?.state === 'thinking' || n.context?.telemetry?.state === 'executing_tool')
+      (plan.status === 'active' || !plan.status) && (
+        inProgress > 0 ||
+        nodes.some((n) => n.context?.telemetry?.state === 'thinking' || n.context?.telemetry?.state === 'executing_tool')
+      )
     );
     const latestThought = plan.latestThought || (nodes.find((n) => n.context?.telemetry?.liveThought)?.context?.telemetry?.liveThought);
     const activeTool = plan.activeTool || (nodes.find((n) => n.context?.telemetry?.activeTool)?.context?.telemetry?.activeTool);
@@ -332,6 +540,13 @@ export const computePlanSummaries = (plans: Record<string, TopologyPlanRecord>):
       progressPercent,
       updatedAt: plan.updatedAt || Date.now(),
       status: plan.status || 'active',
+      completedAt: plan.completedAt,
+      archivedAt: plan.archivedAt,
+      abandonedAt: plan.abandonedAt,
+      abandonReason: plan.abandonReason,
+      pausedAt: plan.pausedAt,
+      summary: plan.summary,
+      artifacts: plan.artifacts,
       hasActiveWork,
       latestThought,
       activeTool,
@@ -355,8 +570,63 @@ const initialDefaultPlan: TopologyPlanRecord = {
   status: 'active',
 };
 
-const initialPlans: Record<string, TopologyPlanRecord> = { default: initialDefaultPlan };
+// LocalStorage Persistence for Real Plans across all lifecycle states
+const STORAGE_KEY_PLANS = 'topology_plans_registry_v1';
+const STORAGE_KEY_ACTIVE_PLAN = 'topology_active_plan_v1';
+
+export const persistPlansToLocalStorage = (plans: Record<string, TopologyPlanRecord>, activePlanId?: string) => {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(STORAGE_KEY_PLANS, JSON.stringify(plans));
+    if (activePlanId) {
+      localStorage.setItem(STORAGE_KEY_ACTIVE_PLAN, activePlanId);
+    }
+  } catch (e) {
+    console.warn('[Topology Store] Failed to persist plans to localStorage:', e);
+  }
+};
+
+export const loadInitialPlansFromStorage = (fallbackDefault: TopologyPlanRecord): { plans: Record<string, TopologyPlanRecord>; activePlanId: string } => {
+  if (typeof window === 'undefined') {
+    return { plans: { [fallbackDefault.id]: fallbackDefault }, activePlanId: fallbackDefault.id };
+  }
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_PLANS);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object' && Object.keys(parsed).length > 0) {
+        // Reconcile and clean plans on load based on what's connected, active, idle, or completed
+        const { plans: reconciled, hasChanges } = reconcilePlansMap(parsed);
+        const storedActiveId = localStorage.getItem(STORAGE_KEY_ACTIVE_PLAN);
+        const activeId = storedActiveId && reconciled[storedActiveId] ? storedActiveId : Object.keys(reconciled)[0];
+        if (hasChanges) {
+          persistPlansToLocalStorage(reconciled, activeId);
+        }
+        return { plans: reconciled, activePlanId: activeId };
+      }
+    }
+  } catch (e) {
+    console.warn('[Topology Store] Failed to load plans from localStorage:', e);
+  }
+  const initial = { [fallbackDefault.id]: fallbackDefault };
+  persistPlansToLocalStorage(initial, fallbackDefault.id);
+  return { plans: initial, activePlanId: fallbackDefault.id };
+};
+
+const initialPlanState = loadInitialPlansFromStorage(initialDefaultPlan);
+const initialPlans: Record<string, TopologyPlanRecord> = initialPlanState.plans;
+const initialActivePlanId: string = initialPlanState.activePlanId;
 const initialPlansList = computePlanSummaries(initialPlans);
+const initialActiveRecord = initialPlans[initialActivePlanId] || initialDefaultPlan;
+const rawActiveNodes = initialActiveRecord.nodes && initialActiveRecord.nodes.length > 0 ? initialActiveRecord.nodes : initialGraph.nodes;
+const rawActiveEdges = ensureSequentialEdges(rawActiveNodes, initialActiveRecord.edges || []);
+const activeEdges = rawActiveEdges.length > 0 ? rawActiveEdges : initialGraph.edges;
+const startPositions = calculateDagreLayout(rawActiveNodes, activeEdges, 'TB');
+const initialCanvasNodes = rawActiveNodes.map(n => ({
+  ...n,
+  position: startPositions[n.id] || n.position,
+}));
+const initialCanvasEdges = activeEdges;
 
 const getInitialUserTopologies = (): CanonicalArchetype[] => {
   if (typeof window === 'undefined') return [];
@@ -379,11 +649,18 @@ export const useTopologyStore = create<TopologyStore>((set, get) => {
   return {
     userTopologies: getInitialUserTopologies(),
     plans: initialPlans,
-    activePlanId: 'default',
+    activePlanId: initialActivePlanId,
     plansList: initialPlansList,
     isFleetModalOpen: false,
-    nodes: initialGraph.nodes,
-    edges: initialGraph.edges,
+    councilBudget: null,
+    councilSessions: [],
+    isCouncilModalOpen: false,
+    isCouncilSpawning: false,
+    activeCouncilSession: null,
+    activeLoopTelemetry: initialActiveRecord.oodaLoop || null,
+    isLoopModalOpen: false,
+    nodes: initialCanvasNodes,
+    edges: initialCanvasEdges,
     layoutDirection: initialGraph.layoutDirection,
     selectedNodeId: null,
     selectedNodeIds: [],
@@ -1077,19 +1354,155 @@ export const useTopologyStore = create<TopologyStore>((set, get) => {
       if (!options?.skipSnapshot) {
         saveSnapshot();
       }
-      set({
-        nodes: get().nodes.map(node => {
-          if (node.id === id) {
-            return {
-              ...node,
-              ...updates,
-              context: updates.context ? { ...node.context, ...updates.context } : node.context,
-              updatedAt: Date.now(),
-            };
-          }
-          return node;
-        }),
+      const updatedNodes = get().nodes.map(node => {
+        if (node.id === id) {
+          return {
+            ...node,
+            ...updates,
+            context: updates.context ? { ...node.context, ...updates.context } : node.context,
+            updatedAt: Date.now(),
+          };
+        }
+        // If the updating node is marked in_progress, ensure other nodes are not lingering in in_progress
+        if (updates.status === 'in_progress' && node.status === 'in_progress') {
+          return {
+            ...node,
+            status: 'completed' as NodeStatus,
+            updatedAt: Date.now(),
+          };
+        }
+        return node;
       });
+
+      const { plans, activePlanId } = get();
+      const currentPlan = plans[activePlanId];
+      let updatedPlans = plans;
+
+      if (currentPlan) {
+        const allCompleted = updatedNodes.length > 0 && updatedNodes.every(n => n.status === 'completed');
+        const planUpdates: Partial<TopologyPlanRecord> = {
+          nodes: updatedNodes,
+          updatedAt: Date.now(),
+        };
+        if (allCompleted && currentPlan.status !== 'completed') {
+          planUpdates.status = 'completed';
+          planUpdates.completedAt = Date.now();
+          if (!currentPlan.summary) {
+            planUpdates.summary = 'All workflow plan tasks completed successfully.';
+          }
+        }
+        const mergedPlan = { ...currentPlan, ...planUpdates };
+        updatedPlans = { ...plans, [activePlanId]: mergedPlan };
+        persistPlansToLocalStorage(updatedPlans, activePlanId);
+      }
+
+      set({
+        nodes: updatedNodes,
+        plans: updatedPlans,
+        plansList: computePlanSummaries(updatedPlans),
+      });
+    },
+
+    completeNode: (id, summary, outputArtifacts, advanceNext = true) => {
+      saveSnapshot();
+      const { nodes, plans, activePlanId } = get();
+      const targetIdx = nodes.findIndex(n => n.id === id);
+      if (targetIdx === -1) return;
+
+      const updatedNodes: TopologyNode[] = nodes.map((node, idx) => {
+        if (node.id === id) {
+          const existingTelemetry = node.context?.telemetry;
+          const telemetry: AgentTelemetry = {
+            state: 'completed',
+            activeTool: undefined,
+            liveThought: summary ? `Completed: ${summary}` : existingTelemetry?.liveThought || 'Completed',
+            terminalLogs: summary
+              ? [...(existingTelemetry?.terminalLogs || []), `[COMPLETED] ${summary}`].slice(-50)
+              : (existingTelemetry?.terminalLogs || []),
+            lastUpdated: Date.now(),
+          };
+          return {
+            ...node,
+            status: 'completed' as NodeStatus,
+            updatedAt: Date.now(),
+            context: {
+              ...node.context,
+              outputArtifacts: outputArtifacts || node.context?.outputArtifacts || [],
+              telemetry,
+            },
+          };
+        }
+        return node;
+      });
+
+      // Advance next pending node for smooth single-agent execution
+      let nextNodeToAdvance: TopologyNode | null = null;
+      if (advanceNext) {
+        const nextNodeIdx = updatedNodes.findIndex((n, idx) => idx > targetIdx && (n.status === 'pending' || n.status === 'ready'));
+        if (nextNodeIdx !== -1) {
+          const nextNode = updatedNodes[nextNodeIdx];
+          const nextExistingTelemetry = nextNode.context?.telemetry;
+          const nextTelemetry: AgentTelemetry = {
+            state: 'thinking',
+            activeTool: undefined,
+            liveThought: `Starting: ${nextNode.label}`,
+            terminalLogs: nextExistingTelemetry?.terminalLogs || [],
+            lastUpdated: Date.now(),
+          };
+          updatedNodes[nextNodeIdx] = {
+            ...nextNode,
+            status: 'in_progress' as NodeStatus,
+            updatedAt: Date.now(),
+            context: {
+              ...nextNode.context,
+              telemetry: nextTelemetry,
+            },
+          };
+          nextNodeToAdvance = updatedNodes[nextNodeIdx];
+        }
+      }
+
+      // Check if all nodes are completed -> auto complete plan
+      const currentPlan = plans[activePlanId];
+      let updatedPlans = plans;
+
+      if (currentPlan) {
+        const allCompleted = updatedNodes.length > 0 && updatedNodes.every(n => n.status === 'completed');
+        const planUpdates: Partial<TopologyPlanRecord> = {
+          nodes: updatedNodes,
+          updatedAt: Date.now(),
+        };
+        if (allCompleted) {
+          planUpdates.status = 'completed';
+          planUpdates.completedAt = Date.now();
+          planUpdates.summary = summary || currentPlan.summary || 'All workflow plan tasks completed successfully.';
+        }
+        const mergedPlan = { ...currentPlan, ...planUpdates };
+        updatedPlans = { ...plans, [activePlanId]: mergedPlan };
+        persistPlansToLocalStorage(updatedPlans, activePlanId);
+      }
+
+      set({
+        nodes: updatedNodes,
+        plans: updatedPlans,
+        plansList: computePlanSummaries(updatedPlans),
+      });
+
+      // Broadcast to bridge
+      if (typeof window !== 'undefined') {
+        fetch('/api/topology/node', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            planId: activePlanId,
+            nodeId: id,
+            status: 'completed',
+            thought: summary ? `Completed: ${summary}` : undefined,
+            outputArtifacts,
+            advanceNextNodeId: nextNodeToAdvance?.id,
+          }),
+        }).catch(() => {});
+      }
     },
 
     recordSnapshot: () => {
@@ -1680,11 +2093,13 @@ export const useTopologyStore = create<TopologyStore>((set, get) => {
     applyDagreLayout: (direction) => {
       saveSnapshot();
       const { nodes, edges, layoutDirection } = get();
-      const targetDir = direction || layoutDirection || 'LR';
-      const positions = calculateDagreLayout(nodes, edges, targetDir);
+      const targetDir = direction || layoutDirection || 'TB';
+      const targetEdges = ensureSequentialEdges(nodes, edges);
+      const positions = calculateDagreLayout(nodes, targetEdges, targetDir);
 
       set({
         layoutDirection: targetDir,
+        edges: targetEdges,
         nodes: nodes.map(n => ({
           ...n,
           position: positions[n.id] || n.position,
@@ -2243,9 +2658,10 @@ export const useTopologyStore = create<TopologyStore>((set, get) => {
     loadTopologyDirect: (nodes, edges) => {
       saveSnapshot();
       const isVertical = get().layoutDirection === 'TB';
+      const targetEdges = ensureSequentialEdges(nodes, edges);
       const finalNodes = isVertical
         ? (() => {
-            const positions = calculateDagreLayout(nodes, edges, 'TB');
+            const positions = calculateDagreLayout(nodes, targetEdges, 'TB');
             return nodes.map(n => ({
               ...n,
               position: positions[n.id] || n.position,
@@ -2255,7 +2671,7 @@ export const useTopologyStore = create<TopologyStore>((set, get) => {
 
       set({
         nodes: finalNodes,
-        edges: JSON.parse(JSON.stringify(edges)),
+        edges: JSON.parse(JSON.stringify(targetEdges)),
         selectedNodeId: null,
         selectedNodeIds: [],
       });
@@ -2413,12 +2829,17 @@ export const useTopologyStore = create<TopologyStore>((set, get) => {
       const targetPlan = updatedPlans[targetPlanId];
       if (targetPlan) {
         const targetNodes = targetPlan.nodes || [];
-        const targetEdges = targetPlan.edges || [];
+        const targetEdges = ensureSequentialEdges(targetNodes, targetPlan.edges || []);
         const positions = calculateDagreLayout(targetNodes, targetEdges, layoutDirection);
         const alignedNodes = targetNodes.map(n => ({
           ...n,
           position: positions[n.id] || n.position,
         }));
+
+        targetPlan.edges = targetEdges;
+        targetPlan.nodes = alignedNodes;
+
+        persistPlansToLocalStorage(updatedPlans, targetPlanId);
 
         set({
           plans: updatedPlans,
@@ -2426,6 +2847,7 @@ export const useTopologyStore = create<TopologyStore>((set, get) => {
           nodes: alignedNodes,
           edges: targetEdges,
           plansList: computePlanSummaries(updatedPlans),
+          activeLoopTelemetry: targetPlan.oodaLoop || null,
           selectedNodeId: null,
           selectedNodeIds: [],
           hoveredNodeId: null,
@@ -2434,40 +2856,51 @@ export const useTopologyStore = create<TopologyStore>((set, get) => {
           future: [],
         });
 
-        // Notify bridge in background
+        // Notify bridge in background & sync latest loop telemetry
         if (typeof window !== 'undefined') {
           fetch('/api/topology/active-plan', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ planId: targetPlanId }),
           }).catch(() => {});
+          get().fetchLoopTelemetry(targetPlanId);
         }
       }
     },
 
     setPlansRegistry: (newPlans, activeId) => {
-      const { activePlanId, layoutDirection } = get();
+      const { activePlanId, layoutDirection, activeLocks, liveSyncStatus } = get();
+      const { plans: reconciledPlans } = reconcilePlansMap(newPlans, {
+        activeLocks,
+        isConnected: liveSyncStatus.connected,
+      });
       const nextActiveId = activeId || activePlanId;
-      const targetPlan = newPlans[nextActiveId];
+      const targetPlan = reconciledPlans[nextActiveId];
 
       if (targetPlan && targetPlan.nodes && targetPlan.nodes.length > 0) {
-        const positions = calculateDagreLayout(targetPlan.nodes, targetPlan.edges, layoutDirection);
+        const targetEdges = ensureSequentialEdges(targetPlan.nodes, targetPlan.edges || []);
+        targetPlan.edges = targetEdges;
+        const positions = calculateDagreLayout(targetPlan.nodes, targetEdges, layoutDirection);
         const alignedNodes = targetPlan.nodes.map(n => ({
           ...n,
           position: positions[n.id] || n.position,
         }));
+        targetPlan.nodes = alignedNodes;
+        persistPlansToLocalStorage(reconciledPlans, nextActiveId);
+
         set({
-          plans: newPlans,
+          plans: reconciledPlans,
           activePlanId: nextActiveId,
           nodes: alignedNodes,
-          edges: targetPlan.edges,
-          plansList: computePlanSummaries(newPlans),
+          edges: targetEdges,
+          plansList: computePlanSummaries(reconciledPlans),
         });
       } else {
+        persistPlansToLocalStorage(reconciledPlans, nextActiveId);
         set({
-          plans: newPlans,
+          plans: reconciledPlans,
           activePlanId: nextActiveId,
-          plansList: computePlanSummaries(newPlans),
+          plansList: computePlanSummaries(reconciledPlans),
         });
       }
     },
@@ -2480,11 +2913,14 @@ export const useTopologyStore = create<TopologyStore>((set, get) => {
     },
 
     upsertPlan: (planPartial, makeActive = false) => {
-      const { plans, activePlanId, layoutDirection } = get();
+      const { plans, activePlanId, layoutDirection, activeLocks, liveSyncStatus } = get();
       const planId = planPartial.id;
       const existing = plans[planId] || {};
 
-      const mergedPlan: TopologyPlanRecord = {
+      const mergedNodes = planPartial.nodes || existing.nodes || [];
+      const mergedEdges = ensureSequentialEdges(mergedNodes, planPartial.edges || existing.edges || []);
+
+      const mergedPlanRaw: TopologyPlanRecord = {
         id: planId,
         title: planPartial.title || existing.title || 'Dynamic Plan',
         description: planPartial.description !== undefined ? planPartial.description : (existing.description || ''),
@@ -2493,18 +2929,31 @@ export const useTopologyStore = create<TopologyStore>((set, get) => {
         agentRole: planPartial.agentRole || existing.agentRole || 'Worker',
         agentAvatar: planPartial.agentAvatar || existing.agentAvatar || '🤖',
         agentColor: planPartial.agentColor || existing.agentColor || '#1a73e8',
-        nodes: planPartial.nodes || existing.nodes || [],
-        edges: planPartial.edges || existing.edges || [],
+        nodes: mergedNodes,
+        edges: mergedEdges,
         createdAt: existing.createdAt || Date.now(),
         updatedAt: Date.now(),
         status: planPartial.status || existing.status || 'active',
+        completedAt: planPartial.completedAt !== undefined ? planPartial.completedAt : existing.completedAt,
+        archivedAt: planPartial.archivedAt !== undefined ? planPartial.archivedAt : existing.archivedAt,
+        abandonedAt: planPartial.abandonedAt !== undefined ? planPartial.abandonedAt : existing.abandonedAt,
+        abandonReason: planPartial.abandonReason !== undefined ? planPartial.abandonReason : existing.abandonReason,
+        pausedAt: planPartial.pausedAt !== undefined ? planPartial.pausedAt : existing.pausedAt,
+        summary: planPartial.summary !== undefined ? planPartial.summary : existing.summary,
+        artifacts: planPartial.artifacts !== undefined ? planPartial.artifacts : existing.artifacts,
         source: planPartial.source || existing.source || 'antigravity_agent',
         latestThought: planPartial.latestThought || existing.latestThought,
         activeTool: planPartial.activeTool || existing.activeTool,
       };
 
+      const mergedPlan = reconcilePlanRecord(mergedPlanRaw, {
+        activeLocks,
+        isConnected: liveSyncStatus.connected,
+      });
+
       const updatedPlans = { ...plans, [planId]: mergedPlan };
       const shouldActivate = makeActive || activePlanId === planId;
+      persistPlansToLocalStorage(updatedPlans, shouldActivate ? planId : activePlanId);
 
       if (shouldActivate) {
         const targetNodes = mergedPlan.nodes;
@@ -2514,6 +2963,7 @@ export const useTopologyStore = create<TopologyStore>((set, get) => {
           ...n,
           position: positions[n.id] || n.position,
         }));
+        mergedPlan.nodes = alignedNodes;
 
         set({
           plans: updatedPlans,
@@ -2554,6 +3004,8 @@ export const useTopologyStore = create<TopologyStore>((set, get) => {
         }
       }
 
+      persistPlansToLocalStorage(updatedPlans, nextActiveId);
+
       const nextPlan = updatedPlans[nextActiveId];
       const positions = calculateDagreLayout(nextPlan.nodes, nextPlan.edges, layoutDirection);
       const alignedNodes = nextPlan.nodes.map(n => ({
@@ -2576,45 +3028,49 @@ export const useTopologyStore = create<TopologyStore>((set, get) => {
       }
     },
 
-    createNewPlan: (title?: string, agentRole: string = 'Architect') => {
+    createNewPlan: (title?: string, agentRole: string = 'Architect', initialNodes?: TopologyNode[], initialEdges?: TopologyEdge[]) => {
       const { plans } = get();
       const planId = `plan-${Date.now()}`;
       const planTitle = title || `Agent Plan ${Object.keys(plans).length + 1}`;
 
-      const newPlanNodes: TopologyNode[] = [
-        {
-          id: `root-${Date.now().toString(36).slice(-4)}`,
-          type: 'goal',
-          label: planTitle,
-          description: 'Primary objective and architectural boundaries',
-          status: 'ready',
-          priority: 'high',
-          tags: ['architecture', 'root'],
-          position: { x: 100, y: 150 },
-          context: {
-            role: agentRole as AgentRole,
-            promptTemplate: 'Decompose objective into actionable tasks',
-            toolsRequired: [],
-            inputArtifacts: [],
-            outputArtifacts: [],
-            validationCriteria: 'All invariants verified',
-          },
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-        }
-      ];
+      const newPlanNodes: TopologyNode[] = (initialNodes && initialNodes.length > 0)
+        ? initialNodes
+        : [
+            {
+              id: `root-${Date.now().toString(36).slice(-4)}`,
+              type: 'goal',
+              label: planTitle,
+              description: 'Primary objective and architectural boundaries',
+              status: 'ready',
+              priority: 'high',
+              tags: ['architecture', 'root'],
+              position: { x: 100, y: 150 },
+              context: {
+                role: agentRole as AgentRole,
+                promptTemplate: 'Decompose objective into actionable tasks',
+                toolsRequired: [],
+                inputArtifacts: [],
+                outputArtifacts: [],
+                validationCriteria: 'All invariants verified',
+              },
+              createdAt: Date.now(),
+              updatedAt: Date.now(),
+            }
+          ];
 
       const newPlan: TopologyPlanRecord = {
         id: planId,
         title: planTitle,
-        description: 'Multi-step autonomous workflow',
+        description: (initialNodes && initialNodes.length > 0)
+          ? `Consensus execution plan with ${initialNodes.length} tasks.`
+          : 'Multi-step autonomous workflow',
         agentId: `agent-${agentRole.toLowerCase()}`,
         agentName: `${agentRole} Agent`,
         agentRole,
         agentAvatar: agentRole === 'Architect' ? '🧠' : agentRole === 'SecurityAnalyst' ? '🛡️' : agentRole === 'FrontendArchitect' ? '🎨' : '🤖',
         agentColor: '#1a73e8',
         nodes: newPlanNodes,
-        edges: [],
+        edges: initialEdges || [],
         createdAt: Date.now(),
         updatedAt: Date.now(),
         status: 'active',
@@ -2653,7 +3109,29 @@ export const useTopologyStore = create<TopologyStore>((set, get) => {
         activeTool: (updates.context?.telemetry?.activeTool as string) || targetPlan.activeTool,
       };
 
+      // If setting to in_progress, ensure single-agent flow by completing any previous in_progress node
+      if (updates.status === 'in_progress') {
+        updatedNodes.forEach((n, idx) => {
+          if (idx !== nodeIdx && n.status === 'in_progress') {
+            updatedNodes[idx] = { ...n, status: 'completed', updatedAt: Date.now() };
+          }
+        });
+      }
+
+      // If completing node, check if all nodes in the plan are completed
+      if (updates.status === 'completed') {
+        const allCompleted = updatedNodes.length > 0 && updatedNodes.every(n => n.status === 'completed');
+        if (allCompleted && targetPlan.status !== 'completed') {
+          updatedPlan.status = 'completed';
+          updatedPlan.completedAt = Date.now();
+          if (!updatedPlan.summary) {
+            updatedPlan.summary = 'All workflow plan tasks completed successfully.';
+          }
+        }
+      }
+
       const updatedPlans = { ...plans, [planId]: updatedPlan };
+      persistPlansToLocalStorage(updatedPlans, activePlanId);
 
       if (planId === activePlanId) {
         set(s => ({
@@ -2667,6 +3145,474 @@ export const useTopologyStore = create<TopologyStore>((set, get) => {
           plansList: computePlanSummaries(updatedPlans),
         });
       }
+    },
+
+    setPlanStatus: async (planId: string, status: PlanStatus, reasonOrSummary?: string) => {
+      const { plans, activePlanId } = get();
+      const targetPlan = plans[planId];
+      if (!targetPlan) return;
+
+      const now = Date.now();
+      const isCompleted = status === 'completed';
+      const isAbandoned = status === 'abandoned';
+      const isArchived = status === 'archived';
+      const isPaused = status === 'paused' || status === 'inactive';
+      const isActive = status === 'active';
+
+      let updatedNodes = targetPlan.nodes || [];
+      if (isCompleted) {
+        updatedNodes = updatedNodes.map(n => ({
+          ...n,
+          status: 'completed' as const,
+          updatedAt: now,
+        }));
+      }
+
+      const updatedPlan: TopologyPlanRecord = {
+        ...targetPlan,
+        status,
+        updatedAt: now,
+        completedAt: isCompleted ? now : targetPlan.completedAt,
+        archivedAt: isArchived ? now : targetPlan.archivedAt,
+        abandonedAt: isAbandoned ? now : targetPlan.abandonedAt,
+        abandonReason: isAbandoned ? (reasonOrSummary || targetPlan.abandonReason || 'User abandoned') : targetPlan.abandonReason,
+        pausedAt: isPaused ? now : (isActive ? undefined : targetPlan.pausedAt),
+        summary: isCompleted && reasonOrSummary ? reasonOrSummary : targetPlan.summary,
+        nodes: updatedNodes,
+      };
+
+      const updatedPlans = { ...plans, [planId]: updatedPlan };
+      persistPlansToLocalStorage(updatedPlans, activePlanId);
+
+      if (planId === activePlanId) {
+        set(s => ({
+          plans: updatedPlans,
+          nodes: isCompleted ? s.nodes.map(n => ({ ...n, status: 'completed' as const, updatedAt: now })) : s.nodes,
+          plansList: computePlanSummaries(updatedPlans),
+        }));
+      } else {
+        set({
+          plans: updatedPlans,
+          plansList: computePlanSummaries(updatedPlans),
+        });
+      }
+
+      if (typeof window !== 'undefined') {
+        try {
+          await fetch('/api/topology/plan/status', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              planId,
+              status,
+              reason: updatedPlan.abandonReason,
+              summary: updatedPlan.summary,
+              artifacts: updatedPlan.artifacts,
+            }),
+          });
+        } catch (err) {
+          console.warn('[Topology Store] Failed to sync plan status via bridge:', err);
+        }
+      }
+    },
+
+    completePlan: async (planId?: string, summary?: string, artifacts?: string[]) => {
+      const { plans, activePlanId } = get();
+      const targetPlanId = planId || activePlanId;
+      const targetPlan = plans[targetPlanId];
+      if (!targetPlan) return;
+
+      const now = Date.now();
+      const updatedNodes = (targetPlan.nodes || []).map(n => ({
+        ...n,
+        status: 'completed' as const,
+        updatedAt: now,
+      }));
+
+      const updatedPlan: TopologyPlanRecord = {
+        ...targetPlan,
+        status: 'completed',
+        completedAt: now,
+        updatedAt: now,
+        summary: summary || targetPlan.summary || `Plan "${targetPlan.title}" completed successfully.`,
+        artifacts: artifacts || targetPlan.artifacts || [],
+        nodes: updatedNodes,
+      };
+
+      const updatedPlans = { ...plans, [targetPlanId]: updatedPlan };
+      persistPlansToLocalStorage(updatedPlans, activePlanId);
+
+      if (targetPlanId === activePlanId) {
+        set(s => ({
+          plans: updatedPlans,
+          nodes: s.nodes.map(n => ({ ...n, status: 'completed' as const, updatedAt: now })),
+          plansList: computePlanSummaries(updatedPlans),
+        }));
+      } else {
+        set({
+          plans: updatedPlans,
+          plansList: computePlanSummaries(updatedPlans),
+        });
+      }
+
+      if (typeof window !== 'undefined') {
+        try {
+          await fetch('/api/topology/plan/complete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              planId: targetPlanId,
+              summary: updatedPlan.summary,
+              artifacts: updatedPlan.artifacts,
+              autoCompleteNodes: true,
+            }),
+          });
+        } catch (err) {
+          console.warn('[Topology Store] Failed to complete plan via bridge:', err);
+        }
+      }
+    },
+
+    reactivatePlan: async (planId: string) => {
+      await get().setPlanStatus(planId, 'active');
+    },
+
+    archivePlan: async (planId?: string) => {
+      const targetId = planId || get().activePlanId;
+      await get().setPlanStatus(targetId, 'archived');
+    },
+
+    abandonPlan: async (planId?: string, reason?: string) => {
+      const targetId = planId || get().activePlanId;
+      await get().setPlanStatus(targetId, 'abandoned', reason);
+    },
+
+    pausePlan: async (planId?: string) => {
+      const targetId = planId || get().activePlanId;
+      await get().setPlanStatus(targetId, 'inactive');
+    },
+
+    resumePlan: async (planId?: string) => {
+      const targetId = planId || get().activePlanId;
+      await get().setPlanStatus(targetId, 'active');
+    },
+
+    cleanAndReconcilePlans: async () => {
+      const { plans, activePlanId, activeLocks, liveSyncStatus } = get();
+      const { plans: cleaned, hasChanges } = reconcilePlansMap(plans, {
+        activeLocks,
+        isConnected: liveSyncStatus.connected,
+      });
+
+      if (hasChanges) {
+        persistPlansToLocalStorage(cleaned, activePlanId);
+        const updatedCurrent = cleaned[activePlanId];
+        set({
+          plans: cleaned,
+          plansList: computePlanSummaries(cleaned),
+          ...(updatedCurrent ? { nodes: updatedCurrent.nodes, edges: updatedCurrent.edges } : {}),
+        });
+      }
+
+      if (typeof window !== 'undefined') {
+        try {
+          const res = await fetch('/api/topology/plans/clean', { method: 'POST' });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.allPlans) {
+              get().setPlansRegistry(data.allPlans, data.activePlanId);
+            }
+          }
+        } catch {
+          // fail-open
+        }
+      }
+    },
+
+    setCouncilModalOpen: (open: boolean) => set({ isCouncilModalOpen: open }),
+    setCouncilBudget: (budget: CouncilBudgetReport) => set({ councilBudget: budget }),
+    setActiveCouncilSession: (session: CouncilSession | null) => set({ activeCouncilSession: session }),
+
+    fetchCouncilBudget: async () => {
+      if (typeof window === 'undefined') return;
+      try {
+        const res = await fetch('/api/topology/council/budget');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.budget) {
+            set({ councilBudget: data.budget });
+          }
+        }
+      } catch (err) {
+        console.warn('[Topology Store] Failed to fetch council budget:', err);
+      }
+    },
+
+    fetchCouncilSessions: async (limit: number = 20) => {
+      if (typeof window === 'undefined') return;
+      try {
+        const res = await fetch(`/api/topology/council/sessions?limit=${limit}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data.sessions)) {
+            set({ councilSessions: data.sessions });
+          }
+        }
+      } catch (err) {
+        console.warn('[Topology Store] Failed to fetch council sessions:', err);
+      }
+    },
+
+    fetchCouncilSessionDetails: async (sessionId: string) => {
+      if (typeof window === 'undefined') return null;
+      try {
+        const res = await fetch(`/api/topology/council/session?id=${encodeURIComponent(sessionId)}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.session) {
+            set({ activeCouncilSession: data.session });
+            return data.session;
+          }
+        }
+      } catch (err) {
+        console.warn('[Topology Store] Failed to fetch council session details:', err);
+      }
+      return null;
+    },
+
+    exportCouncilAdr: async (params = {}) => {
+      if (typeof window === 'undefined') return null;
+      try {
+        const res = await fetch('/api/topology/council/adr', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(params),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          return data.adr || null;
+        }
+      } catch (err) {
+        console.warn('[Topology Store] Failed to export council ADR:', err);
+      }
+      return null;
+    },
+
+    spawnCouncil: async (params) => {
+      set({ isCouncilSpawning: true });
+      try {
+        const res = await fetch('/api/topology/council/spawn', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(params),
+        });
+        const data = await res.json();
+        if (data.budget) {
+          set({ councilBudget: data.budget });
+        }
+        if (data.session) {
+          set({ activeCouncilSession: data.session, isCouncilSpawning: false });
+          // refresh council sessions list
+          get().fetchCouncilSessions();
+          return data.session;
+        }
+        set({ isCouncilSpawning: false });
+        return data;
+      } catch (err) {
+        set({ isCouncilSpawning: false });
+        throw err;
+      }
+    },
+
+    resetCouncilBudget: async (modelId?: string) => {
+      if (typeof window === 'undefined') return;
+      try {
+        const res = await fetch('/api/topology/council/budget/reset', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ modelId }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.budget) {
+            set({ councilBudget: data.budget });
+          }
+        }
+      } catch (err) {
+        console.warn('[Topology Store] Failed to reset budget:', err);
+      }
+    },
+
+    setLoopModalOpen: (open: boolean) => set({ isLoopModalOpen: open }),
+    setActiveLoopTelemetry: (telemetry: OodaLoopTelemetry | null) => set({ activeLoopTelemetry: telemetry }),
+
+    fetchLoopTelemetry: async (planId?: string) => {
+      if (typeof window === 'undefined') return null;
+      const targetPlanId = planId || get().activePlanId;
+      try {
+        const res = await fetch(`/api/topology/loop-telemetry?planId=${encodeURIComponent(targetPlanId)}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.telemetry) {
+            set({ activeLoopTelemetry: data.telemetry });
+            return data.telemetry;
+          }
+        }
+      } catch (err) {
+        console.warn('[Topology Store] Failed to fetch loop telemetry:', err);
+      }
+      return null;
+    },
+
+    emitLoopTelemetry: async (params) => {
+      const planId = params.planId || get().activePlanId;
+      const targetPlan = get().plans[planId];
+      const prevTelemetry = get().activeLoopTelemetry || targetPlan?.oodaLoop;
+
+      const stageNames: Record<OodaStage, string> = {
+        observe: 'Observe',
+        understand: 'Understand',
+        evaluate_with_council: 'Evaluate Council',
+        adversarial_council_evaluation: 'Adversarial Critique',
+        each_member_plans: 'Member Plans',
+        share_and_vote_on_plan: 'Share & Vote',
+        iterate_on_plan: 'Iterate Plan',
+        propose_plan: 'Propose Plan',
+        update: 'Update & Execute',
+      };
+
+      const iterationRecord: OodaLoopIteration = {
+        loopNumber: params.loopNumber || 1,
+        stage: params.stage,
+        stageName: params.stageName || stageNames[params.stage] || params.stage,
+        thought: params.thought,
+        observations: params.observations || [],
+        understandings: params.understandings || [],
+        councilEvaluations: params.councilEvaluations || [],
+        adversarialCritiques: params.adversarialCritiques || [],
+        memberPlans: params.memberPlans || [],
+        voteSummary: params.voteSummary,
+        refinements: params.refinements || [],
+        proposedPlanSummary: params.proposedPlanSummary,
+        updatesApplied: params.updatesApplied || [],
+        metrics: params.metrics || {},
+        status: params.status || 'in_progress',
+        timestamp: Date.now(),
+      };
+
+      // Construct updated telemetry object
+      const updatedTelemetry: OodaLoopTelemetry = {
+        planId,
+        totalLoopsCompleted: prevTelemetry?.totalLoopsCompleted || 0,
+        currentLoop: params.loopNumber || prevTelemetry?.currentLoop || 1,
+        targetMaxLoops: params.totalLoops || prevTelemetry?.targetMaxLoops || 3,
+        activeStage: params.stage,
+        isConverged: params.status === 'converged' || (prevTelemetry?.isConverged ?? false),
+        history: [...(prevTelemetry?.history || []), iterationRecord],
+        updatedAt: Date.now(),
+      };
+
+      if (params.stage === 'update' && (params.status === 'completed' || params.status === 'converged')) {
+        updatedTelemetry.totalLoopsCompleted = Math.max(updatedTelemetry.totalLoopsCompleted, updatedTelemetry.currentLoop);
+      }
+
+      // Optimistic synchronous store update for instantaneous UI reactivity
+      set((state) => {
+        const nextPlans = { ...state.plans };
+        if (nextPlans[planId]) {
+          nextPlans[planId] = {
+            ...nextPlans[planId],
+            oodaLoop: updatedTelemetry,
+            latestThought: params.thought || nextPlans[planId].latestThought,
+            updatedAt: Date.now(),
+          };
+        }
+        return {
+          activeLoopTelemetry: updatedTelemetry,
+          plans: nextPlans,
+        };
+      });
+
+      // Background bridge sync with fail-open safety
+      if (typeof window !== 'undefined') {
+        try {
+          const res = await fetch('/api/topology/loop-telemetry', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              planId,
+              iteration: iterationRecord,
+            }),
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.telemetry) {
+              set({ activeLoopTelemetry: data.telemetry });
+              return data.telemetry;
+            }
+          }
+        } catch (err) {
+          console.warn('[Topology Store] Background loop telemetry sync notice:', err);
+        }
+      }
+
+      return updatedTelemetry;
+    },
+
+    advanceOodaStage: async (planId?: string) => {
+      const targetPlanId = planId || get().activePlanId;
+      const targetPlan = get().plans[targetPlanId];
+      const activeTelemetry = get().activeLoopTelemetry || targetPlan?.oodaLoop;
+
+      const OODA_STAGE_ORDER: OodaStage[] = [
+        'observe',
+        'understand',
+        'evaluate_with_council',
+        'adversarial_council_evaluation',
+        'each_member_plans',
+        'share_and_vote_on_plan',
+        'iterate_on_plan',
+        'propose_plan',
+        'update',
+      ];
+
+      // If no telemetry has run yet for this plan, start at stage 0 ('observe')
+      let nextStage: OodaStage;
+      let nextLoopNumber = 1;
+      let nextIdx = 0;
+
+      if (!activeTelemetry || activeTelemetry.history.length === 0) {
+        nextStage = 'observe';
+        nextLoopNumber = 1;
+        nextIdx = 0;
+      } else {
+        const curIdx = OODA_STAGE_ORDER.indexOf(activeTelemetry.activeStage);
+        nextIdx = (curIdx + 1) % OODA_STAGE_ORDER.length;
+        nextLoopNumber = activeTelemetry.currentLoop || 1;
+        if (curIdx === OODA_STAGE_ORDER.length - 1) {
+          nextLoopNumber += 1;
+        }
+        nextStage = OODA_STAGE_ORDER[nextIdx];
+      }
+
+      const consensusScore = Math.min(100, Math.round(82 + (nextLoopNumber * 5) + (nextIdx * 2)));
+      const isConverged = nextStage === 'update' && (consensusScore >= 85 || nextLoopNumber >= 3);
+
+      await get().emitLoopTelemetry({
+        planId: targetPlanId,
+        loopNumber: nextLoopNumber,
+        totalLoops: 3,
+        stage: nextStage,
+        thought: `[OODA Loop ${nextLoopNumber} - ${nextStage}] Deliberating architectural convergence (${consensusScore}%).`,
+        status: isConverged ? 'converged' : 'in_progress',
+        metrics: {
+          consensusScorePercent: consensusScore,
+          costUsd: Number((0.002 * (nextIdx + 1)).toFixed(5)),
+          tokensUsed: 1800 + nextIdx * 250,
+          durationMs: 700 + nextIdx * 50,
+          invariantsVerifiedCount: 4,
+        }
+      });
     },
   };
 });

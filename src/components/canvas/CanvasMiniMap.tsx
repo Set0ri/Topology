@@ -76,7 +76,7 @@ export const CanvasMiniMap: React.FC = () => {
             className="pointer-events-auto flex flex-col rounded-3xl overflow-hidden bg-white/95 dark:bg-cat-mocha-base/90 text-cat-latte-text dark:text-cat-mocha-text shadow-elevated-lg backdrop-blur-2xl border-none transition-colors duration-200"
           >
             {/* Header Control Bar */}
-            <div className="flex items-center justify-between px-3 py-2 border-b border-cat-latte-surface1/50 dark:border-cat-mocha-surface0/40">
+            <div className="flex items-center justify-between px-3 py-2 bg-black/5 dark:bg-white/5 border-none">
               <div className="flex items-center gap-2">
                 <Compass size={14} className="text-cat-latte-mauve dark:text-cat-mocha-mauve" />
                 <span className="text-[11px] font-semibold tracking-wide uppercase opacity-85">

@@ -16,6 +16,8 @@ import path from 'path';
 import http from 'http';
 import { acquireLock, releaseLock, appendLog, readRecentLogs, getActiveLocks, syncGitLog, LOG_FILE, TOPOLOGY_DIR } from '../mcp-server/gitLock.js';
 import { ensureBridgeRunning, getServerStatus, stopServer } from '../mcp-server/serverSupervisor.js';
+import { budgetTracker } from '../mcp-server/budgetTracker.js';
+import { councilOrchestrator } from '../mcp-server/councilOrchestrator.js';
 
 function postToBridge(endpoint, payload) {
   return new Promise((resolve) => {
@@ -284,7 +286,49 @@ async function main() {
       break;
     }
 
+    case 'clean':
+    case 'clean-plans': {
+      console.log('🧹 Reconciling and cleaning up Topology plans based on active connections and tasks...');
+      try {
+        await postToBridge('plans/clean', {});
+      } catch {}
+
+      const plansFile = path.join(TOPOLOGY_DIR, 'plans.json');
+      let plans = {};
+      try {
+        if (fs.existsSync(plansFile)) plans = JSON.parse(fs.readFileSync(plansFile, 'utf8'));
+      } catch {}
+
+      // Reconcile disk fallback if bridge offline
+      let updated = false;
+      for (const p of Object.values(plans)) {
+        const nodes = p.nodes || [];
+        const completed = nodes.filter(n => n.status === 'completed').length;
+        if (nodes.length > 0 && completed === nodes.length && p.status !== 'completed') {
+          p.status = 'completed';
+          p.completedAt = p.completedAt || Date.now();
+          updated = true;
+        }
+      }
+      if (updated) {
+        fs.writeFileSync(plansFile, JSON.stringify(plans, null, 2), 'utf8');
+      }
+
+      console.log(`✅ Reconciled ${Object.keys(plans).length} plan(s):`);
+      for (const p of Object.values(plans)) {
+        const nodes = p.nodes || [];
+        const completed = nodes.filter(n => n.status === 'completed').length;
+        console.log(`  - [${(p.status || 'active').toUpperCase()}] "${p.title}" (${completed}/${nodes.length} nodes done)`);
+      }
+      break;
+    }
+
     case 'plans': {
+      // Reconcile via bridge if available
+      try {
+        await postToBridge('plans/clean', {});
+      } catch {}
+
       const plansFile = path.join(TOPOLOGY_DIR, 'plans.json');
       const activeFile = path.join(TOPOLOGY_DIR, 'active_plan.json');
       let plans = {};
@@ -295,7 +339,7 @@ async function main() {
       } catch {}
 
       const planList = Object.values(plans);
-      console.log(`\nActive Topology Workflow Plans (${planList.length}):`);
+      console.log(`\nTopology Workflow Plans (${planList.length}):`);
       if (planList.length === 0) {
         console.log('  (No plans currently registered.)\n');
       } else {
@@ -303,7 +347,8 @@ async function main() {
           const isActive = p.id === activePlanId ? ' ⭐ [ACTIVE]' : '';
           const nodes = p.nodes || [];
           const completed = nodes.filter(n => n.status === 'completed').length;
-          console.log(`  - "${p.title}" [${p.id}]: ${p.agentRole || 'Worker'} (${completed}/${nodes.length} completed)${isActive}`);
+          const statusTag = (p.status || (nodes.length > 0 && completed === nodes.length ? 'completed' : 'active')).toUpperCase();
+          console.log(`  - [${statusTag}] "${p.title}" [${p.id}]: ${p.agentRole || 'Worker'} (${completed}/${nodes.length} completed)${isActive}`);
         });
         console.log('');
       }
@@ -324,6 +369,484 @@ async function main() {
       break;
     }
 
+    case 'complete-node': {
+      const nodeId = args.nodeId || args.node || args._[1];
+      if (!nodeId) {
+        console.error('❌ Error: --nodeId is required. E.g.: node scripts/topology-log.mjs complete-node --nodeId task-1 --summary "Verified"');
+        process.exit(1);
+      }
+
+      const planId = args.planId || args.plan || null;
+      const summary = args.summary || args.thought || 'Task completed via CLI';
+      const artifacts = args.artifacts ? String(args.artifacts).split(',').map(s => s.trim()) : [];
+      const advanceNextNode = args.advanceNextNode !== 'false' && args.advance !== 'false';
+      const autoCompletePlan = args.autoCompletePlan !== 'false' && args.autoComplete !== 'false';
+
+      // 1. Post to bridge
+      await postToBridge('node', {
+        planId,
+        nodeId,
+        status: 'completed',
+        thought: summary ? `Completed: ${summary}` : undefined,
+        outputArtifacts: artifacts,
+      });
+
+      // 2. Direct disk fallback
+      let planCompleted = false;
+      let nextNodeAdvanced = null;
+      try {
+        const plansFile = path.join(TOPOLOGY_DIR, 'plans.json');
+        if (fs.existsSync(plansFile)) {
+          const plans = JSON.parse(fs.readFileSync(plansFile, 'utf8'));
+          let targetPlanKey = planId;
+          if (!targetPlanKey) {
+            for (const [k, p] of Object.entries(plans)) {
+              if (Array.isArray(p.nodes) && p.nodes.some(n => n.id === nodeId)) {
+                targetPlanKey = k;
+                break;
+              }
+            }
+          }
+          if (targetPlanKey && plans[targetPlanKey] && Array.isArray(plans[targetPlanKey].nodes)) {
+            const planNodes = plans[targetPlanKey].nodes;
+            const targetIdx = planNodes.findIndex(n => n.id === nodeId);
+            if (targetIdx !== -1) {
+              const now = Date.now();
+              planNodes[targetIdx].status = 'completed';
+              planNodes[targetIdx].updatedAt = now;
+              planNodes[targetIdx].context = planNodes[targetIdx].context || {};
+              planNodes[targetIdx].context.telemetry = planNodes[targetIdx].context.telemetry || {};
+              planNodes[targetIdx].context.telemetry.activeTool = undefined;
+              if (summary) planNodes[targetIdx].context.telemetry.liveThought = `Completed: ${summary}`;
+              if (artifacts.length > 0) planNodes[targetIdx].context.outputArtifacts = artifacts;
+
+              // Clean up other in_progress nodes
+              planNodes.forEach((n, idx) => {
+                if (idx !== targetIdx && n.status === 'in_progress') {
+                  n.status = 'completed';
+                  n.updatedAt = now;
+                }
+              });
+
+              // Advance next node
+              if (advanceNextNode) {
+                const nextNode = planNodes.find((n, idx) => idx > targetIdx && (n.status === 'pending' || n.status === 'ready'));
+                if (nextNode) {
+                  nextNode.status = 'in_progress';
+                  nextNode.updatedAt = now;
+                  nextNodeAdvanced = nextNode.id;
+                }
+              }
+
+              // Auto-complete plan if all nodes done
+              if (autoCompletePlan) {
+                const allDone = planNodes.length > 0 && planNodes.every(n => n.status === 'completed');
+                if (allDone) {
+                  plans[targetPlanKey].status = 'completed';
+                  plans[targetPlanKey].completedAt = now;
+                  plans[targetPlanKey].summary = summary || 'All workflow plan tasks completed successfully.';
+                  planCompleted = true;
+                }
+              }
+
+              plans[targetPlanKey].updatedAt = now;
+              fs.writeFileSync(plansFile, JSON.stringify(plans, null, 2), 'utf8');
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Direct disk update warning:', err.message);
+      }
+
+      await appendLog({
+        action: 'node_complete',
+        planId,
+        nodeId,
+        status: 'completed',
+        thought: summary,
+        payload: { artifacts, planCompleted, nextNodeAdvanced },
+      });
+
+      console.log(`✅ [Topology] Node "${nodeId}" marked COMPLETED.`);
+      if (summary) console.log(`   Summary: ${summary}`);
+      if (artifacts.length > 0) console.log(`   Deliverables: ${artifacts.join(', ')}`);
+      if (nextNodeAdvanced) console.log(`   ⏩ Advanced next node "${nextNodeAdvanced}" to IN_PROGRESS.`);
+      if (planCompleted) console.log(`   🎉 All nodes finished! Plan automatically marked COMPLETED.`);
+      break;
+    }
+
+    case 'complete-plan':
+    case 'complete': {
+      const activeFile = path.join(TOPOLOGY_DIR, 'active_plan.json');
+      let defaultPlanId = 'default';
+      try {
+        if (fs.existsSync(activeFile)) defaultPlanId = JSON.parse(fs.readFileSync(activeFile, 'utf8')).activePlanId || 'default';
+      } catch {}
+
+      const targetPlanId = args.planId || args.plan || args._[1] || defaultPlanId;
+      const summary = args.summary || args.thought || 'Plan completed via CLI';
+      const artifacts = args.artifacts ? String(args.artifacts).split(',').map(s => s.trim()) : [];
+      const autoCompleteNodes = args.autoCompleteNodes !== 'false' && args.autoComplete !== 'false';
+
+      // 1. Post to bridge
+      await postToBridge('plan/complete', {
+        planId: targetPlanId,
+        summary,
+        artifacts,
+        autoCompleteNodes,
+      });
+
+      // 2. Direct disk update fallback
+      try {
+        const plansFile = path.join(TOPOLOGY_DIR, 'plans.json');
+        if (fs.existsSync(plansFile)) {
+          const plans = JSON.parse(fs.readFileSync(plansFile, 'utf8'));
+          if (plans[targetPlanId]) {
+            const now = Date.now();
+            plans[targetPlanId].status = 'completed';
+            plans[targetPlanId].completedAt = now;
+            plans[targetPlanId].updatedAt = now;
+            plans[targetPlanId].summary = summary;
+            plans[targetPlanId].artifacts = artifacts;
+            if (autoCompleteNodes && Array.isArray(plans[targetPlanId].nodes)) {
+              plans[targetPlanId].nodes.forEach(n => { n.status = 'completed'; n.updatedAt = now; });
+            }
+            fs.writeFileSync(plansFile, JSON.stringify(plans, null, 2), 'utf8');
+          }
+        }
+      } catch (err) {
+        console.warn('Direct disk update warning:', err.message);
+      }
+
+      console.log(`🏁 [Topology] Plan "${targetPlanId}" marked COMPLETED.`);
+      if (summary) console.log(`   Summary: ${summary}`);
+      if (artifacts.length > 0) console.log(`   Deliverables: ${artifacts.join(', ')}`);
+      break;
+    }
+
+    case 'plan-status':
+    case 'status': {
+      const activeFile = path.join(TOPOLOGY_DIR, 'active_plan.json');
+      let defaultPlanId = 'default';
+      try {
+        if (fs.existsSync(activeFile)) defaultPlanId = JSON.parse(fs.readFileSync(activeFile, 'utf8')).activePlanId || 'default';
+      } catch {}
+
+      const targetPlanId = args.planId || args.plan || defaultPlanId;
+      const requestedStatus = args.status || args._[1];
+      const reason = args.reason || args.thought || args.summary || null;
+
+      if (!requestedStatus) {
+        console.error('❌ Error: --status is required (active | paused | completed | archived | abandoned)');
+        process.exit(1);
+      }
+
+      await postToBridge('plan/status', {
+        planId: targetPlanId,
+        status: requestedStatus,
+        reason,
+        summary: reason,
+      });
+
+      try {
+        const plansFile = path.join(TOPOLOGY_DIR, 'plans.json');
+        if (fs.existsSync(plansFile)) {
+          const plans = JSON.parse(fs.readFileSync(plansFile, 'utf8'));
+          if (plans[targetPlanId]) {
+            const now = Date.now();
+            plans[targetPlanId].status = requestedStatus;
+            plans[targetPlanId].updatedAt = now;
+            if (requestedStatus === 'completed') plans[targetPlanId].completedAt = now;
+            if (requestedStatus === 'archived') plans[targetPlanId].archivedAt = now;
+            if (requestedStatus === 'abandoned') {
+              plans[targetPlanId].abandonedAt = now;
+              plans[targetPlanId].abandonReason = reason || 'CLI command';
+            }
+            if (requestedStatus === 'paused' || requestedStatus === 'inactive') plans[targetPlanId].pausedAt = now;
+            fs.writeFileSync(plansFile, JSON.stringify(plans, null, 2), 'utf8');
+          }
+        }
+      } catch (err) {
+        console.warn('Direct disk update warning:', err.message);
+      }
+
+      console.log(`🔄 [Topology] Plan "${targetPlanId}" transitioned to status "${requestedStatus}".`);
+      if (reason) console.log(`   Reason/Note: ${reason}`);
+      break;
+    }
+
+    case 'council': {
+      const goal = args.goal || args._.slice(1).join(' ') || 'Architecture and planning deliberation';
+      const rounds = parseInt(args.rounds || '3', 10);
+      const strategy = args.strategy || 'halt_before_limit';
+      const planId = args.planId || args.plan || null;
+      const contextFiles = args.context ? String(args.context).split(',').map(s => s.trim()) : (args.contextFiles ? String(args.contextFiles).split(',').map(s => s.trim()) : []);
+      const constraints = args.constraints ? String(args.constraints).split(',').map(s => s.trim()) : [];
+      const saveAdr = args.saveAdr !== 'false' && args.adr !== 'false';
+
+      console.log(`🏛️ [Council] Convening multi-model council for: "${goal}"`);
+      console.log(`   Rounds: ${rounds} | Strategy: ${strategy} | Save ADR: ${saveAdr}`);
+      if (contextFiles.length > 0) console.log(`   Context Files: ${contextFiles.join(', ')}`);
+      if (constraints.length > 0) console.log(`   Invariants: ${constraints.join('; ')}`);
+
+      const session = await councilOrchestrator.spawnCouncil({
+        goal,
+        planId,
+        rounds,
+        strategy,
+        contextFiles,
+        constraints,
+        saveAdr,
+        handoffToPlan: args.handoff !== 'false',
+        handoffAgentRole: args.handoffRole || args.role || 'ExecutionLead',
+      });
+      if (session.stoppedEarly) {
+        console.warn(`🛑 [Council Interrupted] ${session.message} (TTR: ${session.ttrSeconds}s)`);
+      } else {
+        console.log(`✅ [Council Completed] Plan: ${session.planId}`);
+        if (session.estimatedCostUsd !== undefined) {
+          console.log(`   Estimated Financial Cost: $${session.estimatedCostUsd.toFixed(4)} USD`);
+        }
+        if (session.adrPath) {
+          console.log(`   ADR Exported: ${session.adrPath}`);
+        }
+        if (session.consensus) {
+          console.log(`\n📋 Consensus Summary:`);
+          console.log(`   ${session.consensus.consensusSummary}`);
+          console.log(`\n🚀 Synthesized Tasks Ready for Execution:`);
+          session.consensus.dag?.forEach((t, i) => {
+            console.log(`   ${i + 1}. [${t.role}] ${t.label}: ${t.description}`);
+          });
+        }
+      }
+      break;
+    }
+
+    case 'sessions': {
+      const limit = parseInt(args.limit || '10', 10);
+      const sessions = councilOrchestrator.listCouncilSessions(limit);
+      console.log(`\n🏛️ Historical Council Deliberation Sessions (${sessions.length} recorded):`);
+      if (sessions.length === 0) {
+        console.log(`   No sessions found in .topology/councils/`);
+      } else {
+        for (const s of sessions) {
+          const dateStr = new Date(s.timestamp).toLocaleString();
+          const costStr = s.totalCostUsd ? `$${s.totalCostUsd.toFixed(4)}` : '$0.0000';
+          console.log(`\n   • [${s.id}] "${s.goal}"`);
+          console.log(`     Deliberated: ${dateStr} | Rounds: ${s.roundsDeliberated} | Cost: ${costStr}`);
+          console.log(`     Tokens: ${s.totalTokensUsed.toLocaleString()} | Tasks: ${s.consensusSummary ? 'Consensus reached' : 'Incomplete'}`);
+          if (s.adrPath) console.log(`     ADR: ${s.adrPath}`);
+        }
+      }
+      console.log('');
+      break;
+    }
+
+    case 'adr': {
+      const sessionId = args.session || args.sessionId || args._[1];
+      const session = sessionId ? councilOrchestrator.getCouncilSession(sessionId) : councilOrchestrator.getLastSession();
+      if (!session) {
+        console.error(`❌ Error: No council deliberation session found${sessionId ? ` for "${sessionId}"` : ''}.`);
+        process.exit(1);
+      }
+      const title = args.title || undefined;
+      const saveToDisk = args.save !== 'false';
+      const adr = councilOrchestrator.generateAdrMarkdown(session, { title, saveToDisk });
+      console.log(`\n📑 Architectural Decision Record (ADR):`);
+      if (adr.filePath) console.log(`   Saved to: ${adr.filePath}\n`);
+      console.log(adr.markdown);
+      break;
+    }
+
+    case 'budget': {
+      const status = budgetTracker.getBudgetStatus();
+      console.log(`\n📊 Gemini Ultra Multi-Model Council Quotas & Real-Time Headroom:`);
+      console.log(`   Global Status: ${status.systemStatus.toUpperCase()} (15% safety reserve armed)`);
+      console.log(`   Total Session Cost: $${status.totalSessionCostUsd?.toFixed(4) || '0.0000'} | Daily Cost: $${status.totalDailyCostUsd?.toFixed(4) || '0.0000'}`);
+      for (const m of Object.values(status.models)) {
+        console.log(`\n   ${m.avatar} ${m.name} (${m.family}):`);
+        console.log(`      Role: ${m.role}`);
+        console.log(`      RPM:  ${m.rpm.current}/${m.rpm.limit} (${m.rpm.percent}%) [Safe ceiling: ${m.rpm.safeLimit}]`);
+        console.log(`      TPM:  ${m.tpm.current}/${m.tpm.limit} (${m.tpm.percent}%) [Safe ceiling: ${m.tpm.safeLimit}]`);
+        console.log(`      Cost: $${m.cost?.sessionCostUsd?.toFixed(4) || '0.0000'} (Daily: $${m.cost?.dailyCostUsd?.toFixed(4) || '0.0000'}, All-Time: $${m.cost?.allTimeCostUsd?.toFixed(4) || '0.0000'})`);
+        console.log(`      Daily: ${m.daily.current}/${m.daily.limit} (${m.daily.percent}%)`);
+        console.log(`      TTR (60s window): ${m.ttr.formattedWindow}`);
+        console.log(`      TTR (daily 00:00 UTC): ${m.ttr.formattedDaily}`);
+        console.log(`      Status: ${m.status.toUpperCase()}`);
+      }
+      break;
+    }
+
+    case 'ooda':
+    case 'loop': {
+      const planId = args.plan || args.planId || args._[1];
+      if (!planId) {
+        console.error('❌ Error: --plan is required. E.g.: node scripts/topology-log.mjs loop --plan distributed-engine --loop 1 --stage observe --thought "Scanning codebase"');
+        process.exit(1);
+      }
+      const loopNumber = parseInt(args.loop || args.loopNumber || '1', 10);
+      const totalLoops = args.totalLoops ? parseInt(args.totalLoops, 10) : undefined;
+      const stage = args.stage || args._[2] || 'observe';
+      const thought = args.thought || null;
+      const status = args.status || 'in_progress';
+      const observations = args.observations ? String(args.observations).split(';').map(s => s.trim()) : [];
+      const understandings = args.understandings ? String(args.understandings).split(';').map(s => s.trim()) : [];
+      const refinements = args.refinements ? String(args.refinements).split(';').map(s => s.trim()) : [];
+      const updatesApplied = args.updatesApplied ? String(args.updatesApplied).split(';').map(s => s.trim()) : [];
+      const voteSummary = args.voteSummary || null;
+      const proposedPlanSummary = args.proposedPlanSummary || null;
+      const score = args.score ? parseFloat(args.score) : undefined;
+      let memberPlans = [];
+      if (args.memberPlans) {
+        try {
+          memberPlans = typeof args.memberPlans === 'string' ? JSON.parse(args.memberPlans) : args.memberPlans;
+        } catch {}
+      }
+
+      const OODA_STAGE_NAMES = {
+        observe: 'Observe 👁️',
+        understand: 'Understand 💡',
+        evaluate_with_council: 'Evaluate with Council 🏛️',
+        adversarial_council_evaluation: 'Adversarial Council Evaluation ⚔️',
+        each_member_plans: 'Each Member Plans 📝',
+        share_and_vote_on_plan: 'Share & Vote on Plan 🗳️',
+        iterate_on_plan: 'Iterate on Plan 🔄',
+        propose_plan: 'Propose Plan 📋',
+        update: 'Update & Execute ⚡',
+      };
+
+      const stageLabel = OODA_STAGE_NAMES[stage] || stage;
+
+      const iterationRecord = {
+        loopNumber,
+        stage,
+        stageName: stageLabel,
+        thought,
+        observations,
+        understandings,
+        memberPlans,
+        voteSummary,
+        refinements,
+        proposedPlanSummary,
+        updatesApplied,
+        metrics: score ? { consensusScorePercent: score } : {},
+        status,
+        timestamp: Date.now(),
+      };
+
+      // 1. Direct file fallback
+      let allLoops = {};
+      try {
+        const LOOPS_FILE = path.join(TOPOLOGY_DIR, 'ooda_loops.json');
+        if (fs.existsSync(LOOPS_FILE)) {
+          allLoops = JSON.parse(fs.readFileSync(LOOPS_FILE, 'utf8'));
+        }
+        if (!allLoops[planId]) {
+          allLoops[planId] = {
+            planId,
+            totalLoopsCompleted: 0,
+            currentLoop: loopNumber,
+            targetMaxLoops: totalLoops,
+            activeStage: stage,
+            isConverged: status === 'converged',
+            history: [],
+            updatedAt: Date.now(),
+          };
+        }
+        if (!Array.isArray(allLoops[planId].history)) {
+          allLoops[planId].history = allLoops[planId].iteration ? [allLoops[planId].iteration] : [];
+        }
+        allLoops[planId].currentLoop = loopNumber;
+        if (totalLoops) allLoops[planId].targetMaxLoops = totalLoops;
+        allLoops[planId].activeStage = stage;
+        allLoops[planId].isConverged = status === 'converged' || allLoops[planId].isConverged;
+        allLoops[planId].updatedAt = Date.now();
+        allLoops[planId].history.push(iterationRecord);
+        if (stage === 'update' && (status === 'completed' || status === 'converged')) {
+          allLoops[planId].totalLoopsCompleted = Math.max(allLoops[planId].totalLoopsCompleted, loopNumber);
+        }
+        fs.writeFileSync(LOOPS_FILE, JSON.stringify(allLoops, null, 2), 'utf8');
+
+        // Update plan in plans.json
+        const plansFile = path.join(TOPOLOGY_DIR, 'plans.json');
+        if (fs.existsSync(plansFile)) {
+          const plans = JSON.parse(fs.readFileSync(plansFile, 'utf8'));
+          if (plans[planId]) {
+            plans[planId].oodaLoop = allLoops[planId];
+            if (thought) plans[planId].latestThought = thought;
+            plans[planId].updatedAt = Date.now();
+            fs.writeFileSync(plansFile, JSON.stringify(plans, null, 2), 'utf8');
+          }
+        }
+      } catch (err) {
+        console.warn('Direct file save notice:', err.message);
+      }
+
+      // 2. Post to bridge
+      await postToBridge('loop-telemetry', {
+        planId,
+        telemetry: allLoops[planId],
+        iteration: iterationRecord,
+      });
+
+      await appendLog({
+        action: 'loop_telemetry',
+        planId,
+        status,
+        thought: thought || `[OODA Loop ${loopNumber} - ${stageLabel}] ${status}`,
+        payload: { loopNumber, totalLoops, stage },
+      });
+
+      console.log(`\n🔄 [OODA Loop] Telemetry emitted for "${planId}":`);
+      console.log(`   Loop Iteration: Loop ${loopNumber}${totalLoops ? ` of ${totalLoops}` : ''}`);
+      console.log(`   Active Stage:   ${stageLabel}`);
+      console.log(`   Status:         ${status.toUpperCase()}`);
+      if (thought) console.log(`   Thought:        ${thought}`);
+      break;
+    }
+
+    case 'loops': {
+      const planId = args.plan || args.planId || args._[1];
+      const LOOPS_FILE = path.join(TOPOLOGY_DIR, 'ooda_loops.json');
+      if (!fs.existsSync(LOOPS_FILE)) {
+        console.log('\nℹ️ No OODA loop records found in .topology/ooda_loops.json\n');
+        break;
+      }
+      const allLoops = JSON.parse(fs.readFileSync(LOOPS_FILE, 'utf8'));
+      if (planId && allLoops[planId]) {
+        const d = allLoops[planId];
+        const history = Array.isArray(d.history) ? d.history : (d.iteration ? [d.iteration] : []);
+        const curLoop = d.currentLoop || d.iteration?.loopNumber || 1;
+        const totalLoopsTarget = d.targetMaxLoops;
+        const actStage = d.activeStage || d.iteration?.stage || 'observe';
+        const completedLoops = d.totalLoopsCompleted || 0;
+        const isConverged = d.isConverged || d.iteration?.status === 'converged';
+
+        console.log(`\n🔄 OODA Loop Telemetry: "${planId}"`);
+        console.log(`   Current Loop: Loop ${curLoop}${totalLoopsTarget ? ` of ${totalLoopsTarget}` : ''}`);
+        console.log(`   Completed Loops: ${completedLoops}`);
+        console.log(`   Active Stage: ${actStage}`);
+        console.log(`   Convergence: ${isConverged ? 'CONVERGED ✅' : 'ITERATING 🔄'}`);
+        console.log(`\n   History (${history.length} stages):`);
+        history.forEach((h, i) => {
+          console.log(`     ${i + 1}. [Loop ${h.loopNumber}] ${h.stageName || h.stage} (${h.status}): ${h.thought || ''}`);
+        });
+        console.log('');
+      } else {
+        console.log(`\n🔄 Active OODA Loop Plans (${Object.keys(allLoops).length}):`);
+        for (const [pid, d] of Object.entries(allLoops)) {
+          const curLoop = d.currentLoop || d.iteration?.loopNumber || 1;
+          const totalLoopsTarget = d.targetMaxLoops ? `/${d.targetMaxLoops}` : '';
+          const actStage = d.activeStage || d.iteration?.stage || 'observe';
+          const completedLoops = d.totalLoopsCompleted || 0;
+          const isConverged = d.isConverged || d.iteration?.status === 'converged';
+          console.log(`   • [${pid}] Loop ${curLoop}${totalLoopsTarget} • ${actStage} (${completedLoops} completed loops)${isConverged ? ' [CONVERGED]' : ''}`);
+        }
+        console.log('');
+      }
+      break;
+    }
+
     case 'help':
     default: {
       console.log(`
@@ -334,6 +857,16 @@ Usage:
   node scripts/topology-log.mjs server          Ensure visualizer dev server is running on http://localhost:5173
   node scripts/topology-log.mjs stop-server     Gracefully stop visualizer server process
   node scripts/topology-log.mjs plans           List all active agent plans registered on the server
+  node scripts/topology-log.mjs switch          <planId> Switch active visual canvas plan
+  node scripts/topology-log.mjs complete-node   --nodeId <id> [--summary <text>] [--artifacts <files>] Mark node completed & advance
+  node scripts/topology-log.mjs complete-plan   [--plan <planId>] [--summary <text>] Mark entire plan completed
+  node scripts/topology-log.mjs status          --status <active|paused|completed|archived|abandoned> [--reason <text>]
+  node scripts/topology-log.mjs council         --goal <prompt> [--rounds 3] [--context <files>] [--constraints <list>] Run council
+  node scripts/topology-log.mjs sessions        List recorded council deliberation sessions
+  node scripts/topology-log.mjs adr             [--session <id>] [--save] Export consensus ADR Markdown
+  node scripts/topology-log.mjs budget          Display live Gemini Ultra model quotas, usage, costs, and TTR countdowns
+  node scripts/topology-log.mjs loop            --plan <id> --loop <N> --stage <stage> [--thought <text>] Emit OODA telemetry
+  node scripts/topology-log.mjs loops           [--plan <id>] Inspect OODA loop iterations and history
   node scripts/topology-log.mjs log             --action <action> [--plan <planId>] [--nodeId <id>] [--agent <name>] [--thought <text>] [--status <status>]
   node scripts/topology-log.mjs lock            --nodeId <id> [--agent <name>] [--ttl <seconds>]
   node scripts/topology-log.mjs unlock          --nodeId <id> [--agent <name>]

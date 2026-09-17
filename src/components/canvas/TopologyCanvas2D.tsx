@@ -60,8 +60,11 @@ const TopologyCanvasInner: React.FC = () => {
   const createSiblingNode = useTopologyStore(s => s.createSiblingNode);
   const applyDagreLayout = useTopologyStore(s => s.applyDagreLayout);
   const addNode = useTopologyStore(s => s.addNode);
+  const undo = useTopologyStore(s => s.undo);
+  const redo = useTopologyStore(s => s.redo);
+  const batchDeleteNodes = useTopologyStore(s => s.batchDeleteNodes);
 
-  // Responsive layout: auto-switch to vertical ('TB') when resizing to mobile (< 768px), or horizontal ('LR') on desktop
+  // Responsive layout: ensure vertical ('TB') layout on mobile (< 768px)
   useEffect(() => {
     let lastWidth = typeof window !== 'undefined' ? window.innerWidth : 1200;
     const handleResize = () => {
@@ -72,9 +75,6 @@ const TopologyCanvasInner: React.FC = () => {
 
       if (!wasMobile && isNowMobile) {
         setLayoutDirection('TB');
-        setTimeout(() => fitView({ duration: 350, padding: 0.2 }), 50);
-      } else if (wasMobile && !isNowMobile) {
-        setLayoutDirection('LR');
         setTimeout(() => fitView({ duration: 350, padding: 0.2 }), 50);
       }
     };
@@ -214,8 +214,77 @@ const TopologyCanvasInner: React.FC = () => {
   // Keyboard navigation & rapid authoring
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      const activeTag = document.activeElement?.tagName.toLowerCase();
-      if (activeTag === 'input' || activeTag === 'textarea') return;
+      const activeEl = document.activeElement as HTMLElement | null;
+      const activeTag = activeEl?.tagName.toLowerCase();
+      if (
+        activeTag === 'input' || 
+        activeTag === 'textarea' || 
+        activeTag === 'select' || 
+        activeEl?.isContentEditable
+      ) return;
+
+      // Suppress canvas hotkeys if any full-screen modal is currently mounted
+      const openModal = document.querySelector('.fixed.inset-0.z-50:not([data-spotlight="true"])');
+      if (openModal || activeEl?.closest('.fixed.inset-0.z-50:not([data-spotlight="true"])')) return;
+
+      const isCtrlOrCmd = e.ctrlKey || e.metaKey;
+
+      if (isCtrlOrCmd && (e.key === 'z' || e.key === 'Z')) {
+        e.preventDefault();
+        if (e.shiftKey) {
+          redo();
+        } else {
+          undo();
+        }
+        return;
+      }
+
+      if (isCtrlOrCmd && (e.key === 'y' || e.key === 'Y')) {
+        e.preventDefault();
+        redo();
+        return;
+      }
+
+      if (isCtrlOrCmd && (e.key === 'a' || e.key === 'A')) {
+        e.preventDefault();
+        setSelectedNodeIds(nodes.map(n => n.id));
+        return;
+      }
+
+      if ((isCtrlOrCmd && (e.key === 'f' || e.key === 'k' || e.key === 'F' || e.key === 'K')) || e.key === '/') {
+        e.preventDefault();
+        const centerPos = screenToFlowPosition({
+          x: window.innerWidth / 2,
+          y: window.innerHeight / 2,
+        });
+        setSpotlightState({
+          isOpen: true,
+          screenPos: { x: window.innerWidth / 2, y: window.innerHeight / 2 },
+          flowPos: centerPos,
+        });
+        return;
+      }
+
+      if (isCtrlOrCmd && (e.key === 'l' || e.key === 'L')) {
+        e.preventDefault();
+        applyDagreLayout();
+        setTimeout(() => fitView({ duration: 350, padding: 0.2 }), 40);
+        return;
+      }
+
+      if (isCtrlOrCmd && e.key === '0') {
+        e.preventDefault();
+        fitView({ duration: 350, padding: 0.2 });
+        return;
+      }
+
+      if (!isCtrlOrCmd && (e.key === '1' || e.key === '2' || e.key === '3')) {
+        e.preventDefault();
+        if (e.key === '1') setLod('macro');
+        if (e.key === '2') setLod('normal');
+        if (e.key === '3') setLod('micro');
+        return;
+      }
 
       if (e.key === 'Tab') {
         e.preventDefault();
@@ -230,19 +299,40 @@ const TopologyCanvasInner: React.FC = () => {
           addNode();
         }
       } else if (e.key === 'Delete' || e.key === 'Backspace') {
-        if (selectedNodeId) {
+        if (selectedNodeIds.length > 1) {
+          e.preventDefault();
+          batchDeleteNodes();
+        } else if (selectedNodeId) {
           e.preventDefault();
           deleteNode(selectedNodeId);
         }
       } else if (e.key === 'Escape') {
         selectNode(null);
+        setSelectedNodeIds([]);
         setSpotlightState(prev => ({ ...prev, isOpen: false }));
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedNodeId, branchChildNode, createSiblingNode, addNode, deleteNode, selectNode]);
+  }, [
+    nodes,
+    selectedNodeId,
+    selectedNodeIds,
+    branchChildNode,
+    createSiblingNode,
+    addNode,
+    deleteNode,
+    batchDeleteNodes,
+    selectNode,
+    setSelectedNodeIds,
+    undo,
+    redo,
+    applyDagreLayout,
+    fitView,
+    screenToFlowPosition,
+    setLod,
+  ]);
 
   const isLight = theme === 'default' || theme === 'light' || theme === 'latte';
   const isDefault = theme === 'default';

@@ -19,7 +19,8 @@ import {
   Users,
   Radio,
   Brain,
-  Activity
+  Activity,
+  RotateCw
 } from 'lucide-react';
 import { useTopologyStore } from '../../store/useTopologyStore';
 import { exportToObsidianCanvas, exportToMermaid, exportToUniversalAgentManifest } from '../../utils/obsidianCanvas';
@@ -27,6 +28,19 @@ import { generateHeadlessCliRunner } from '../../utils/agentHandoff';
 import { SAMPLE_TOPOLOGIES } from '../../data/sampleTopologies';
 import { ThemePalettePicker } from './ThemePalettePicker';
 import { PlanSelectorDropdown } from './PlanSelectorDropdown';
+import { MoreToolsDropdown } from './MoreToolsDropdown';
+
+const STAGE_SHORT_LABELS: Record<string, string> = {
+  observe: 'Observe',
+  understand: 'Understand',
+  evaluate_with_council: 'Evaluate',
+  adversarial_council_evaluation: 'Critique',
+  each_member_plans: 'Plans',
+  share_and_vote_on_plan: 'Vote',
+  iterate_on_plan: 'Iterate',
+  propose_plan: 'Propose',
+  update: 'Execute',
+};
 
 interface HeaderProps {
   onOpenGenerator: () => void;
@@ -66,10 +80,40 @@ export const Header: React.FC<HeaderProps> = ({
   const globalSquad = useTopologyStore(s => s.globalSquad);
   const liveSyncStatus = useTopologyStore(s => s.liveSyncStatus);
   const sharedContext = useTopologyStore(s => s.sharedContext);
+  const setCouncilModalOpen = useTopologyStore(s => s.setCouncilModalOpen);
+  const councilBudget = useTopologyStore(s => s.councilBudget);
+  const setLoopModalOpen = useTopologyStore(s => s.setLoopModalOpen);
+  const activeLoopTelemetry = useTopologyStore(s => s.activeLoopTelemetry);
+  const activePlanId = useTopologyStore(s => s.activePlanId);
+  const plans = useTopologyStore(s => s.plans);
+  const activePlan = plans[activePlanId];
+  const loopTelemetry = activeLoopTelemetry || activePlan?.oodaLoop;
 
   const [isExportOpen, setIsExportOpen] = useState(false);
-  const [isSamplesOpen, setIsSamplesOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const exportMenuRef = useRef<HTMLDivElement>(null);
+
+  // Close export menu on outside click or Escape
+  React.useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(e.target as Node)) {
+        setIsExportOpen(false);
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsExportOpen(false);
+      }
+    };
+    if (isExportOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      document.addEventListener('keydown', handleKeyDown);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isExportOpen]);
 
   const coherenceReport = getCoherenceReport();
   const isLight = theme === 'default' || theme === 'light' || theme === 'latte';
@@ -148,9 +192,9 @@ export const Header: React.FC<HeaderProps> = ({
   }, [onOpenDiagnostics]);
 
   return (
-    <header className="h-13 sm:h-14 px-2.5 sm:px-4 flex items-center justify-between bg-white/90 dark:bg-[#10121a]/90 backdrop-blur-2xl select-none z-30 border-none transition-colors duration-200 shadow-xs gap-2">
+    <header className="h-13 sm:h-14 px-2 sm:px-4 flex items-center justify-between bg-white/90 dark:bg-[#10121a]/90 backdrop-blur-2xl select-none z-30 border-none transition-colors duration-200 shadow-xs gap-1.5 sm:gap-2">
       {/* Left: Brand Logo, Compact 2D/3D Switcher, and Plan Selector Dropdown */}
-      <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+      <div className="flex items-center gap-1.5 sm:gap-2.5 min-w-0 flex-1 sm:flex-initial">
         {/* Brand Logo */}
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           <div className="w-7 h-7 rounded-xl bg-gradient-to-br from-[#1a73e8] to-[#4285f4] flex items-center justify-center shadow-xs shrink-0">
@@ -191,18 +235,18 @@ export const Header: React.FC<HeaderProps> = ({
 
         <div className="w-px h-5 bg-black/10 dark:bg-white/10 shrink-0 hidden sm:block" />
 
-        {/* Workspace Plan Selector Dropdown (Clean, non-scrolling) */}
-        <PlanSelectorDropdown onOpenFleetModal={onOpenFleetModal} />
+        {/* Workspace Plan Selector Dropdown (Clean, responsive, non-scrolling) */}
+        <PlanSelectorDropdown onOpenFleetModal={onOpenFleetModal} className="min-w-0" />
       </div>
 
       {/* Right: Health, AI Plan, Minimal Swarm Observability, Telemetry & Export */}
       <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
-        {/* Coherence Health Pill */}
+        {/* Coherence Health Pill - visible on lg+ */}
         <button
           type="button"
           onClick={onOpenCoherence}
           title={`Graph Coherence: ${coherenceReport.score}% (Click for full diagnostic report)`}
-          className={`hidden md:flex items-center gap-1 px-2 py-1 rounded-xl text-xs font-medium transition-all duration-150 border-none cursor-pointer shadow-xs ${
+          className={`hidden lg:flex items-center gap-1 px-2 py-1 rounded-xl text-xs font-medium transition-all duration-150 border-none cursor-pointer shadow-xs ${
             coherenceReport.score >= 90
               ? 'bg-[#e6f4ea] text-[#137333] dark:bg-cat-mocha-green/15 dark:text-cat-mocha-green'
               : coherenceReport.score >= 70
@@ -214,19 +258,19 @@ export const Header: React.FC<HeaderProps> = ({
           <span className="font-semibold">{coherenceReport.score}%</span>
         </button>
 
-        {/* AI Plan Synthesizer Primary CTA */}
+        {/* AI Plan Synthesizer Primary CTA - Always visible */}
         <button
           type="button"
           onClick={onOpenGenerator}
           title="Open AI Plan Synthesizer"
-          className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-xl text-xs font-medium bg-[#1a73e8] hover:bg-[#1557b0] text-white shadow-xs transition-all duration-150 border-none cursor-pointer shrink-0"
+          className="flex items-center gap-1.5 px-2 sm:px-3 py-1 rounded-xl text-xs font-medium bg-[#1a73e8] hover:bg-[#1557b0] text-white shadow-xs transition-all duration-150 border-none cursor-pointer shrink-0"
         >
           <Sparkles size={13} />
           <span className="hidden sm:inline font-semibold">AI Plan</span>
         </button>
 
-        {/* Undo / Redo */}
-        <div className="hidden sm:flex items-center gap-0.5 bg-black/5 dark:bg-white/5 p-0.5 rounded-xl">
+        {/* Undo / Redo - visible on xl+ */}
+        <div className="hidden xl:flex items-center gap-0.5 bg-black/5 dark:bg-white/5 p-0.5 rounded-xl">
           <button
             type="button"
             disabled={history.length === 0}
@@ -247,14 +291,14 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
         </div>
 
-        <div className="w-px h-4 bg-black/10 dark:bg-white/10 mx-0.5 hidden md:block" />
+        <div className="w-px h-4 bg-black/10 dark:bg-white/10 mx-0.5 hidden xl:block" />
 
-        {/* Multi-Agent Swarm Observability */}
+        {/* Multi-Agent Swarm Observability - visible on md+ */}
         <button
           type="button"
           onClick={() => setCockpitOpen(!isCockpitOpen)}
           title={`Multi-Agent Swarm Observability (${globalSquad.length} active agents)`}
-          className={`h-8 px-2 rounded-xl text-xs font-medium flex items-center gap-1 transition-all border-none cursor-pointer shadow-xs shrink-0 ${
+          className={`hidden md:flex h-8 px-2 rounded-xl text-xs font-medium items-center gap-1 transition-all border-none cursor-pointer shadow-xs shrink-0 ${
             isCockpitOpen
               ? 'bg-[#1a73e8] text-white font-semibold'
               : 'bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 text-[#202124] dark:text-[#f8fafc]'
@@ -268,12 +312,12 @@ export const Header: React.FC<HeaderProps> = ({
           </span>
         </button>
 
-        {/* Shared Context Blackboard */}
+        {/* Shared Context Blackboard - visible on xl+ */}
         <button
           type="button"
           onClick={onOpenSharedContext}
           title={`Shared Agent Context Repository (${Object.keys(sharedContext?.global || {}).length} entries)`}
-          className="h-8 px-2 rounded-xl text-xs font-medium bg-purple-500/10 hover:bg-purple-500/15 text-purple-700 dark:text-purple-300 flex items-center gap-1 transition-all border-none cursor-pointer shadow-xs shrink-0"
+          className="hidden xl:flex h-8 px-2 rounded-xl text-xs font-medium bg-purple-500/10 hover:bg-purple-500/15 text-purple-700 dark:text-purple-300 items-center gap-1 transition-all border-none cursor-pointer shadow-xs shrink-0"
         >
           <Brain size={13} className="text-purple-600 dark:text-purple-400" />
           <span className="px-1.5 py-0.2 rounded-md text-[10px] bg-purple-500/15 text-purple-600 dark:text-purple-300 font-bold font-mono">
@@ -281,7 +325,7 @@ export const Header: React.FC<HeaderProps> = ({
           </span>
         </button>
 
-        {/* Antigravity Live Agent Sync Status Indicator */}
+        {/* Antigravity Live Agent Sync Status Indicator - Always visible */}
         <button
           type="button"
           onClick={onOpenAgentSync}
@@ -309,21 +353,63 @@ export const Header: React.FC<HeaderProps> = ({
           <Radio size={13} className={liveSyncStatus.connected ? 'text-emerald-500' : 'opacity-60'} />
         </button>
 
-        {/* Diagnostics & Telemetry HUD */}
+        {/* Multi-Model Council & Gemini Ultra Quotas */}
+        <button
+          type="button"
+          onClick={() => setCouncilModalOpen(true)}
+          title="Multi-Model Council & Gemini Ultra Quota Monitor"
+          className="h-8 px-2 sm:px-2.5 rounded-xl text-xs font-medium bg-gradient-to-r from-indigo-500/15 via-purple-500/15 to-transparent hover:bg-white/10 text-indigo-700 dark:text-indigo-300 flex items-center gap-1.5 transition-all border-none cursor-pointer shadow-xs shrink-0"
+        >
+          <span className="text-sm leading-none">🏛️</span>
+          <span className="hidden md:inline font-semibold">Council</span>
+          <span className={`w-1.5 h-1.5 rounded-full ${
+            councilBudget?.systemStatus === 'healthy' || !councilBudget
+              ? 'bg-emerald-500 shadow-sm shadow-emerald-500/50'
+              : councilBudget?.systemStatus === 'approaching_limit'
+              ? 'bg-amber-500 animate-pulse'
+              : 'bg-rose-500 animate-ping'
+          }`} />
+        </button>
+
+        {/* Multi-Loop OODA / Council Iteration Cycle */}
+        <button
+          type="button"
+          onClick={() => setLoopModalOpen(true)}
+          title={`OODA Council Iteration Cycle: Loop ${loopTelemetry?.currentLoop || 1}${loopTelemetry?.targetMaxLoops ? `/${loopTelemetry.targetMaxLoops}` : ''} • ${loopTelemetry?.activeStage || 'observe'}${loopTelemetry?.isConverged ? ' (Converged)' : ''}`}
+          className="h-8 px-2 sm:px-2.5 rounded-xl text-xs font-medium bg-gradient-to-r from-amber-500/15 via-orange-500/15 to-transparent hover:bg-white/10 text-amber-800 dark:text-amber-200 flex items-center gap-1.5 transition-all border-none cursor-pointer shadow-xs shrink-0"
+        >
+          <RotateCw size={13} className={`text-amber-600 dark:text-amber-400 ${loopTelemetry?.isConverged ? '' : 'animate-spin-slow'}`} />
+          <span className="hidden lg:inline font-semibold">
+            {loopTelemetry
+              ? `Loop ${loopTelemetry.currentLoop}${loopTelemetry.targetMaxLoops ? `/${loopTelemetry.targetMaxLoops}` : ''}`
+              : 'OODA'}
+          </span>
+          <span className={`px-1.5 py-0.2 rounded-md text-[10px] font-bold font-mono ${
+            loopTelemetry?.isConverged
+              ? 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-300'
+              : 'bg-amber-500/20 text-amber-800 dark:text-amber-200'
+          }`}>
+            {loopTelemetry?.isConverged
+              ? 'Done'
+              : (loopTelemetry?.activeStage ? (STAGE_SHORT_LABELS[loopTelemetry.activeStage] || loopTelemetry.activeStage) : 'Loop 1')}
+          </span>
+        </button>
+
+        {/* Diagnostics & Telemetry HUD - visible on xl+ */}
         <button
           type="button"
           onClick={onOpenDiagnostics}
           title="System Diagnostics & Telemetry HUD (Ctrl+Shift+D)"
-          className="h-8 w-8 rounded-xl text-xs font-medium bg-blue-500/10 hover:bg-blue-500/15 text-blue-700 dark:text-blue-300 flex items-center justify-center transition-all border-none cursor-pointer shadow-xs shrink-0"
+          className="hidden xl:flex h-8 w-8 rounded-xl text-xs font-medium bg-blue-500/10 hover:bg-blue-500/15 text-blue-700 dark:text-blue-300 items-center justify-center transition-all border-none cursor-pointer shadow-xs shrink-0"
         >
           <Activity size={13} className="text-blue-600 dark:text-blue-400" />
         </button>
 
-        {/* Topology Hub & Archetype Library */}
+        {/* Topology Hub & Archetype Library - visible on lg+ */}
         <button
           type="button"
           onClick={onOpenLibrary}
-          className="h-8 px-2 rounded-xl text-xs font-medium bg-gradient-to-r from-[#1a73e8]/10 to-[#9334e6]/10 hover:from-[#1a73e8]/15 hover:to-[#9334e6]/15 text-[#1a73e8] dark:text-[#8ab4f8] hidden sm:flex items-center gap-1 transition-all border-none cursor-pointer shadow-xs shrink-0"
+          className="h-8 px-2 rounded-xl text-xs font-medium bg-gradient-to-r from-[#1a73e8]/10 to-[#9334e6]/10 hover:from-[#1a73e8]/15 hover:to-[#9334e6]/15 text-[#1a73e8] dark:text-[#8ab4f8] hidden lg:flex items-center gap-1 transition-all border-none cursor-pointer shadow-xs shrink-0"
           title="Browse 10 Canonical Archetypes & Community Topologies (80% coverage)"
         >
           <Compass size={13} className="text-[#1a73e8] dark:text-[#8ab4f8]" />
@@ -343,8 +429,8 @@ export const Header: React.FC<HeaderProps> = ({
           className="hidden"
         />
 
-        {/* Consolidated Export & Import Dropdown */}
-        <div className="relative">
+        {/* Consolidated Export & Import Dropdown - Always visible */}
+        <div ref={exportMenuRef} className="relative">
           <button
             type="button"
             onClick={() => {
@@ -452,15 +538,26 @@ export const Header: React.FC<HeaderProps> = ({
           )}
         </div>
 
-        {/* Compact Tutorial Guide Icon Button */}
+        {/* Compact Tutorial Guide Icon Button - visible on xl+ */}
         <button
           type="button"
           onClick={onOpenTutorial}
           title="Open Interactive Onboarding Guide"
-          className="w-8 h-8 rounded-xl flex items-center justify-center bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 text-[#5f6368] dark:text-[#94a3b8] hover:text-[#202124] dark:hover:text-[#f8fafc] transition-colors border-none cursor-pointer"
+          className="hidden xl:flex w-8 h-8 rounded-xl items-center justify-center bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 text-[#5f6368] dark:text-[#94a3b8] hover:text-[#202124] dark:hover:text-[#f8fafc] transition-colors border-none cursor-pointer"
         >
           <HelpCircle size={15} />
         </button>
+
+        {/* Responsive More Tools Dropdown - visible on < xl */}
+        <MoreToolsDropdown
+          onOpenCoherence={onOpenCoherence}
+          onOpenSharedContext={onOpenSharedContext}
+          onOpenDiagnostics={onOpenDiagnostics}
+          onOpenLibrary={onOpenLibrary}
+          onOpenTutorial={onOpenTutorial}
+          onOpenFleetModal={onOpenFleetModal}
+          className="flex xl:hidden"
+        />
 
         {/* Ultra-Compact Jewel Palette Picker (swatches only) */}
         <ThemePalettePicker />
