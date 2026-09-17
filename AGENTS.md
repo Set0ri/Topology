@@ -12,6 +12,10 @@ Whenever executing multi-step projects, complex architectures, or long-running r
 9. **Local Advisory Locking**: When modifying shared resources or taking ownership of a node, acquire a process-safe advisory lease using `topology_acquire_lock` (or `node scripts/topology-log.mjs lock <resource>`). Release it upon task completion with `topology_release_lock`.
 10. **Append-Only Execution Logging**: All actions automatically write to `.topology/topology.log`. Custom progress events or checkpoints can be appended directly via `topology_log_event`.
 11. **Distributed Git Synchronization**: For multi-agent workflows spanning branches or remotes, sync state using `topology_sync_git_log` or `node scripts/topology-log.mjs sync --push`.
+12. **Multi-Model Deliberation Council**: Before complex architectures or refactors, convene the 3-model council with `topology_spawn_council`. Parallelizes evaluation across Gemini 3.8 Flash (fast architect), Claude 4.6 Opus (invariant critic), and GPT-OSS 120b (resilience auditor). Automatically performs pre-flight budget checks on Gemini Ultra quotas, handles 1, 2, or 3 rounds, synthesizes consensus, and hands off to an active visual DAG.
+13. **Model Budget & Quota Tracking**: Query live RPM/TPM usage, remaining token reserves, and rolling-window Time-To-Refresh (TTR) countdowns with `topology_get_council_budget`.
+14. **9-Stage OODA Iteration Engine**: Run iterative refinement loops across the 9 stages: `observe` ➔ `understand` ➔ `evaluate_with_council` ➔ `adversarial_council_evaluation` ➔ `each_member_plans` ➔ `share_and_vote_on_plan` ➔ `iterate_on_plan` ➔ `propose_plan` ➔ `update`. Stream stage telemetry via `topology_emit_loop_telemetry` and inspect timelines via `topology_get_loop_telemetry`.
+15. **Architectural Decision Records (ADR)**: Export standardized ADR documents to `docs/adr/` with `topology_export_council_adr`.
 
 ## Non-Critical Infrastructure & Fail-Safe Execution
 
@@ -43,11 +47,23 @@ node scripts/topology-log.mjs plans
 # Switch active visual canvas plan
 node scripts/topology-log.mjs switch backend-refactor
 
+# Convene multi-model council with visual DAG handoff
+node scripts/topology-log.mjs council --goal="Design caching layer" --rounds=3 --context="src/types/topology.ts"
+
+# Inspect Gemini Ultra quotas & Time-To-Refresh (TTR) countdowns
+node scripts/topology-log.mjs budget
+
+# Emit 9-stage OODA loop telemetry
+node scripts/topology-log.mjs loop --plan="backend-refactor" --loop=1 --total=3 --stage="observe" --thought="Scanning AST"
+
+# Inspect loop progress and stage timeline
+node scripts/topology-log.mjs loops --plan="backend-refactor"
+
+# Export latest deliberation ADR to docs/adr/
+node scripts/topology-log.mjs adr --save
+
 # Acquire advisory lock
 node scripts/topology-log.mjs lock node:step-1 --agent="AgentA" --ttl=30
-
-# Append execution log entry / update plan node
-node scripts/topology-log.mjs log --action="node_updated" --plan="backend-refactor" --nodeId="step-1" --status="in_progress"
 
 # Complete node and advance to next pending step
 node scripts/topology-log.mjs complete-node --nodeId="step-1" --plan="backend-refactor" --summary="Implemented API contracts"
