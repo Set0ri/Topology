@@ -12,10 +12,11 @@ Whenever executing multi-step projects, complex architectures, or long-running r
 9. **Local Advisory Locking**: When modifying shared resources or taking ownership of a node, acquire a process-safe advisory lease using `topology_acquire_lock` (or `node scripts/topology-log.mjs lock <resource>`). Release it upon task completion with `topology_release_lock`.
 10. **Append-Only Execution Logging**: All actions automatically write to `.topology/topology.log`. Custom progress events or checkpoints can be appended directly via `topology_log_event`.
 11. **Distributed Git Synchronization**: For multi-agent workflows spanning branches or remotes, sync state using `topology_sync_git_log` or `node scripts/topology-log.mjs sync --push`.
-12. **Multi-Model Deliberation Council**: Before complex architectures or refactors, convene the 3-model council with `topology_spawn_council`. Parallelizes evaluation across Gemini 3.8 Flash (fast architect), Claude 4.6 Opus (invariant critic), and GPT-OSS 120b (resilience auditor). Automatically performs pre-flight budget checks on Gemini Ultra quotas, handles 1, 2, or 3 rounds, synthesizes consensus, and hands off to an active visual DAG.
+12. **Multi-Model Deliberation Council**: Before complex architectures or refactors, convene the multi-model council with `topology_spawn_council`. Defaults to Gemini 3.8 Flash, Claude 4.6 Opus, and GPT-OSS 120b, or pass custom registered members via `members: string[]`. Automatically performs pre-flight budget checks on RPM/TPM quotas, handles 1, 2, or 3 rounds, synthesizes consensus, and hands off to an active visual DAG.
 13. **Model Budget & Quota Tracking**: Query live RPM/TPM usage, remaining token reserves, and rolling-window Time-To-Refresh (TTR) countdowns with `topology_get_council_budget`.
-14. **9-Stage OODA Iteration Engine**: Run iterative refinement loops across the 9 stages: `observe` ➔ `understand` ➔ `evaluate_with_council` ➔ `adversarial_council_evaluation` ➔ `each_member_plans` ➔ `share_and_vote_on_plan` ➔ `iterate_on_plan` ➔ `propose_plan` ➔ `update`. Stream stage telemetry via `topology_emit_loop_telemetry` and inspect timelines via `topology_get_loop_telemetry`.
-15. **Architectural Decision Records (ADR)**: Export standardized ADR documents to `docs/adr/` with `topology_export_council_adr`.
+14. **Extensible Custom Models**: Register custom council models dynamically via `topology_register_model` (or `node scripts/topology-log.mjs add-model`). Supports `gemini`, `anthropic`, `openai`, `openai_compatible` (e.g. DeepSeek, Mistral), and `ollama` endpoints with customized RPM/TPM rate limits, cost rates, and system personas.
+15. **9-Stage OODA Iteration Engine with Strict Loop Limits**: Run iterative refinement loops across the 9 stages: `observe` ➔ `understand` ➔ `evaluate_with_council` ➔ `adversarial_council_evaluation` ➔ `each_member_plans` ➔ `share_and_vote_on_plan` ➔ `iterate_on_plan` ➔ `propose_plan` ➔ `update`. Stream stage telemetry via `topology_emit_loop_telemetry` with strict parameter `maxLoops` (default 3, clamped 1-10) to prevent unbounded loops. Inspect timelines via `topology_get_loop_telemetry`.
+16. **Architectural Decision Records (ADR)**: Export standardized ADR documents to `docs/adr/` with `topology_export_council_adr`.
 
 ## Non-Critical Infrastructure & Fail-Safe Execution
 
@@ -47,14 +48,20 @@ node scripts/topology-log.mjs plans
 # Switch active visual canvas plan
 node scripts/topology-log.mjs switch backend-refactor
 
-# Convene multi-model council with visual DAG handoff
+# Convene multi-model council with visual DAG handoff (or with custom models: --models="modelA,modelB")
 node scripts/topology-log.mjs council --goal="Design caching layer" --rounds=3 --context="src/types/topology.ts"
 
-# Inspect Gemini Ultra quotas & Time-To-Refresh (TTR) countdowns
+# List registered council models and quotas
+node scripts/topology-log.mjs models
+
+# Register a custom model with custom quota and endpoint
+node scripts/topology-log.mjs add-model --id=deepseek-v3 --name="DeepSeek V3" --provider=openai_compatible --rpm=120 --tpm=1000000
+
+# Inspect quotas, live usage & Time-To-Refresh (TTR) countdowns
 node scripts/topology-log.mjs budget
 
-# Emit 9-stage OODA loop telemetry
-node scripts/topology-log.mjs loop --plan="backend-refactor" --loop=1 --total=3 --stage="observe" --thought="Scanning AST"
+# Emit 9-stage OODA loop telemetry with strict loop limit
+node scripts/topology-log.mjs loop --plan="backend-refactor" --loop=1 --max-loops=3 --stage="observe" --thought="Scanning AST"
 
 # Inspect loop progress and stage timeline
 node scripts/topology-log.mjs loops --plan="backend-refactor"

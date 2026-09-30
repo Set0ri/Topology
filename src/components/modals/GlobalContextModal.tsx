@@ -116,9 +116,7 @@ export const GlobalContextModal: React.FC<GlobalContextModalProps> = ({ isOpen, 
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className={`p-5 flex items-center justify-between border-b ${
-          isDark ? 'border-white/10' : 'border-black/5'
-        }`}>
+        <div className="p-5 flex items-center justify-between border-none">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-2xl bg-purple-500/15 text-purple-500 flex items-center justify-center shrink-0">
               <Brain size={22} />
@@ -148,8 +146,8 @@ export const GlobalContextModal: React.FC<GlobalContextModalProps> = ({ isOpen, 
         </div>
 
         {/* Navigation Tabs & Search & Add Button */}
-        <div className={`px-5 py-3 flex items-center justify-between gap-3 border-b ${
-          isDark ? 'border-white/5 bg-cat-mocha-base/30' : 'border-black/5 bg-gray-50/50'
+        <div className={`px-5 py-3 flex items-center justify-between gap-3 border-none ${
+          isDark ? 'bg-cat-mocha-base/30' : 'bg-gray-50/50'
         }`}>
           {/* Tabs */}
           <div className="flex items-center gap-1.5 p-1 rounded-2xl bg-black/5 dark:bg-white/5">
@@ -208,8 +206,8 @@ export const GlobalContextModal: React.FC<GlobalContextModalProps> = ({ isOpen, 
 
         {/* Inline Create Entry Form */}
         {isAdding && (
-          <form onSubmit={handleCreate} className={`p-4 border-b animate-in fade-in duration-150 ${
-            isDark ? 'bg-cat-mocha-surface1/60 border-white/10' : 'bg-purple-50/70 border-purple-100'
+          <form onSubmit={handleCreate} className={`p-4 border-none animate-in fade-in duration-150 ${
+            isDark ? 'bg-cat-mocha-surface1/60' : 'bg-purple-50/70'
           }`}>
             <div className="font-semibold text-xs mb-2 flex items-center gap-1.5 text-purple-500">
               <Sparkles size={13} />

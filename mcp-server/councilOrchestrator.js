@@ -18,7 +18,7 @@
 import http from 'http';
 import fs from 'fs';
 import path from 'path';
-import { budgetTracker, MODEL_QUOTA_CONFIG } from './budgetTracker.js';
+import { budgetTracker, MODEL_QUOTA_CONFIG, getModelConfig, registerCustomModel } from './budgetTracker.js';
 import { providerClient } from './providerClient.js';
 import { appendLog } from './gitLock.js';
 
@@ -112,9 +112,17 @@ function readContextFiles(filePaths = []) {
 /**
  * Generates rich, domain-aware deliberation outputs for each model
  */
+/**
+ * Generates rich, domain-aware deliberation outputs for each model
+ */
 function generateCognitiveContent(modelId, roundIndex, goal, context = {}) {
   const { constraints = [], contextSummary = '' } = context;
   const constraintNotice = constraints.length > 0 ? ` (Honoring constraints: ${constraints.join('; ')})` : '';
+  const modelCfg = getModelConfig(modelId) || {
+    name: modelId,
+    role: 'Specialist Architect',
+    avatar: '🤖',
+  };
 
   if (roundIndex === 1) {
     if (modelId === 'gemini-3.8-flash') {
@@ -139,8 +147,7 @@ function generateCognitiveContent(modelId, roundIndex, goal, context = {}) {
         estimatedTokens: 2400,
         thought: `Interrogating invariant boundaries for "${goal}". Uncovering subtle concurrency hazards and state corruption vectors.`,
       };
-    } else {
-      // gpt-oss-120b
+    } else if (modelId === 'gpt-oss-120b') {
       return {
         perspective: 'Alternative Paradigms & Robustness Auditing',
         proposals: [
@@ -151,14 +158,26 @@ function generateCognitiveContent(modelId, roundIndex, goal, context = {}) {
         estimatedTokens: 2100,
         thought: `Stress-testing systemic resiliency for "${goal}". Auditing against extreme load and degraded connectivity.`,
       };
+    } else {
+      // Dynamic custom model contribution
+      return {
+        perspective: `${modelCfg.role} (${modelCfg.name})`,
+        proposals: [
+          `Formulate structured approach for "${goal}" prioritizing ${modelCfg.role.toLowerCase()}${constraintNotice}.`,
+          `Establish domain invariants and interface boundaries tailored to ${modelCfg.name} recommendations.`,
+          `Validate non-blocking state updates and observability metrics across execution phases.`,
+        ],
+        estimatedTokens: modelCfg.defaultEstInputTokens || 1800,
+        thought: `Formulating specialized proposals for "${goal}" based on ${modelCfg.role} perspective.`,
+      };
     }
   } else if (roundIndex === 2) {
     if (modelId === 'claude-4.6-opus') {
       return {
-        perspective: 'Adversarial Critique on Flash & GPT-OSS',
+        perspective: 'Adversarial Critique on Peer Proposals',
         critiques: [
-          'Critique of Flash proposal: Speculative parallel branches without atomic commit gates risk dirty reads in shared context.',
-          'Critique of GPT-OSS proposal: Full event-sourcing adds unnecessary storage overhead for short-lived workflows; use append-only WAL with periodic compaction instead.',
+          'Critique of speculative branches: Speculative parallel branches without atomic commit gates risk dirty reads in shared context.',
+          'Critique of heavy storage paradigms: Full event-sourcing adds unnecessary storage overhead for short-lived workflows; use append-only WAL with periodic compaction instead.',
         ],
         suggestedAmendments: 'Introduce 2-phase verification barrier before advancing to execution.',
         estimatedTokens: 2600,
@@ -168,38 +187,49 @@ function generateCognitiveContent(modelId, roundIndex, goal, context = {}) {
       return {
         perspective: 'Edge-Case Stress Testing & Practical Tradeoffs',
         critiques: [
-          'Flash’s micro-step decomposition needs backpressure limits; unbounded queueing will exhaust memory under high throughput.',
-          'Opus’s formal barriers must have explicit timeouts to avoid distributed deadlocks when an agent hangs.',
+          'Micro-step decomposition needs backpressure limits; unbounded queueing will exhaust memory under high throughput.',
+          'Formal barriers must have explicit timeouts to avoid distributed deadlocks when an agent hangs.',
         ],
         suggestedAmendments: 'Add lease-based watchdog heartbeats to all barrier gates.',
         estimatedTokens: 2200,
         thought: `Auditing peer critique. Recommending backpressure limits and heartbeat timeouts on barrier gates.`,
       };
-    } else {
-      // gemini-3.8-flash
+    } else if (modelId === 'gemini-3.8-flash') {
       return {
         perspective: 'Pragmatic Synthesis & Contract Reconciliation',
         critiques: [
-          'Accepted Opus critique: We will wrap speculative branches in write-ahead validation checkpoints.',
-          'Accepted GPT-OSS critique: Watchdog TTLs of 30s will prevent deadlocks on barriers without complex raft elections.',
+          'Accepted peer critique: We will wrap speculative branches in write-ahead validation checkpoints.',
+          'Accepted watchdog recommendation: Watchdog TTLs of 30s will prevent deadlocks on barriers without complex raft elections.',
         ],
         suggestedAmendments: 'Unify into a streamlined 4-phase execution DAG with embedded invariants.',
         estimatedTokens: 1950,
         thought: `Harmonizing peer critiques into concrete, actionable engineering contracts.`,
+      };
+    } else {
+      // Dynamic custom model critique
+      return {
+        perspective: `${modelCfg.role} Adversarial Review`,
+        critiques: [
+          `Review of peer proposals: Enforce bounded memory buffers and timeout handling for "${goal}".`,
+          `Ensure boundary state remains recoverable under network disconnects or process termination.`,
+        ],
+        suggestedAmendments: `Integrate telemetry checkpoints and verified rollback triggers for ${modelCfg.name}.`,
+        estimatedTokens: modelCfg.defaultEstOutputTokens || 2200,
+        thought: `Auditing peer architecture from ${modelCfg.role} perspective.`,
       };
     }
   } else {
     // Round 3: Consensus & DAG Generation (Synthesized by Lead)
     return {
       perspective: 'Unanimous Council Consensus & Execution DAG',
-      consensusSummary: `The Council has converged on an invariant-verified, backpressure-aware architecture for "${goal}". All 3 model families (Gemini, Claude, GPT) have validated failure modes and concurrency guarantees.${constraintNotice}`,
+      consensusSummary: `The Council has converged on an invariant-verified, backpressure-aware architecture for "${goal}". Deliberation verified failure modes and concurrency guarantees.${constraintNotice}`,
       dag: [
         {
           id: 'phase-1-contracts',
           label: 'Define Invariant Contracts & Schema Boundaries',
           role: 'Architect',
           type: 'milestone',
-          description: `Formulate strict schemas and idempotency tokens for "${goal}". Approved by Claude Opus.`,
+          description: `Formulate strict schemas and idempotency tokens for "${goal}". Approved by Council.`,
           status: 'completed',
         },
         {
@@ -207,7 +237,7 @@ function generateCognitiveContent(modelId, roundIndex, goal, context = {}) {
           label: 'Setup Append-Only WAL & State Checkpoints',
           role: 'SystemsEngineer',
           type: 'task',
-          description: 'Deploy resilient local append-only logging with automatic snapshotting. Recommended by GPT-OSS.',
+          description: 'Deploy resilient local append-only logging with automatic snapshotting.',
           status: 'ready',
         },
         {
@@ -233,7 +263,7 @@ function generateCognitiveContent(modelId, roundIndex, goal, context = {}) {
         { source: 'phase-3-core-implementation', target: 'phase-4-verification-gates', label: 'verify_invariants' },
       ],
       estimatedTokens: 3100,
-      thought: `Consensus finalized. Execution blueprint generated and ready for Gemini 3.8 Flash to execute.`,
+      thought: `Consensus finalized. Execution blueprint generated and ready for execution.`,
     };
   }
 }
@@ -247,6 +277,7 @@ export class CouncilOrchestrator {
     planId,
     rounds = 3,
     strategy = 'halt_before_limit',
+    members = ['gemini-3.8-flash', 'claude-4.6-opus', 'gpt-oss-120b'],
     contextFiles = [],
     constraints = [],
     specialists = {},
@@ -263,13 +294,36 @@ export class CouncilOrchestrator {
     const sessionPlanId = planId || sessionId;
     const startTime = Date.now();
     const deliberationHistory = [];
-    const members = ['gemini-3.8-flash', 'claude-4.6-opus', 'gpt-oss-120b'];
+
+    // Normalize and validate council members
+    let activeMembers = Array.isArray(members) && members.length > 0
+      ? members.map(m => String(m).trim().toLowerCase()).filter(Boolean)
+      : typeof members === 'string' && members.trim()
+        ? members.split(',').map(m => m.trim().toLowerCase()).filter(Boolean)
+        : ['gemini-3.8-flash', 'claude-4.6-opus', 'gpt-oss-120b'];
+    if (activeMembers.length === 0) {
+      activeMembers = ['gemini-3.8-flash', 'claude-4.6-opus', 'gpt-oss-120b'];
+    }
+
+    // Ensure all active members have registered quota and config records
+    for (const mId of activeMembers) {
+      if (!getModelConfig(mId)) {
+        registerCustomModel({
+          id: mId,
+          name: mId.split('-').map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(' '),
+          role: 'Council Specialist',
+          avatar: '🤖',
+        });
+      }
+    }
+    const validatedMembers = activeMembers;
 
     // Read context files
     const loadedFiles = readContextFiles(contextFiles);
     const contextSummary = loadedFiles.map((f) => `[File: ${f.path}]\n${f.content}`).join('\n\n');
 
     // 1. Initialize Topology Plan for visualizer canvas dynamically based on maxRounds
+    const memberNamesList = validatedMembers.map(m => getModelConfig(m)?.name || m).join(', ');
     const initNodes = [
       {
         id: 'council-init',
@@ -277,7 +331,7 @@ export class CouncilOrchestrator {
         type: 'milestone',
         role: 'Orchestrator',
         status: 'in_progress',
-        description: `Verify quota headroom for Gemini Ultra plan before deliberating on "${goal}".`,
+        description: `Verify quota headroom for ${validatedMembers.length} council models before deliberating on "${goal}".`,
       },
     ];
 
@@ -289,7 +343,7 @@ export class CouncilOrchestrator {
           type: 'task',
           role: specialists['round1'] || 'Council',
           status: 'pending',
-          description: 'Gemini 3.8 Flash, Claude 4.6 Opus, and GPT-OSS 120b formulate diverse paradigms.',
+          description: `${memberNamesList} formulate independent diverse proposals.`,
         });
       } else if (r === 2) {
         initNodes.push({
@@ -298,14 +352,14 @@ export class CouncilOrchestrator {
           type: 'task',
           role: specialists['round2'] || 'Council',
           status: 'pending',
-          description: 'Cross-model peer review interrogating assumptions and failure boundaries.',
+          description: 'Cross-model peer review interrogating assumptions, deadlocks, and failure boundaries.',
         });
       } else {
         initNodes.push({
           id: 'council-round-3',
           label: 'Round 3: Unified Consensus & Decomposed DAG Synthesis',
           type: 'decision',
-          role: specialists['round3'] || 'Gemini-Flash-Lead',
+          role: specialists['round3'] || (getModelConfig(validatedMembers[0])?.role || 'LeadArchitect'),
           status: 'pending',
           description: 'Synthesize optimal solution into an actionable DAG plan for execution.',
         });
@@ -319,7 +373,7 @@ export class CouncilOrchestrator {
         type: 'artifact',
         role: 'ExecutionEngine',
         status: 'pending',
-        description: 'Consensus plan handed off to Gemini 3.8 Flash execution engine.',
+        description: `Consensus plan handed off to ${handoffAgentRole} execution engine.`,
       });
     }
 
@@ -344,7 +398,7 @@ export class CouncilOrchestrator {
     await sendToBridge('/api/topology/plan', {
       planId: sessionPlanId,
       title: `🏛️ Council: ${goal.length > 50 ? goal.slice(0, 47) + '...' : goal}`,
-      description: `Recurrent multi-model council deliberation (Gemini 3.8 Flash, Claude 4.6 Opus, GPT-OSS 120b).`,
+      description: `Recurrent multi-model council deliberation (${memberNamesList}).`,
       agentRole: 'CouncilOrchestrator',
       agentId: 'council-orchestrator',
       makeActive: true,
@@ -355,13 +409,13 @@ export class CouncilOrchestrator {
     await appendLog({
       action: 'council_started',
       planId: sessionPlanId,
-      thought: `Initiating multi-model council for: "${goal}". Pre-flight checking Gemini Ultra quota budgets.`,
+      thought: `Initiating multi-model council for: "${goal}". Pre-flight checking quotas for ${validatedMembers.length} members.`,
     });
 
     // 2. Pre-flight quota check for all members
-    for (const memberId of members) {
+    for (const memberId of validatedMembers) {
       const check = budgetTracker.canConsume(memberId, 2500);
-      if (!check.allowed && strategy === 'halt_before_limit') {
+      if (!check.allowed && (strategy === 'halt_before_limit' || strategy === 'pause_for_refresh')) {
         const initNode = initNodes.find(n => n.id === 'council-init');
         if (initNode) initNode.status = 'blocked';
 
@@ -390,7 +444,7 @@ export class CouncilOrchestrator {
       planId: sessionPlanId,
       nodeId: 'council-init',
       status: 'completed',
-      thought: 'All 3 models cleared under Gemini Ultra safety quota (15% reserve preserved).',
+      thought: `All ${validatedMembers.length} council models cleared under quota check (15% reserve preserved).`,
     });
 
     // 3. Deliberation Rounds (Parallel Execution across models)
@@ -418,21 +472,52 @@ export class CouncilOrchestrator {
           deliberationHistory[1].contributions.map(c => `[${c.memberName} (${c.perspective})]:\nCritiques: ${(c.critiques || []).join('; ')}\nAmendments: ${c.suggestedAmendments || 'None'}`).join('\n\n');
       }
 
-      // Execute all 3 models in parallel for this round
-      const modelPromises = members.map(async (memberId) => {
+      // Execute all council models in parallel for this round
+      const modelPromises = validatedMembers.map(async (memberId) => {
         let activeModelId = memberId;
-        const estTokens = memberId === 'claude-4.6-opus' ? 2600 : memberId === 'gpt-oss-120b' ? 2200 : 1900;
+        const memberCfg = getModelConfig(activeModelId);
+        const estTokens = memberCfg?.defaultEstInputTokens || (memberId === 'claude-4.6-opus' ? 2600 : memberId === 'gpt-oss-120b' ? 2200 : 1900);
 
         // Check quota before consumption
-        const quotaCheck = budgetTracker.canConsume(activeModelId, estTokens);
+        let quotaCheck = budgetTracker.canConsume(activeModelId, estTokens);
         if (!quotaCheck.allowed) {
           if (strategy === 'fallback_gemini_flash' && activeModelId !== 'gemini-3.8-flash') {
+            activeModelId = 'gemini-3.8-flash';
+            const surrogateCheck = budgetTracker.canConsume(activeModelId, estTokens);
+            if (!surrogateCheck.allowed) {
+              return {
+                halted: true,
+                message: `Gemini 3.8 Flash surrogate also at safe ceiling: ${surrogateCheck.message}`,
+                ttrSeconds: surrogateCheck.ttrSeconds,
+                memberId,
+              };
+            }
             await appendLog({
               action: 'council_fallback_triggered',
               planId: sessionPlanId,
-              thought: `${MODEL_QUOTA_CONFIG[activeModelId].name} reached safe ceiling. Falling back to Gemini 3.8 Flash surrogate.`,
+              thought: `${getModelConfig(memberId)?.name || memberId} reached safe ceiling. Falling back to Gemini 3.8 Flash surrogate.`,
             });
-            activeModelId = 'gemini-3.8-flash';
+          } else if (strategy === 'pause_for_refresh') {
+            const waitSeconds = quotaCheck.ttrSeconds || 10;
+            if (waitSeconds <= 10) {
+              await new Promise(r => setTimeout(r, waitSeconds * 1000));
+              quotaCheck = budgetTracker.canConsume(activeModelId, estTokens);
+              if (!quotaCheck.allowed) {
+                return {
+                  halted: true,
+                  message: `${getModelConfig(activeModelId)?.name || activeModelId} still throttled after pause. ${quotaCheck.message}`,
+                  ttrSeconds: quotaCheck.ttrSeconds,
+                  memberId,
+                };
+              }
+            } else {
+              return {
+                halted: true,
+                message: `Pause duration (${waitSeconds}s) exceeds automatic pause threshold (10s). ${quotaCheck.message}`,
+                ttrSeconds: waitSeconds,
+                memberId,
+              };
+            }
           } else if (strategy === 'halt_before_limit') {
             return {
               halted: true,
@@ -450,7 +535,7 @@ export class CouncilOrchestrator {
           liveResult = await providerClient.queryModel({
             modelId: activeModelId,
             prompt,
-            systemPrompt: `You are ${MODEL_QUOTA_CONFIG[activeModelId].name} specializing in ${MODEL_QUOTA_CONFIG[activeModelId].role}.`,
+            systemPrompt: `You are ${getModelConfig(activeModelId)?.name || activeModelId} specializing in ${getModelConfig(activeModelId)?.role || 'Architecture'}.`,
           });
         } catch {
           // fallback to cognitive synthesis
@@ -474,12 +559,13 @@ export class CouncilOrchestrator {
           outputTokens,
         });
 
+        const activeCfg = getModelConfig(activeModelId);
         const contribution = {
           memberId: activeModelId,
           originalMemberId: memberId,
-          memberName: MODEL_QUOTA_CONFIG[activeModelId].name,
-          avatar: MODEL_QUOTA_CONFIG[activeModelId].avatar,
-          color: MODEL_QUOTA_CONFIG[activeModelId].color,
+          memberName: activeCfg?.name || activeModelId,
+          avatar: activeCfg?.avatar || '🤖',
+          color: activeCfg?.color || '#6366f1',
           round,
           timestamp: Date.now(),
           tokensUsed: actualTokens,
@@ -556,15 +642,17 @@ export class CouncilOrchestrator {
           totalSessionCostUsd += res.costUsd || 0;
           totalTokensConsumed += res.actualTokens || 0;
 
-          if (isFinalRound && (res.activeModelId === 'gemini-3.8-flash' || !consensusData)) {
-            consensusData = res.content?.dag ? res.content : generateCognitiveContent('gemini-3.8-flash', 3, goal, { constraints, contextSummary });
+          if (isFinalRound && (res.activeModelId === validatedMembers[0] || !consensusData)) {
+            const baseContent = res.content?.dag ? res.content : generateCognitiveContent(validatedMembers[0], 3, goal, { constraints, contextSummary });
+            const liveSummary = res.contribution?.consensusSummary;
+            consensusData = liveSummary ? { ...baseContent, consensusSummary: liveSummary } : baseContent;
           }
         }
       }
 
       // Ensure consensusData exists after final round
       if (isFinalRound && (!consensusData || !consensusData.dag)) {
-        consensusData = generateCognitiveContent('gemini-3.8-flash', 3, goal, { constraints, contextSummary });
+        consensusData = generateCognitiveContent(validatedMembers[0] || 'gemini-3.8-flash', 3, goal, { constraints, contextSummary });
       }
 
       // Stream summary thought to round node
@@ -589,13 +677,13 @@ export class CouncilOrchestrator {
         planId: sessionPlanId,
         nodeId: roundNodeId,
         status: 'completed',
-        thought: `Round ${round} completed concurrently with contributions from all 3 model families.`,
+        thought: `Round ${round} completed concurrently with contributions from all ${validatedMembers.length} council models.`,
       });
     }
 
     // Ensure fallback consensus if loop broke early
     if (!consensusData || !consensusData.dag) {
-      consensusData = generateCognitiveContent('gemini-3.8-flash', 3, goal, { constraints, contextSummary });
+      consensusData = generateCognitiveContent(validatedMembers[0] || 'gemini-3.8-flash', 3, goal, { constraints, contextSummary });
     }
 
     // 4. Automated Multi-Agent Plan Handoff
@@ -667,6 +755,7 @@ export class CouncilOrchestrator {
       contextFiles: loadedFiles.map((f) => f.path),
       constraints,
       specialists,
+      members: validatedMembers,
       deliberationHistory,
       consensus: consensusData,
       totalTokensUsed: totalTokensConsumed,
@@ -693,6 +782,7 @@ export class CouncilOrchestrator {
         sessionId,
         goal,
         rounds,
+        members: validatedMembers,
         totalTokens: totalTokensConsumed,
         estimatedCostUsd: sessionRecord.estimatedCostUsd,
         adrPath: adrReport?.filePath,
@@ -724,11 +814,18 @@ export class CouncilOrchestrator {
 
     const dateStr = new Date(session.timestamp || Date.now()).toISOString().split('T')[0];
 
+    const memberLabels = (session.members || ['gemini-3.8-flash', 'claude-4.6-opus', 'gpt-oss-120b'])
+      .map(mId => {
+        const cfg = getModelConfig(mId);
+        return cfg ? `${cfg.name} (${cfg.avatar} ${cfg.role})` : mId;
+      })
+      .join(', ');
+
     let md = `# ADR-${nextNum}: ${session.goal}\n\n`;
     md += `* **Status**: Accepted (Synthesized by Multi-Model Council)\n`;
     md += `* **Date**: ${dateStr}\n`;
     md += `* **Plan ID**: \`${session.planId || 'council-plan'}\`\n`;
-    md += `* **Council Members**: Gemini 3.8 Flash (⚡ Lead), Claude 4.6 Opus (🧠 Invariant Critic), GPT-OSS 120b (🌐 Robustness Auditor)\n`;
+    md += `* **Council Members**: ${memberLabels}\n`;
     md += `* **Estimated Deliberation Cost**: \$${session.estimatedCostUsd?.toFixed(4) || '0.0000'} (${session.totalTokensUsed?.toLocaleString() || 0} tokens)\n\n`;
 
     md += `## Context & Problem Statement\n`;
@@ -825,10 +922,20 @@ export class CouncilOrchestrator {
   listCouncilSessions(limit = 10) {
     ensureDir(COUNCILS_DIR);
     try {
-      const files = fs.readdirSync(COUNCILS_DIR).filter((f) => f.endsWith('.json'));
-      const sessions = [];
+      const allFiles = fs.readdirSync(COUNCILS_DIR).filter((f) => f.endsWith('.json'));
+      // Sort by file mtime descending to read the most recent files first
+      const fileStats = allFiles.map(file => {
+        try {
+          return { file, mtime: fs.statSync(path.join(COUNCILS_DIR, file)).mtimeMs };
+        } catch {
+          return { file, mtime: 0 };
+        }
+      });
+      fileStats.sort((a, b) => b.mtime - a.mtime);
+      const targetFiles = fileStats.slice(0, Math.max(limit * 2, 20)).map(s => s.file);
 
-      for (const file of files) {
+      const sessions = [];
+      for (const file of targetFiles) {
         try {
           const raw = fs.readFileSync(path.join(COUNCILS_DIR, file), 'utf8');
           const data = JSON.parse(raw);
@@ -861,8 +968,10 @@ export class CouncilOrchestrator {
    * Retrieves a specific council deliberation session by ID
    */
   getCouncilSession(sessionId) {
+    if (!sessionId) return null;
+    const cleanId = String(sessionId).trim().replace(/\.json$/, '');
     ensureDir(COUNCILS_DIR);
-    const directPath = path.join(COUNCILS_DIR, `${sessionId}.json`);
+    const directPath = path.join(COUNCILS_DIR, `${cleanId}.json`);
     if (fs.existsSync(directPath)) {
       try {
         return JSON.parse(fs.readFileSync(directPath, 'utf8'));
@@ -876,7 +985,7 @@ export class CouncilOrchestrator {
     for (const file of files) {
       try {
         const data = JSON.parse(fs.readFileSync(path.join(COUNCILS_DIR, file), 'utf8'));
-        if (data.id === sessionId || data.planId === sessionId) {
+        if (data.id === cleanId || data.planId === cleanId) {
           return data;
         }
       } catch {

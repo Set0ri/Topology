@@ -16,7 +16,7 @@ import path from 'path';
 import http from 'http';
 import { acquireLock, releaseLock, appendLog, readRecentLogs, getActiveLocks, syncGitLog, LOG_FILE, TOPOLOGY_DIR } from '../mcp-server/gitLock.js';
 import { ensureBridgeRunning, getServerStatus, stopServer } from '../mcp-server/serverSupervisor.js';
-import { budgetTracker } from '../mcp-server/budgetTracker.js';
+import { budgetTracker, getAllModelConfigs, registerCustomModel, unregisterCustomModel } from '../mcp-server/budgetTracker.js';
 import { councilOrchestrator } from '../mcp-server/councilOrchestrator.js';
 
 function postToBridge(endpoint, payload) {
@@ -53,13 +53,20 @@ function parseArgs(args) {
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg.startsWith('--')) {
-      const key = arg.slice(2);
-      const next = args[i + 1];
-      if (next && !next.startsWith('--')) {
-        result[key] = next;
-        i++;
+      const eqIdx = arg.indexOf('=');
+      if (eqIdx !== -1) {
+        const key = arg.slice(2, eqIdx);
+        const val = arg.slice(eqIdx + 1);
+        result[key] = val;
       } else {
-        result[key] = true;
+        const key = arg.slice(2);
+        const next = args[i + 1];
+        if (next && !next.startsWith('--')) {
+          result[key] = next;
+          i++;
+        } else {
+          result[key] = true;
+        }
       }
     } else {
       result._.push(arg);
@@ -580,12 +587,14 @@ async function main() {
       const rounds = parseInt(args.rounds || '3', 10);
       const strategy = args.strategy || 'halt_before_limit';
       const planId = args.planId || args.plan || null;
+      const members = args.models ? String(args.models).split(',').map(s => s.trim()) : (args.members ? String(args.members).split(',').map(s => s.trim()) : undefined);
       const contextFiles = args.context ? String(args.context).split(',').map(s => s.trim()) : (args.contextFiles ? String(args.contextFiles).split(',').map(s => s.trim()) : []);
       const constraints = args.constraints ? String(args.constraints).split(',').map(s => s.trim()) : [];
       const saveAdr = args.saveAdr !== 'false' && args.adr !== 'false';
 
       console.log(`🏛️ [Council] Convening multi-model council for: "${goal}"`);
       console.log(`   Rounds: ${rounds} | Strategy: ${strategy} | Save ADR: ${saveAdr}`);
+      if (members && members.length > 0) console.log(`   Members: ${members.join(', ')}`);
       if (contextFiles.length > 0) console.log(`   Context Files: ${contextFiles.join(', ')}`);
       if (constraints.length > 0) console.log(`   Invariants: ${constraints.join('; ')}`);
 
@@ -594,6 +603,7 @@ async function main() {
         planId,
         rounds,
         strategy,
+        members,
         contextFiles,
         constraints,
         saveAdr,
@@ -618,6 +628,77 @@ async function main() {
             console.log(`   ${i + 1}. [${t.role}] ${t.label}: ${t.description}`);
           });
         }
+      }
+      break;
+    }
+
+    case 'models':
+    case 'list-models': {
+      const all = getAllModelConfigs();
+      console.log(`\n🏛️ Registered Topology Council Models (${Object.keys(all).length}):\n`);
+      for (const [id, m] of Object.entries(all)) {
+        console.log(`  ${m.avatar || '🤖'} ${m.name} [${id}]`);
+        console.log(`     Family:   ${m.family}`);
+        console.log(`     Provider: ${m.provider || 'default'}${m.endpoint ? ` (${m.endpoint})` : ''}`);
+        console.log(`     Role:     ${m.role}`);
+        console.log(`     Limits:   RPM: ${m.limits?.rpm} | TPM: ${m.limits?.tpm} | Daily: ${m.limits?.dailyTokens}`);
+        console.log(`     Rates:    $${m.ratesPerMillion?.inputUsd}/M in | $${m.ratesPerMillion?.outputUsd}/M out\n`);
+      }
+      break;
+    }
+
+    case 'add-model':
+    case 'register-model': {
+      const id = args.id || args._[1];
+      if (!id) {
+        console.error('❌ Error: --id is required. E.g.: node scripts/topology-log.mjs add-model --id deepseek-v3 --name "DeepSeek V3" --provider openai_compatible --endpoint "https://api.deepseek.com/v1" --apiKeyEnv DEEPSEEK_API_KEY');
+        process.exit(1);
+      }
+      const model = registerCustomModel({
+        id,
+        name: args.name || id,
+        family: args.family || 'Custom LLM',
+        avatar: args.avatar || '🤖',
+        color: args.color || '#6366f1',
+        role: args.role || 'Council Specialist',
+        provider: args.provider || 'openai_compatible',
+        endpoint: args.endpoint || args.baseUrl || '',
+        apiKeyEnv: args.apiKeyEnv || null,
+        apiKey: args.apiKey || null,
+        modelName: args.modelName || args.model || id,
+        limits: {
+          rpm: args.rpm ? parseInt(args.rpm, 10) : 60,
+          tpm: args.tpm ? parseInt(args.tpm, 10) : 300000,
+          dailyTokens: args.dailyTokens ? parseInt(args.dailyTokens, 10) : 5000000,
+        },
+        ratesPerMillion: {
+          inputUsd: args.rateIn ? parseFloat(args.rateIn) : 0.20,
+          outputUsd: args.rateOut ? parseFloat(args.rateOut) : 0.80,
+        },
+      });
+      console.log(`✅ [Topology] Registered custom council model "${model.name}" [${model.id}].`);
+      console.log(`   Provider: ${model.provider} | Endpoint: ${model.endpoint || 'default'}`);
+      console.log(`   Config saved to .topology/models.json.`);
+      break;
+    }
+
+    case 'remove-model':
+    case 'unregister-model': {
+      const id = args.id || args._[1];
+      if (!id) {
+        console.error('❌ Error: --id is required. E.g.: node scripts/topology-log.mjs remove-model --id custom-model');
+        process.exit(1);
+      }
+      try {
+        const removed = unregisterCustomModel(id);
+        if (removed) {
+          console.log(`✅ [Topology] Unregistered custom council model "${id}".`);
+        } else {
+          console.warn(`⚠️ [Topology] Model "${id}" was not found in registered custom models.`);
+        }
+      } catch (err) {
+        console.error(`❌ [Topology] Error: ${err.message}`);
+        process.exit(1);
       }
       break;
     }
@@ -681,14 +762,27 @@ async function main() {
     case 'loop': {
       const planId = args.plan || args.planId || args._[1];
       if (!planId) {
-        console.error('❌ Error: --plan is required. E.g.: node scripts/topology-log.mjs loop --plan distributed-engine --loop 1 --stage observe --thought "Scanning codebase"');
+        console.error('❌ Error: --plan is required. E.g.: node scripts/topology-log.mjs loop --plan distributed-engine --loop 1 --max-loops 3 --stage observe --thought "Scanning codebase"');
         process.exit(1);
       }
-      const loopNumber = parseInt(args.loop || args.loopNumber || '1', 10);
-      const totalLoops = args.totalLoops ? parseInt(args.totalLoops, 10) : undefined;
+
+      // Strict parameter for number of loops (clamped 1-10)
+      const rawMaxLoops = args.maxLoops || args['max-loops'] || args.maxloops || args.totalLoops || args.total || '3';
+      const maxLoops = Math.max(1, Math.min(parseInt(rawMaxLoops, 10), 10));
+      let loopNumber = parseInt(args.loop || args.loopNumber || '1', 10);
+      let status = args.status || 'in_progress';
       const stage = args.stage || args._[2] || 'observe';
+
+      // Strict capping: if loop exceeds maxLoops, clamp and declare converged
+      if (loopNumber > maxLoops) {
+        console.warn(`⚠️ [OODA Loop] Requested Loop ${loopNumber} exceeds strict maxLoops parameter (${maxLoops}). Loop capped and declared CONVERGED.`);
+        loopNumber = maxLoops;
+        status = 'converged';
+      } else if (stage === 'update' && loopNumber >= maxLoops) {
+        status = 'converged';
+      }
+
       const thought = args.thought || null;
-      const status = args.status || 'in_progress';
       const observations = args.observations ? String(args.observations).split(';').map(s => s.trim()) : [];
       const understandings = args.understandings ? String(args.understandings).split(';').map(s => s.trim()) : [];
       const refinements = args.refinements ? String(args.refinements).split(';').map(s => s.trim()) : [];
@@ -746,7 +840,7 @@ async function main() {
             planId,
             totalLoopsCompleted: 0,
             currentLoop: loopNumber,
-            targetMaxLoops: totalLoops,
+            targetMaxLoops: maxLoops,
             activeStage: stage,
             isConverged: status === 'converged',
             history: [],
@@ -757,7 +851,7 @@ async function main() {
           allLoops[planId].history = allLoops[planId].iteration ? [allLoops[planId].iteration] : [];
         }
         allLoops[planId].currentLoop = loopNumber;
-        if (totalLoops) allLoops[planId].targetMaxLoops = totalLoops;
+        allLoops[planId].targetMaxLoops = maxLoops;
         allLoops[planId].activeStage = stage;
         allLoops[planId].isConverged = status === 'converged' || allLoops[planId].isConverged;
         allLoops[planId].updatedAt = Date.now();
@@ -794,11 +888,11 @@ async function main() {
         planId,
         status,
         thought: thought || `[OODA Loop ${loopNumber} - ${stageLabel}] ${status}`,
-        payload: { loopNumber, totalLoops, stage },
+        payload: { loopNumber, maxLoops, stage },
       });
 
       console.log(`\n🔄 [OODA Loop] Telemetry emitted for "${planId}":`);
-      console.log(`   Loop Iteration: Loop ${loopNumber}${totalLoops ? ` of ${totalLoops}` : ''}`);
+      console.log(`   Loop Iteration: Loop ${loopNumber} of ${maxLoops} (Strict Cap)`);
       console.log(`   Active Stage:   ${stageLabel}`);
       console.log(`   Status:         ${status.toUpperCase()}`);
       if (thought) console.log(`   Thought:        ${thought}`);
@@ -823,7 +917,7 @@ async function main() {
         const isConverged = d.isConverged || d.iteration?.status === 'converged';
 
         console.log(`\n🔄 OODA Loop Telemetry: "${planId}"`);
-        console.log(`   Current Loop: Loop ${curLoop}${totalLoopsTarget ? ` of ${totalLoopsTarget}` : ''}`);
+        console.log(`   Current Loop: Loop ${curLoop}${totalLoopsTarget ? ` of ${totalLoopsTarget} (Strict Cap)` : ''}`);
         console.log(`   Completed Loops: ${completedLoops}`);
         console.log(`   Active Stage: ${actStage}`);
         console.log(`   Convergence: ${isConverged ? 'CONVERGED ✅' : 'ITERATING 🔄'}`);
@@ -861,11 +955,14 @@ Usage:
   node scripts/topology-log.mjs complete-node   --nodeId <id> [--summary <text>] [--artifacts <files>] Mark node completed & advance
   node scripts/topology-log.mjs complete-plan   [--plan <planId>] [--summary <text>] Mark entire plan completed
   node scripts/topology-log.mjs status          --status <active|paused|completed|archived|abandoned> [--reason <text>]
-  node scripts/topology-log.mjs council         --goal <prompt> [--rounds 3] [--context <files>] [--constraints <list>] Run council
+  node scripts/topology-log.mjs council         --goal <prompt> [--models <id1,id2>] [--rounds 3] [--context <files>] [--constraints <list>] Run council
+  node scripts/topology-log.mjs models          List all registered council models and quota limits
+  node scripts/topology-log.mjs add-model       --id <id> --name <name> --provider <provider> [--endpoint <url>] Register custom model
+  node scripts/topology-log.mjs remove-model    --id <id> Unregister custom model from registry
   node scripts/topology-log.mjs sessions        List recorded council deliberation sessions
   node scripts/topology-log.mjs adr             [--session <id>] [--save] Export consensus ADR Markdown
-  node scripts/topology-log.mjs budget          Display live Gemini Ultra model quotas, usage, costs, and TTR countdowns
-  node scripts/topology-log.mjs loop            --plan <id> --loop <N> --stage <stage> [--thought <text>] Emit OODA telemetry
+  node scripts/topology-log.mjs budget          Display live model quotas, usage, costs, and TTR countdowns
+  node scripts/topology-log.mjs loop            --plan <id> --loop <N> --max-loops <M> --stage <stage> [--thought <text>] Emit OODA telemetry
   node scripts/topology-log.mjs loops           [--plan <id>] Inspect OODA loop iterations and history
   node scripts/topology-log.mjs log             --action <action> [--plan <planId>] [--nodeId <id>] [--agent <name>] [--thought <text>] [--status <status>]
   node scripts/topology-log.mjs lock            --nodeId <id> [--agent <name>] [--ttl <seconds>]

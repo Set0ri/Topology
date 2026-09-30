@@ -397,7 +397,7 @@ export const MultiAgentCockpit: React.FC = () => {
                     </div>
 
                     {/* Footer: Node Assignments & Quick Filter */}
-                    <div className="flex items-center justify-between pt-2 border-t border-black/5 dark:border-white/5 text-[11px]">
+                    <div className="flex items-center justify-between pt-2 border-none text-[11px]">
                       <span className="text-[#5f6368] dark:text-[#94a3b8]">
                         Assigned: <strong className="text-[#202124] dark:text-[#f8fafc]">{assignedCount} nodes</strong>
                       </span>

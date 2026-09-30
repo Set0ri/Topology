@@ -6,12 +6,7 @@
     "properties": {
       "modelId": {
         "type": "string",
-        "enum": [
-          "gemini-3.8-flash",
-          "claude-4.6-opus",
-          "gpt-oss-120b"
-        ],
-        "description": "Filter report to a specific model ID"
+        "description": "Filter report to a specific model ID (e.g. gemini-3.8-flash, claude-4.6-opus, gpt-oss-120b, or custom registered models)"
       },
       "reset": {
         "type": "boolean",

@@ -337,6 +337,7 @@ interface TopologyStore {
   emitLoopTelemetry: (params: {
     planId: string;
     loopNumber?: number;
+    maxLoops?: number;
     totalLoops?: number;
     stage: OodaStage;
     stageName?: string;
@@ -359,7 +360,7 @@ interface TopologyStore {
     };
     status?: 'in_progress' | 'completed' | 'converged' | 'repeating';
   }) => Promise<OodaLoopTelemetry | null>;
-  advanceOodaStage: (planId?: string) => Promise<void>;
+  advanceOodaStage: (planId?: string, maxLoopsParam?: number) => Promise<void>;
 }
 
 export function ensureSequentialEdges(nodes: TopologyNode[], edges?: TopologyEdge[]): TopologyEdge[] {
@@ -3500,19 +3501,30 @@ export const useTopologyStore = create<TopologyStore>((set, get) => {
         timestamp: Date.now(),
       };
 
-      // Construct updated telemetry object
+      // Construct updated telemetry object with strict loop limit enforcement
+      const strictMaxLoops = Math.max(1, Math.min(10, params.maxLoops || params.totalLoops || prevTelemetry?.targetMaxLoops || 3));
+      let currentLoop = params.loopNumber || prevTelemetry?.currentLoop || 1;
+      let isConverged = params.status === 'converged' || (prevTelemetry?.isConverged ?? false);
+
+      if (currentLoop > strictMaxLoops) {
+        currentLoop = strictMaxLoops;
+        isConverged = true;
+      } else if (params.stage === 'update' && currentLoop >= strictMaxLoops) {
+        isConverged = true;
+      }
+
       const updatedTelemetry: OodaLoopTelemetry = {
         planId,
         totalLoopsCompleted: prevTelemetry?.totalLoopsCompleted || 0,
-        currentLoop: params.loopNumber || prevTelemetry?.currentLoop || 1,
-        targetMaxLoops: params.totalLoops || prevTelemetry?.targetMaxLoops || 3,
+        currentLoop,
+        targetMaxLoops: strictMaxLoops,
         activeStage: params.stage,
-        isConverged: params.status === 'converged' || (prevTelemetry?.isConverged ?? false),
+        isConverged,
         history: [...(prevTelemetry?.history || []), iterationRecord],
         updatedAt: Date.now(),
       };
 
-      if (params.stage === 'update' && (params.status === 'completed' || params.status === 'converged')) {
+      if (params.stage === 'update' && (params.status === 'completed' || isConverged)) {
         updatedTelemetry.totalLoopsCompleted = Math.max(updatedTelemetry.totalLoopsCompleted, updatedTelemetry.currentLoop);
       }
 
@@ -3559,7 +3571,7 @@ export const useTopologyStore = create<TopologyStore>((set, get) => {
       return updatedTelemetry;
     },
 
-    advanceOodaStage: async (planId?: string) => {
+    advanceOodaStage: async (planId?: string, maxLoopsParam?: number) => {
       const targetPlanId = planId || get().activePlanId;
       const targetPlan = get().plans[targetPlanId];
       const activeTelemetry = get().activeLoopTelemetry || targetPlan?.oodaLoop;
@@ -3576,6 +3588,12 @@ export const useTopologyStore = create<TopologyStore>((set, get) => {
         'update',
       ];
 
+      const strictMaxLoops = Math.max(1, Math.min(10, maxLoopsParam || activeTelemetry?.targetMaxLoops || 3));
+
+      if (activeTelemetry?.isConverged) {
+        return;
+      }
+
       // If no telemetry has run yet for this plan, start at stage 0 ('observe')
       let nextStage: OodaStage;
       let nextLoopNumber = 1;
@@ -3587,23 +3605,36 @@ export const useTopologyStore = create<TopologyStore>((set, get) => {
         nextIdx = 0;
       } else {
         const curIdx = OODA_STAGE_ORDER.indexOf(activeTelemetry.activeStage);
-        nextIdx = (curIdx + 1) % OODA_STAGE_ORDER.length;
-        nextLoopNumber = activeTelemetry.currentLoop || 1;
+        const currentLoop = activeTelemetry.currentLoop || 1;
+
         if (curIdx === OODA_STAGE_ORDER.length - 1) {
-          nextLoopNumber += 1;
+          // Finished 'update' stage
+          if (currentLoop >= strictMaxLoops) {
+            // Strictly capped: reached maximum allowed loops.
+            nextLoopNumber = strictMaxLoops;
+            nextIdx = curIdx;
+            nextStage = 'update';
+          } else {
+            nextLoopNumber = currentLoop + 1;
+            nextIdx = 0;
+            nextStage = OODA_STAGE_ORDER[0];
+          }
+        } else {
+          nextIdx = curIdx + 1;
+          nextLoopNumber = Math.min(strictMaxLoops, currentLoop);
+          nextStage = OODA_STAGE_ORDER[nextIdx];
         }
-        nextStage = OODA_STAGE_ORDER[nextIdx];
       }
 
       const consensusScore = Math.min(100, Math.round(82 + (nextLoopNumber * 5) + (nextIdx * 2)));
-      const isConverged = nextStage === 'update' && (consensusScore >= 85 || nextLoopNumber >= 3);
+      const isConverged = (nextStage === 'update' && (consensusScore >= 85 || nextLoopNumber >= strictMaxLoops));
 
       await get().emitLoopTelemetry({
         planId: targetPlanId,
-        loopNumber: nextLoopNumber,
-        totalLoops: 3,
+        loopNumber: Math.min(nextLoopNumber, strictMaxLoops),
+        totalLoops: strictMaxLoops,
         stage: nextStage,
-        thought: `[OODA Loop ${nextLoopNumber} - ${nextStage}] Deliberating architectural convergence (${consensusScore}%).`,
+        thought: `[OODA Loop ${Math.min(nextLoopNumber, strictMaxLoops)}/${strictMaxLoops} - ${nextStage}] Deliberating architectural convergence (${consensusScore}%).`,
         status: isConverged ? 'converged' : 'in_progress',
         metrics: {
           consensusScorePercent: consensusScore,

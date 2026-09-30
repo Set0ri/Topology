@@ -1817,5 +1817,400 @@ graph TD
    - *Issue*: Starting fresh OODA loop cycles skipped stage 0 (`observe`) and jumped to `understand`, and UI froze if bridge connection was offline.
    - *Fix*: Initial cycle now starts at `observe` (stage 0), and `emitLoopTelemetry` optimistically mutates the local Zustand store immediately before syncing in the background with fail-open safety.
 
+---
 
+## 41. Dynamic Council Model Extensibility & Strict Multi-Loop OODA Governance
+
+### 1. Extensible Multi-Model Architecture & Registry
+Topology enables arbitrary model registration across disparate providers without code modifications:
+- **Registry Persistence**: Custom models are persisted to `.topology/models.json` (with local fallback to `topology.models.json` or in-memory dictionary).
+- **Supported Provider Protocols**:
+  - `gemini`: Native Google Generative Language API endpoint and streaming schema (`generateContent`).
+  - `anthropic`: Messages API protocol (`/v1/messages`).
+  - `openai` / `openai_compatible` / `ollama`: Universal OpenAI `/chat/completions` protocol compatible with DeepSeek, Mistral, Local Ollama, LM Studio, vLLM, and Groq.
+- **Granular Quota & Budget Tracking**:
+  - Independent tracking of Requests Per Minute (RPM), Tokens Per Minute (TPM), Requests Per Day (RPD), and Tokens Per Day (TPD).
+  - Rolling 60-second sliding windows with millisecond-precision Time-To-Refresh (TTR) countdowns.
+  - Custom input/output financial USD rates per 1k tokens.
+- **Cognitive Domain Fallback**: If external API keys or networks are unavailable, custom models gracefully synthesize high-fidelity structural contributions via domain-specialized prompts and invariants.
+
+```mermaid
+flowchart TD
+    UserCLI["CLI: node scripts/topology-log.mjs add-model"] -->|Register| Storage[".topology/models.json"]
+    MCPTool["MCP: topology_register_model"] -->|Register| Storage
+    Storage --> Registry["budgetTracker.js (MODEL_QUOTA_CONFIG)"]
+    Registry --> Council["councilOrchestrator.js (spawnCouncil)"]
+    Council --> Router["providerClient.js (queryModel)"]
+    Router -->|gemini| GeminiAPI["Google Gemini API"]
+    Router -->|anthropic| AnthropicAPI["Anthropic Messages API"]
+    Router -->|openai_compatible| CustomAPI["DeepSeek / Ollama / OpenAI / vLLM"]
+    Router -->|offline fallback| DomainSynth["Deterministic Cognitive Synthesis"]
+```
+
+### 2. Strict Parameter for Number of Loops (`maxLoops`)
+Unbounded or runaway iteration loops can drain API quotas and create deadlocks. Topology enforces strict loop governance:
+- **Bounded Range**: Parameter `maxLoops` is strictly clamped between `1` and `10` across MCP schemas, CLI flags, store actions, and UI controls (default: 3).
+- **Proactive Cap & Forced Convergence**:
+  - If telemetry emits a `loopNumber > maxLoops`, Topology logs an informational warning notice (`⚠️ [Strict Loop Parameter Notice]`), clamps `loopNumber` to `maxLoops`, and forces `status: "converged"`.
+  - When an iteration completes the final stage (`update`) and `loopNumber >= maxLoops`, it automatically marks the cycle `status: "converged"`, halting recursive execution.
+- **Interactive UI Stepper Synchronization**:
+  - `OodaLoopTelemetryModal.tsx` provides a sleek, borderless selector pill for `Max Loops` (`1, 2, 3, 4, 5, 8, 10`).
+  - `advanceOodaStage(planId, maxLoops)` and `handleAutoRunLoop` enforce the configured loop ceiling and stop advancing upon convergence.
+
+---
+
+## 42. Comprehensive Architectural UML & Functional Dataflow Diagrams
+
+This section provides exhaustive UML sequence diagrams, class diagrams, state machines, and dataflow pipelines detailing how each core system operates from external trigger (MCP / CLI / UI) through validation, state mutation, and visualizer rendering.
+
+### 1. Sequence Diagram: Multi-Model Deliberation Council Lifecycle
+
+This sequence diagram illustrates the complete execution dataflow when convening the multi-model council (`gemini-3.8-flash`, `claude-4.6-opus`, `gpt-oss-120b`, or custom models) across pre-flight quota checks, concurrent multi-provider queries, adversarial peer review, consensus formation, ADR generation, and visualizer DAG handoff.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Caller as Agent / CLI / User
+    participant MCP as MCP Server / CLI (index.js / topology-log.mjs)
+    participant Council as CouncilOrchestrator (councilOrchestrator.js)
+    participant Budget as BudgetTracker (budgetTracker.js)
+    participant Provider as ProviderClient (providerClient.js)
+    participant Bridge as Visualizer Bridge (localhost:5173)
+    participant Store as Zustand Store (useTopologyStore.ts)
+    participant Disk as Local Storage (.topology/ & docs/adr/)
+
+    Caller->>MCP: topology_spawn_council(goal, members, rounds, strategy)
+    MCP->>Council: spawnCouncil({ goal, members, rounds, strategy, contextFiles })
+    
+    activate Council
+    Council->>Council: validateMembers & normalize (load custom models)
+    Council->>Bridge: POST /api/topology/plan (Initialize deliberation nodes & edges)
+    Bridge-->>Council: 200 OK (or fail-open fallback cached to .topology/)
+
+    Note over Council,Budget: Phase 1: Pre-Flight Safety Quota Audit
+    loop For each council member
+        Council->>Budget: canConsume(modelId, estimatedTokens: 2500)
+        Budget->>Budget: prune(now) & check sliding 60s RPM / TPM & Daily vs 85% ceiling
+        alt Safe Headroom Exists (Usage < 85%)
+            Budget-->>Council: { allowed: true, reason: "OK" }
+        else Safety Limit Reached (Usage >= 85%)
+            Budget-->>Council: { allowed: false, reason: "RPM_SAFETY_LIMIT_REACHED", ttrSeconds }
+            Council-->>MCP: Halt with SAFETY_STOP notice (15% reserve preserved)
+            MCP-->>Caller: 🛑 Interrupted (TTR countdown)
+        end
+    end
+
+    Note over Council,Provider: Phase 2: Concurrent Multi-Model Deliberation Rounds
+    loop Round r = 1 to maxRounds (1: Ideation, 2: Critique, 3: Consensus)
+        Council->>Bridge: POST /api/topology/node (round status: "in_progress")
+        
+        par Concurrent Queries across Models
+            Council->>Provider: queryModel({ modelId: "gemini-3.8-flash", prompt, systemPrompt })
+            alt Live API Key Present & Online
+                Provider->>Provider: postHttps(generativelanguage.googleapis.com)
+                Provider-->>Council: { usedLiveApi: true, text, tokensUsed, costUsd }
+            else Missing Key / Offline / Timeout
+                Provider-->>Council: { usedLiveApi: false, reason: "NO_API_KEY" }
+                Council->>Council: generateCognitiveContent(modelId, round, goal)
+            end
+        and
+            Council->>Provider: queryModel({ modelId: "claude-4.6-opus", prompt, systemPrompt })
+            alt Live API Key Present
+                Provider->>Provider: postHttps(api.anthropic.com/v1/messages)
+                Provider-->>Council: { usedLiveApi: true, text, tokensUsed, costUsd }
+            else Offline / Fallback
+                Council->>Council: generateCognitiveContent(modelId, round, goal)
+            end
+        and
+            Council->>Provider: queryModel({ modelId: "gpt-oss-120b", prompt, systemPrompt })
+            alt Live API Key / Local Endpoint
+                Provider->>Provider: postHttps(endpoint/chat/completions)
+                Provider-->>Council: { usedLiveApi: true, text, tokensUsed, costUsd }
+            else Fallback
+                Council->>Council: generateCognitiveContent(modelId, round, goal)
+            end
+        end
+
+        Council->>Budget: recordConsumption(modelId, tokensUsed, options)
+        Budget->>Disk: Persist updated council_budget.json
+        Council->>Bridge: POST /api/topology/node (round status: "completed", thought)
+    end
+
+    Note over Council,Disk: Phase 3: Consensus Synthesis, ADR & DAG Handoff
+    Council->>Council: Synthesize consensus DAG tasks & causal edges
+    Council->>Council: generateAdrMarkdown(sessionRecord)
+    Council->>Disk: Write docs/adr/ADR-XXXX-<slug>.md & .topology/councils/<id>.json
+    Council->>Disk: appendLog({ action: "council_consensus_reached" })
+
+    opt handoffToPlan = true
+        Council->>Bridge: POST /api/topology/plan (Merged council + execution nodes)
+        Bridge->>Store: upsertPlan & makeActive (Task 1 set to "ready")
+    end
+
+    Council-->>MCP: { success: true, sessionId, consensus, adr, budgetReport }
+    deactivate Council
+    MCP-->>Caller: 🏛️ Formatted Markdown Summary + Ready DAG Blueprint
+```
+
+---
+
+### 2. Sequence Diagram: 9-Stage OODA Iteration Engine with Strict Governance
+
+This sequence diagram depicts the 9-stage OODA iteration loop with strict parameter capping (`maxLoops` clamped 1-10), optimistic store reactivity, and automatic termination upon convergence.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Agent as Autonomous Agent / Operator
+    participant Tool as MCP / Store (topology_emit_loop_telemetry / advanceOodaStage)
+    participant Validator as Strict Governance & Loop Clamper
+    participant Store as useTopologyStore (Zustand)
+    participant Bridge as Bridge HTTP Server (:5173)
+    participant Disk as Local WAL (.topology/ooda_loops.json)
+    participant UI as OodaLoopTelemetryModal.tsx (UI)
+
+    Agent->>Tool: emitLoopTelemetry({ planId, loopNumber, maxLoops, stage, thought, ... })
+    
+    activate Tool
+    Tool->>Validator: Validate parameters & clamp limits
+    Note over Validator: effectiveMaxLoops = clamp(maxLoops, 1, 10)<br/>if (loopNumber > effectiveMaxLoops) cap & force converged
+    Validator-->>Tool: { loopNumber, effectiveMaxLoops, status: converged | in_progress }
+
+    Note over Tool,Store: Optimistic Local State Update (Instant UI Reactivity)
+    Tool->>Store: Mutate activeLoopTelemetry & plans[planId].oodaLoop
+    Store->>UI: Re-render Modal: Active Stage Icon, Visual Stepper & Member Votes
+
+    Note over Tool,Disk: Disk WAL & Background SSE Synchronization
+    Tool->>Disk: Read & Update .topology/ooda_loops.json & plans.json
+    Tool->>Disk: appendLog({ action: "loop_telemetry", stage, status })
+    
+    Tool->>Bridge: POST /api/topology/loop-telemetry (async fail-open)
+    Bridge-->>Tool: 200 OK (or cache fallback)
+
+    alt Stage == "update" AND (status == "converged" OR loopNumber >= effectiveMaxLoops)
+        Tool->>Store: Set isConverged = true (halt automatic re-runs)
+        Tool-->>Agent: 🎉 CONVERGED: Architectural synthesis finalized.
+    else Iteration In Progress
+        Tool-->>Agent: 🔄 Stage recorded (Stage i/9 in Loop N/M)
+    end
+    deactivate Tool
+```
+
+---
+
+### 3. Class & Architecture UML Diagram: Models, Routing & Budget Tracker
+
+This class diagram defines the object-oriented structure, interfaces, and relationships among the model registry, provider transport adapters, budget tracking engine, and council orchestrator.
+
+```mermaid
+classDiagram
+    class ModelQuotaConfig {
+        +string id
+        +string name
+        +string family
+        +string avatar
+        +string color
+        +string role
+        +string provider
+        +string endpoint
+        +string apiKeyEnv
+        +string apiKey
+        +string modelName
+        +Limits limits
+        +Rates ratesPerMillion
+        +number defaultEstInputTokens
+        +number defaultEstOutputTokens
+    }
+
+    class Limits {
+        +number rpm
+        +number tpm
+        +number dailyTokens
+    }
+
+    class Rates {
+        +number inputUsd
+        +number outputUsd
+    }
+
+    class BudgetTracker {
+        -BudgetState state
+        +loadState() BudgetState
+        +saveState() void
+        +safeWriteJson(filePath, data) void
+        +registerCustomModel(modelInput) ModelConfig
+        +unregisterCustomModel(modelId) boolean
+        +prune(now) void
+        +canConsume(modelId, estimatedTokens, now) QuotaCheckResult
+        +recordConsumption(modelId, tokensUsed, now, options) ConsumptionResult
+        +getBudgetStatus(now) BudgetStatusReport
+        +setThrottled(modelId, durationSeconds, now) void
+        +resetBudget(modelId) BudgetStatusReport
+    }
+
+    class ProviderClient {
+        -CouncilConfig config
+        -Map queryCache
+        +refreshConfig() CouncilConfig
+        +getApiKey(provider) string
+        +getBaseUrl(provider) string
+        +queryModel(params) Promise~ModelQueryResult~
+    }
+
+    class CouncilOrchestrator {
+        +spawnCouncil(params) Promise~CouncilSession~
+        +generateAdrMarkdown(session, options) AdrResult
+        +saveCouncilSession(session) void
+        +listCouncilSessions(limit) CouncilSessionSummary[]
+        +getCouncilSession(sessionId) CouncilSession
+        +getLastSession() CouncilSession
+    }
+
+    class GitLock {
+        +acquireLock(resourceKey, agentId, ttlSeconds, metadata) LockResult
+        +releaseLock(resourceKey, agentId) ReleaseResult
+        +getActiveLocks() NodeLock[]
+        +appendLog(entry) LogEntry
+        +readRecentLogs(limit) LogEntry[]
+        +syncGitLog(options) Promise~GitSyncResult~
+    }
+
+    class UseTopologyStore {
+        +Record~string, TopologyPlanRecord~ plans
+        +string activePlanId
+        +OodaLoopTelemetry activeLoopTelemetry
+        +CouncilBudgetReport councilBudget
+        +switchPlan(planId) void
+        +emitLoopTelemetry(params) Promise
+        +advanceOodaStage(planId, maxLoops) Promise
+        +spawnCouncil(params) Promise
+        +writeSharedContext(scope, key, value) void
+    }
+
+    BudgetTracker --> ModelQuotaConfig : validates quotas against
+    CouncilOrchestrator --> BudgetTracker : queries canConsume & recordConsumption
+    CouncilOrchestrator --> ProviderClient : executes live or fallback queries
+    CouncilOrchestrator --> GitLock : records append-only WAL
+    UseTopologyStore --> CouncilOrchestrator : spawns deliberation
+    UseTopologyStore --> BudgetTracker : queries live budget headroom
+    UseTopologyStore --> GitLock : verifies active leases
+```
+
+---
+
+### 4. State Machine Diagram: Advisory Lock Leases & Git Synchronization
+
+This state diagram details the lifecycle of process-safe advisory leases, watchdog heartbeats, deadlock prevention via TTL auto-expiration, and non-blocking Git event replication.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Unlocked : Resource Free
+
+    Unlocked --> LeaseAcquired : acquireLock(nodeId, agentId, ttl)
+    note right of LeaseAcquired
+        Atomic 'wx' file creation in .topology/<key>.lock
+        Record owner PID, acquiredAt, expiresAt
+    end note
+
+    LeaseAcquired --> LeaseActive : Lease verified
+    
+    LeaseActive --> LeaseActive : Heartbeat / Renew (same agentId)
+    LeaseActive --> LockContention : Another agent attempts acquire
+    note right of LockContention
+        Returns TOPOLOGY_ERR_LOCK_CONTENTION
+        Fail-open: other agent takes parallel task
+    end note
+
+    LeaseActive --> Released : releaseLock(nodeId, agentId)
+    Released --> Unlocked : Lockfile unlinked
+
+    LeaseActive --> Expired : now > expiresAt (TTL elapsed)
+    note right of Expired
+        Deadlock Safeguard:
+        Owner crash does not hang fleet
+    end note
+
+    Expired --> StolenTakenOver : New agent acquires expired lease
+    StolenTakenOver --> LeaseActive : Lease transferred
+
+    state "Git WAL Replication" as GitSync {
+        [*] --> AppendWAL : appendLog(entry)
+        AppendWAL --> GitAddCommit : autoCommit = true
+        GitAddCommit --> GitRebasePull : git pull --rebase
+        GitRebasePull --> GitPush : autoPush = true
+        GitPush --> [*]
+    }
+```
+
+---
+
+### 5. Architecture & Dataflow Diagram: 2D & 3D Spatial Canvas Pipeline
+
+This diagram shows how user interactions and streaming agent thoughts flow seamlessly into the dual 2D/3D visualization rendering pipeline with zero borders and high-fps performance.
+
+```mermaid
+flowchart TD
+    subgraph Input_Stream ["Events & Ingestion"]
+        E1["MCP Tool Execution (topology_update_node, thought)"]
+        E2["CLI Logging (scripts/topology-log.mjs)"]
+        E3["Human Interaction (Drag, Hotkeys, Quick-Add)"]
+    end
+
+    subgraph State_Hub ["Centralized Reactive Store (useTopologyStore.ts)"]
+        Z1["nodes: TopologyNode[]"]
+        Z2["edges: TopologyEdge[]"]
+        Z3["plans: Record<string, TopologyPlanRecord>"]
+        Z4["activeLocks: Record<string, NodeLock>"]
+        Z5["activeLoopTelemetry: OodaLoopTelemetry"]
+    end
+
+    subgraph Canvas2D ["2D Precision Flow Canvas (TopologyCanvas2D.tsx)"]
+        C1["React Flow Canvas (@xyflow/react)"]
+        C2["Custom Node Card (TopologyCustomNode.tsx)"]
+        C3["Zero-Border Styling (border-none, backdrop-blur-xl, shadow-2xl)"]
+        C4["Semantic LOD Engine (Macro < 0.55x, Normal, Micro > 1.25x)"]
+        C5["60fps rAF Throttled Drag Dispatch"]
+    end
+
+    subgraph Canvas3D ["3D Force Constellation (TopologyGraph3D.tsx)"]
+        G1["ForceGraph3D Engine (Three.js WebGL)"]
+        G2["Geometry Object Pooling (sphereGeoNormal, haloGeoNormal)"]
+        G3["Cached Lambert Materials (lambertMaterialCache)"]
+        G4["Cached SpriteText Templates (spriteTextCache)"]
+        G5["Scene Lighting Injector (AmbientLight + DirectionalLight)"]
+    end
+
+    Input_Stream -->|Actions & Telemetry| State_Hub
+    State_Hub -->|Reactive Selector| Canvas2D
+    State_Hub -->|Reactive Selector| Canvas3D
+
+    C1 --> C2 --> C3
+    C1 --> C4
+    C1 --> C5
+
+    G1 --> G2 --> G3
+    G1 --> G4
+    G1 --> G5
+```
+
+---
+
+### 6. Detailed Functional & Algorithmic Breakdown
+
+| Module | Function | Inputs | Outputs | Key Invariants & Error Safeguards |
+| :--- | :--- | :--- | :--- | :--- |
+| `budgetTracker.js` | `getModelConfig(modelId)` | `modelId: string` | `ModelConfig \| null` | Case-insensitive ID lookup. Automatically re-scans `.topology/models.json` on disk if model was added dynamically by CLI without restart. |
+| `budgetTracker.js` | `canConsume(modelId, estimatedTokens, now)` | `modelId, tokens, timestamp` | `QuotaCheckResult` | Prunes sliding 60s window. Enforces strict 85% safety stop ceiling (15% reserve buffer) on RPM, TPM, and Daily tokens. Computes exact TTR countdown. |
+| `budgetTracker.js` | `recordConsumption(modelId, tokensUsed, now, opts)` | `modelId, tokens, timestamp, options` | `ConsumptionResult` | Lazily initializes model tracking state if model was registered on-the-fly. Computes USD cost per 1M tokens. Persists state atomically. |
+| `budgetTracker.js` | `registerCustomModel(modelInput)` | `modelInput: object` | `ModelConfig` | Sanitizes `rpm`, `tpm`, `dailyTokens`, and rates with fallback validation against `NaN`. Writes configuration to `.topology/models.json` via atomic rename. |
+| `budgetTracker.js` | `unregisterCustomModel(modelId)` | `modelId: string` | `boolean` | Deletes model from active registry and `.topology/models.json` atomically. Protects core default models (`gemini-3.8-flash`, `claude-4.6-opus`, `gpt-oss-120b`). |
+| `budgetTracker.js` | `safeWriteJson(filePath, data)` | `filePath, data` | `void` | Atomic write-to-temp and rename pattern preventing empty or truncated JSON reads across concurrent multi-process agent executions. |
+| `providerClient.js` | `getApiKey(provider)` | `provider: string` | `string \| null` | Resolves API keys with precedence: config override -> provider specific env -> uppercase dynamic pattern `process.env[${PROVIDER}_API_KEY]`. |
+| `providerClient.js` | `queryModel(params)` | `modelId, prompt, systemPrompt, ...` | `Promise<ModelQueryResult>` | Memoized SHA-256 query cache. Resolves provider transport (`gemini`, `anthropic`, `openai_compatible`, `ollama`). Normalizes endpoint URL prefixes. Categorizes HTTP status codes (`AUTH_FAILED`, `RATE_LIMIT_EXCEEDED`, `TIMEOUT`). Extracts thinking blocks & reasoning content. |
+| `councilOrchestrator.js` | `spawnCouncil(params)` | `goal, members, rounds, strategy, ...` | `Promise<CouncilSession>` | Pre-flights all members. Concurrently queries models per round via `Promise.all`. Handles `halt_before_limit`, `fallback_gemini_flash` (with surrogate quota safety check), and `pause_for_refresh`. Preserves live LLM consensus summary. Generates ADR and handoff DAG. |
+| `councilOrchestrator.js` | `generateAdrMarkdown(session, options)` | `sessionRecord, options` | `AdrResult` | Produces standardized Markdown ADR document. Formats table of invariants, peer critiques, consensus outcomes, and execution steps. Writes to `docs/adr/`. |
+| `gitLock.js` | `acquireLock(resourceKey, agentId, ttl, meta)` | `resourceKey, agentId, ttlSeconds` | `LockResult` | Atomic exclusive file creation (`wx` flag). Self-heals stale locks (`now > expiresAt`). Supports lease renewal by same owner. Returns contention status with TTL. |
+| `gitLock.js` | `syncGitLog(options)` | `remote, branch, autoCommit, autoPush` | `Promise<GitSyncResult>` | Commits local `.topology/topology.log` updates. Runs `git pull --rebase` to resolve distributed multi-agent mutations without merge bubbles. Optionally pushes. |
+| `useTopologyStore.ts` | `emitLoopTelemetry(params)` | `OodaLoopTelemetryParams` | `Promise<OodaLoopTelemetry>` | Enforces strict `maxLoops` parameter (clamped 1-10) directly within store state. Updates local Zustand store optimistically for instant UI reactivity. Asynchronously pushes to bridge and WAL. |
+| `useTopologyStore.ts` | `advanceOodaStage(planId, maxLoops)` | `planId, maxLoopsParam` | `Promise<void>` | Automatically steps sequentially through the 9 OODA stages. Caps loop count at `maxLoops`. Guards against re-advancing after convergence (`activeTelemetry.isConverged`). |
 

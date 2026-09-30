@@ -17,6 +17,11 @@
         "type": "number",
         "description": "Target or total expected loops for this planning/execution cycle"
       },
+      "maxLoops": {
+        "type": "number",
+        "default": 3,
+        "description": "Strict maximum number of allowed loop iterations (1 to 10). Clamps loopNumber to prevent infinite looping."
+      },
       "stage": {
         "type": "string",
         "enum": [

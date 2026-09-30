@@ -1,0 +1,65 @@
+{
+  "name": "topology_register_model",
+  "description": "Register or update an extensible custom model for the Multi-Model Council and Quota/Budget Tracker (supports gemini, anthropic, openai, openai_compatible, ollama providers).",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "string",
+        "description": "Unique identifier for the model (e.g. 'deepseek-v3', 'mistral-large', 'llama-3.3-70b')"
+      },
+      "name": {
+        "type": "string",
+        "description": "Human-readable display name for the model"
+      },
+      "provider": {
+        "type": "string",
+        "description": "Provider family: 'gemini', 'anthropic', 'openai', 'openai_compatible', 'ollama'"
+      },
+      "role": {
+        "type": "string",
+        "description": "Council role / specialization (e.g. 'Synthesizer & Code Auditor', 'Domain Specialist')"
+      },
+      "avatar": {
+        "type": "string",
+        "description": "Emoji or icon avatar representing the model"
+      },
+      "apiEndpoint": {
+        "type": "string",
+        "description": "Optional custom API endpoint URL (e.g. 'https://api.deepseek.com/v1', 'http://localhost:11434/v1')"
+      },
+      "apiKeyEnv": {
+        "type": "string",
+        "description": "Environment variable name containing the API key (e.g. 'DEEPSEEK_API_KEY', 'OPENAI_API_KEY')"
+      },
+      "rpmQuota": {
+        "type": "number",
+        "description": "Requests Per Minute rate limit ceiling"
+      },
+      "tpmQuota": {
+        "type": "number",
+        "description": "Tokens Per Minute throughput quota limit"
+      },
+      "rpdQuota": {
+        "type": "number",
+        "description": "Requests Per Day quota ceiling"
+      },
+      "tpdQuota": {
+        "type": "number",
+        "description": "Tokens Per Day quota ceiling"
+      },
+      "costPer1kInput": {
+        "type": "number",
+        "description": "Cost in USD per 1,000 prompt tokens"
+      },
+      "costPer1kOutput": {
+        "type": "number",
+        "description": "Cost in USD per 1,000 completion tokens"
+      }
+    },
+    "required": [
+      "id",
+      "name"
+    ]
+  }
+}

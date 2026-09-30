@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   RotateCw,
   X,
@@ -133,10 +133,23 @@ export const OodaLoopTelemetryModal: React.FC = () => {
   const [copied, setCopied] = useState(false);
   const [isAdvancing, setIsAdvancing] = useState(false);
 
+  const activePlan = plans[activePlanId];
+  const telemetry = activeLoopTelemetry || activePlan?.oodaLoop;
+
+  const [strictMaxLoops, setStrictMaxLoops] = useState<number>(() => {
+    return telemetry?.targetMaxLoops || 3;
+  });
+
+  useEffect(() => {
+    if (telemetry?.targetMaxLoops && telemetry.targetMaxLoops !== strictMaxLoops) {
+      setStrictMaxLoops(telemetry.targetMaxLoops);
+    }
+  }, [telemetry?.targetMaxLoops]);
+
   const handleAdvanceStage = async () => {
     setIsAdvancing(true);
     try {
-      await advanceOodaStage(activePlanId);
+      await advanceOodaStage(activePlanId, strictMaxLoops);
     } finally {
       setIsAdvancing(false);
     }
@@ -145,10 +158,13 @@ export const OodaLoopTelemetryModal: React.FC = () => {
   const handleAutoRunLoop = async () => {
     setIsAdvancing(true);
     try {
-      for (let i = 0; i < 9; i++) {
-        await advanceOodaStage(activePlanId);
+      for (let i = 0; i < 9 * strictMaxLoops; i++) {
+        await advanceOodaStage(activePlanId, strictMaxLoops);
         const currentTelemetry = useTopologyStore.getState().activeLoopTelemetry;
-        if (currentTelemetry?.isConverged || currentTelemetry?.activeStage === 'update') {
+        if (
+          currentTelemetry?.isConverged ||
+          (currentTelemetry?.activeStage === 'update' && (currentTelemetry?.currentLoop || 1) >= strictMaxLoops)
+        ) {
           break;
         }
         await new Promise(r => setTimeout(r, 380));
@@ -157,9 +173,6 @@ export const OodaLoopTelemetryModal: React.FC = () => {
       setIsAdvancing(false);
     }
   };
-
-  const activePlan = plans[activePlanId];
-  const telemetry = activeLoopTelemetry || activePlan?.oodaLoop;
 
   // Group history by loop iteration
   const loopGroups = useMemo(() => {
@@ -347,6 +360,20 @@ export const OodaLoopTelemetryModal: React.FC = () => {
               <span>Auto Run Loop</span>
             </button>
             <div className="w-px h-4 bg-black/10 dark:bg-white/10 mx-1" />
+            <div className="flex items-center gap-1.5 text-xs bg-black/5 dark:bg-white/5 rounded-xl px-2.5 py-1">
+              <span className="text-[#5f6368] dark:text-[#9aa0a6] font-medium">Max Loops:</span>
+              <select
+                value={strictMaxLoops}
+                onChange={(e) => setStrictMaxLoops(Number(e.target.value))}
+                className="bg-transparent font-bold text-[#202124] dark:text-white border-none outline-none cursor-pointer text-xs"
+              >
+                {[1, 2, 3, 4, 5, 8, 10].map(n => (
+                  <option key={n} value={n} className="bg-white dark:bg-[#1a1c1e] text-[#202124] dark:text-white">
+                    {n} {n === 1 ? 'loop' : 'loops'}
+                  </option>
+                ))}
+              </select>
+            </div>
             <div className="flex items-center gap-1.5 text-[#5f6368] dark:text-[#9aa0a6]">
               <TrendingUp size={13} className="text-amber-500" />
               <span>Completed:</span>
@@ -354,14 +381,6 @@ export const OodaLoopTelemetryModal: React.FC = () => {
                 {telemetry?.totalLoopsCompleted || 0}
               </span>
             </div>
-            {telemetry?.targetMaxLoops && (
-              <div className="flex items-center gap-1.5 text-[#5f6368] dark:text-[#9aa0a6]">
-                <span>Target:</span>
-                <span className="font-bold text-[#202124] dark:text-white">
-                  {telemetry.targetMaxLoops} loops
-                </span>
-              </div>
-            )}
           </div>
         </div>
 

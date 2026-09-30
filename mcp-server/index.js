@@ -27,7 +27,7 @@ import {
   BRIDGE_HOST,
   BRIDGE_PORT,
 } from './serverSupervisor.js';
-import { budgetTracker, MODEL_QUOTA_CONFIG } from './budgetTracker.js';
+import { budgetTracker, MODEL_QUOTA_CONFIG, getAllModelConfigs, registerCustomModel, unregisterCustomModel, getModelConfig } from './budgetTracker.js';
 import { councilOrchestrator } from './councilOrchestrator.js';
 const TOPOLOGY_DIR = path.resolve(process.cwd(), '.topology');
 const PLAN_FILE = path.join(TOPOLOGY_DIR, 'plan.json');
@@ -506,6 +506,11 @@ export const TOOLS = [
           default: 'halt_before_limit',
           description: 'Allocation strategy when a model reaches its 85% safety quota ceiling'
         },
+        members: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional list of model IDs to convene on the council. Defaults to ["gemini-3.8-flash", "claude-4.6-opus", "gpt-oss-120b"]. Can include custom registered models (e.g. "deepseek-v3", "llama3.3:70b").'
+        },
         contextFiles: {
           type: 'array',
           items: { type: 'string' },
@@ -518,7 +523,7 @@ export const TOOLS = [
         },
         specialists: {
           type: 'object',
-          description: 'Optional specialist persona overrides for the 3 council seats'
+          description: 'Optional specialist persona overrides for the council seats'
         },
         saveAdr: {
           type: 'boolean',
@@ -541,14 +546,13 @@ export const TOOLS = [
   },
   {
     name: 'topology_get_council_budget',
-    description: 'Inspect live quota allocations, RPM/TPM usage, financial cost ($ USD), daily counts, and sliding window TTR (Time-To-Refresh) countdowns for the Gemini Ultra multi-model council (Gemini 3.8 Flash, Claude 4.6 Opus, GPT-OSS 120b).',
+    description: 'Inspect live quota allocations, RPM/TPM usage, financial cost ($ USD), daily counts, and sliding window TTR (Time-To-Refresh) countdowns across all registered council models.',
     inputSchema: {
       type: 'object',
       properties: {
         modelId: {
           type: 'string',
-          enum: ['gemini-3.8-flash', 'claude-4.6-opus', 'gpt-oss-120b'],
-          description: 'Filter report to a specific model ID'
+          description: 'Optional model ID to filter report (e.g. "gemini-3.8-flash", "deepseek-v3", "claude-4.6-opus", etc.)'
         },
         reset: {
           type: 'boolean',
@@ -595,13 +599,69 @@ export const TOOLS = [
     }
   },
   {
+    name: 'topology_register_model',
+    description: 'Register or update an extensible custom model for the Multi-Model Council and Budget Tracker. Supports OpenAI-compatible endpoints, Ollama, DeepSeek, OpenRouter, Anthropic, and Gemini with custom RPM/TPM quotas and pricing.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'Unique model identifier (e.g. "deepseek-v3", "llama3.3-70b", "mistral-large")' },
+        name: { type: 'string', description: 'Human-readable display name (e.g. "DeepSeek V3", "Llama 3.3 70B")' },
+        family: { type: 'string', description: 'Provider family or coalition (e.g. "Ollama", "DeepSeek", "OpenRouter")' },
+        avatar: { type: 'string', default: '🤖', description: 'Emoji avatar or icon representation' },
+        color: { type: 'string', default: '#6366f1', description: 'Hex color for card badges and graphs' },
+        role: { type: 'string', description: 'Council deliberation role (e.g. "Algorithmic Code Optimizer", "Security Critic")' },
+        provider: {
+          type: 'string',
+          enum: ['openai_compatible', 'ollama', 'openai', 'anthropic', 'gemini'],
+          default: 'openai_compatible',
+          description: 'API transport protocol'
+        },
+        endpoint: { type: 'string', description: 'Custom API base URL (e.g. "http://localhost:11434/v1" or "https://api.deepseek.com/v1")' },
+        apiKeyEnv: { type: 'string', description: 'Name of environment variable storing the API key (e.g. "DEEPSEEK_API_KEY")' },
+        apiKey: { type: 'string', description: 'Optional explicit API key' },
+        modelName: { type: 'string', description: 'Actual model string sent to backend API (e.g. "deepseek-chat")' },
+        limits: {
+          type: 'object',
+          properties: {
+            rpm: { type: 'number', default: 60, description: 'Requests-per-minute limit' },
+            tpm: { type: 'number', default: 300000, description: 'Tokens-per-minute limit' },
+            dailyTokens: { type: 'number', default: 5000000, description: 'Daily token ceiling' }
+          }
+        },
+        ratesPerMillion: {
+          type: 'object',
+          properties: {
+            inputUsd: { type: 'number', default: 0.20, description: 'USD cost per 1M input tokens' },
+            outputUsd: { type: 'number', default: 0.80, description: 'USD cost per 1M output tokens' }
+          }
+        }
+      },
+      required: ['id']
+    }
+  },
+  {
+    name: 'topology_unregister_model',
+    description: 'Unregister a custom model from the Topology model registry and remove its quotas from .topology/models.json.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        modelId: {
+          type: 'string',
+          description: 'Unique model identifier to unregister (e.g. "deepseek-v3")'
+        }
+      },
+      required: ['modelId']
+    }
+  },
+  {
     name: 'topology_emit_loop_telemetry',
-    description: 'Emit OODA / Council iteration loop telemetry across the 9 stages (observe -> understand -> evaluate_with_council -> adversarial_council_evaluation -> each_member_plans -> share_and_vote_on_plan -> iterate_on_plan -> propose_plan -> update). Tracks loop iteration count (Loop N of M), member votes, amendments, and convergence status.',
+    description: 'Emit OODA / Council iteration loop telemetry across the 9 stages (observe -> understand -> evaluate_with_council -> adversarial_council_evaluation -> each_member_plans -> share_and_vote_on_plan -> iterate_on_plan -> propose_plan -> update). Tracks loop iteration count (Loop N of M), member votes, amendments, and convergence status with strict maxLoops capping.',
     inputSchema: {
       type: 'object',
       properties: {
         planId: { type: 'string', description: 'Unique workflow plan ID to attach loop telemetry to' },
         loopNumber: { type: 'number', default: 1, description: 'Current 1-based loop iteration index (e.g. 1, 2, 3...)' },
+        maxLoops: { type: 'number', default: 3, description: 'Strict maximum loop count allowed before forced convergence (clamped between 1 and 10)' },
         totalLoops: { type: 'number', description: 'Target or total expected loops for this planning/execution cycle' },
         stage: {
           type: 'string',
@@ -1572,7 +1632,7 @@ async function handleToolCall(name, args = {}) {
   }
 
   if (name === 'topology_spawn_council') {
-    const { goal, planId, rounds = 3, strategy = 'halt_before_limit', contextFiles = [], constraints = [], specialists, saveAdr = true, handoffToPlan = true, handoffAgentRole = 'ExecutionLead' } = args;
+    const { goal, planId, rounds = 3, strategy = 'halt_before_limit', members, contextFiles = [], constraints = [], specialists, saveAdr = true, handoffToPlan = true, handoffAgentRole = 'ExecutionLead' } = args;
     if (!goal) {
       return {
         content: [{
@@ -1587,6 +1647,7 @@ async function handleToolCall(name, args = {}) {
       planId,
       rounds,
       strategy,
+      members,
       contextFiles,
       constraints,
       specialists,
@@ -1736,11 +1797,67 @@ async function handleToolCall(name, args = {}) {
     };
   }
 
+  if (name === 'topology_register_model') {
+    try {
+      const model = registerCustomModel(args);
+      return {
+        content: [{
+          type: 'text',
+          text: `✅ **Custom Council Model Registered**\n\n` +
+                `* **Model ID**: \`${model.id}\`\n` +
+                `* **Name**: **${model.avatar} ${model.name}**\n` +
+                `* **Family / Provider**: \`${model.family}\` (\`${model.provider}\`)\n` +
+                `* **Endpoint**: \`${model.endpoint || 'default'}\`\n` +
+                `* **Deliberation Role**: \`${model.role}\`\n` +
+                `* **Quota Limits**: RPM \`${model.limits.rpm}\` | TPM \`${model.limits.tpm.toLocaleString()}\` | Daily \`${model.limits.dailyTokens.toLocaleString()}\`\n` +
+                `* **Rates**: \`$${model.ratesPerMillion.inputUsd}/M in\` | \`$${model.ratesPerMillion.outputUsd}/M out\`\n\n` +
+                `> Persisted to \`.topology/models.json\`. This model can now be selected in \`topology_spawn_council\` using \`members: ["${model.id}", ...]\` and tracked in \`topology_get_council_budget\`.`
+        }]
+      };
+    } catch (err) {
+      return {
+        content: [{
+          type: 'text',
+          text: `⚠️ **Registration Error**: ${err.message}`
+        }]
+      };
+    }
+  if (name === 'topology_unregister_model') {
+    const { modelId } = args;
+    if (!modelId) {
+      return {
+        content: [{
+          type: 'text',
+          text: `⚠️ **[${TOPOLOGY_ERROR_CODES.INVALID_SCHEMA}] Parameter Error**: \`modelId\` is required.`
+        }]
+      };
+    }
+    try {
+      const removed = unregisterCustomModel(modelId);
+      return {
+        content: [{
+          type: 'text',
+          text: removed
+            ? `✅ **Custom Model Unregistered**: Successfully removed \`${modelId}\` from active registry and \`.topology/models.json\`.`
+            : `⚠️ **Notice**: Model \`${modelId}\` was not found in registered custom models.`
+        }]
+      };
+    } catch (err) {
+      return {
+        content: [{
+          type: 'text',
+          text: `❌ **Unregister Error**: ${err.message}`
+        }]
+      };
+    }
+  }
+
   if (name === 'topology_emit_loop_telemetry') {
     const {
       planId,
-      loopNumber = 1,
+      loopNumber: rawLoopNumber = 1,
       totalLoops,
+      maxLoops: rawMaxLoops,
       stage,
       stageName,
       thought,
@@ -1754,7 +1871,7 @@ async function handleToolCall(name, args = {}) {
       proposedPlanSummary,
       updatesApplied = [],
       metrics = {},
-      status = 'in_progress',
+      status: rawStatus = 'in_progress',
     } = args;
 
     if (!planId || !stage) {
@@ -1764,6 +1881,20 @@ async function handleToolCall(name, args = {}) {
           text: `⚠️ **[${TOPOLOGY_ERROR_CODES.INVALID_SCHEMA}] Parameter Error**: \`planId\` and \`stage\` are required to emit loop telemetry.`
         }]
       };
+    }
+
+    // Strict parameter enforcement for loop iteration count
+    const effectiveMaxLoops = Math.max(1, Math.min(parseInt(rawMaxLoops || totalLoops || '3', 10), 10));
+    let loopNumber = Math.max(1, parseInt(rawLoopNumber, 10));
+    let status = rawStatus;
+    let loopCappingNotice = '';
+
+    if (loopNumber > effectiveMaxLoops) {
+      loopCappingNotice = `⚠️ **[Strict Loop Parameter Notice]**: Requested Loop ${loopNumber} exceeds strict maxLoops ceiling (${effectiveMaxLoops}). Loop capped and declared CONVERGED.\n\n`;
+      loopNumber = effectiveMaxLoops;
+      status = 'converged';
+    } else if (stage === 'update' && loopNumber >= effectiveMaxLoops) {
+      status = 'converged';
     }
 
     const OODA_STAGE_NAMES = {
@@ -1821,7 +1952,7 @@ async function handleToolCall(name, args = {}) {
         planId,
         totalLoopsCompleted: 0,
         currentLoop: loopNumber,
-        targetMaxLoops: totalLoops,
+        targetMaxLoops: effectiveMaxLoops,
         activeStage: stage,
         isConverged: status === 'converged',
         history: [],
@@ -1830,7 +1961,7 @@ async function handleToolCall(name, args = {}) {
     }
     const currentLoopData = allLoops[planId];
     currentLoopData.currentLoop = loopNumber;
-    if (totalLoops) currentLoopData.targetMaxLoops = totalLoops;
+    currentLoopData.targetMaxLoops = effectiveMaxLoops;
     currentLoopData.activeStage = stage;
     currentLoopData.isConverged = status === 'converged' || currentLoopData.isConverged;
     currentLoopData.updatedAt = Date.now();
@@ -1855,7 +1986,7 @@ async function handleToolCall(name, args = {}) {
       planId,
       status,
       thought: thought || `[OODA Loop ${loopNumber} - ${stageLabel}] ${status}`,
-      payload: { loopNumber, totalLoops, stage, metrics },
+      payload: { loopNumber, maxLoops: effectiveMaxLoops, stage, metrics },
     });
 
     // 4. Send to live visualizer bridge
@@ -1866,9 +1997,9 @@ async function handleToolCall(name, args = {}) {
     });
 
     // 5. Format rich response text for the agent
-    let text = `🔄 **OODA Loop Telemetry Recorded**\n\n`;
+    let text = loopCappingNotice + `🔄 **OODA Loop Telemetry Recorded**\n\n`;
     text += `* **Plan**: \`${planId}\`\n`;
-    text += `* **Loop Iteration**: \`Loop ${loopNumber}${totalLoops ? ` of ${totalLoops}` : ''}\` (Total Loops Completed: ${currentLoopData.totalLoopsCompleted})\n`;
+    text += `* **Loop Iteration**: \`Loop ${loopNumber} of ${effectiveMaxLoops} (Strict Cap)\` (Total Loops Completed: ${currentLoopData.totalLoopsCompleted})\n`;
     text += `* **Active Stage**: **${stageLabel}** (Stage ${stageIndexHuman}/9)\n`;
     text += `* **Status**: \`${status.toUpperCase()}\`${currentLoopData.isConverged ? ' 🎉 **(CONVERGED)**' : ''}\n\n`;
 
@@ -2285,6 +2416,17 @@ async function handleToolCall(name, args = {}) {
       status: idx === 0 ? 'ready' : 'pending',
       priority: idx === 0 ? 'high' : 'medium',
       position: { x: 80, y: 80 + idx * 240 },
+      context: {
+        role: t.role || handoffAgentRole,
+        promptTemplate: t.description || '',
+        toolsRequired: [],
+        inputArtifacts: [],
+        outputArtifacts: [],
+        validationCriteria: 'Invariants verified',
+        requiresHumanApproval: false,
+      },
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
     }));
 
     const executionEdges = dagEdges.map(e => ({

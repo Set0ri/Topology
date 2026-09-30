@@ -162,7 +162,7 @@ export class ErrorBoundary extends Component<Props, State> {
             </div>
 
             {/* Recovery Action Buttons */}
-            <div className="flex flex-col sm:flex-row items-center gap-2 pt-2 border-t border-black/5 dark:border-white/10">
+            <div className="flex flex-col sm:flex-row items-center gap-2 pt-2 border-none">
               <button
                 type="button"
                 onClick={this.handleResetToSafeState}

@@ -45,12 +45,13 @@ export const SimulationBar: React.FC = () => {
   return (
     <div className="fixed bottom-3 sm:bottom-6 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1.5 sm:gap-3 px-2.5 sm:px-4 py-1.5 sm:py-2.5 rounded-2xl bg-white/95 dark:bg-[#181a24]/95 text-[#202124] dark:text-[#f8fafc] backdrop-blur-2xl shadow-elevated-xl border-none max-w-[calc(100vw-1rem)] overflow-x-auto scrollbar-none transition-colors duration-200">
       {/* Simulation Status Icon */}
-      <div className="flex items-center gap-1.5 sm:gap-2 pr-1 sm:pr-2 border-r border-black/5 dark:border-white/10 shrink-0">
+      <div className="flex items-center gap-1.5 sm:gap-2 pr-1 sm:pr-2 border-none shrink-0">
         <Activity size={14} className={`text-[#f9ab00] ${isSimulating ? 'animate-pulse' : ''}`} />
         <span className="text-xs font-semibold tracking-wide hidden lg:inline">
           {isSimulating ? 'Simulating...' : 'Simulation Engine'}
         </span>
       </div>
+      <div className="w-px h-4 bg-black/10 dark:bg-white/10 shrink-0" />
 
       {/* Play / Pause */}
       <button
@@ -103,8 +104,9 @@ export const SimulationBar: React.FC = () => {
         <span className="text-xs font-semibold hidden md:inline">Swarm</span>
       </button>
 
+      <div className="w-px h-4 bg-black/10 dark:bg-white/10 shrink-0" />
       {/* Progress Bar & Counter */}
-      <div className="flex items-center gap-2 pl-1 sm:pl-2 border-l border-black/5 dark:border-white/10 shrink-0">
+      <div className="flex items-center gap-2 pl-1 sm:pl-2 border-none shrink-0">
         <div className="w-12 sm:w-20 h-1.5 rounded-full bg-black/5 dark:bg-white/10 overflow-hidden">
           <div 
             className="h-full bg-gradient-to-r from-[#1a73e8] to-[#1e8e3e] transition-all duration-300"

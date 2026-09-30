@@ -12,6 +12,13 @@
         "type": "string",
         "description": "Optional unique plan ID for visualizing the deliberation on the Topology canvas"
       },
+      "members": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Optional custom council member model IDs (e.g. [\"gemini-3.8-flash\", \"claude-4.6-opus\", \"deepseek-v3\"]). Defaults to standard 3 models."
+      },
       "rounds": {
         "type": "number",
         "default": 3,

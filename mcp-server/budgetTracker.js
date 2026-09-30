@@ -21,8 +21,8 @@ import path from 'path';
 const TOPOLOGY_DIR = path.resolve(process.cwd(), '.topology');
 const BUDGET_FILE = path.join(TOPOLOGY_DIR, 'council_budget.json');
 
-// Gemini Ultra Plan Quota Allocations
-export const MODEL_QUOTA_CONFIG = {
+// Gemini Ultra Plan Quota Allocations & Extensible Model Registry
+export const DEFAULT_MODEL_CONFIG = {
   'gemini-3.8-flash': {
     id: 'gemini-3.8-flash',
     name: 'Gemini 3.8 Flash',
@@ -30,6 +30,7 @@ export const MODEL_QUOTA_CONFIG = {
     avatar: '⚡',
     color: '#1a73e8',
     role: 'Fast Architect & Execution Lead',
+    provider: 'gemini',
     limits: {
       rpm: 1000,
       tpm: 4000000,
@@ -49,6 +50,7 @@ export const MODEL_QUOTA_CONFIG = {
     avatar: '🧠',
     color: '#9334e6',
     role: 'Deep Reasoning & Invariant Critic',
+    provider: 'anthropic',
     limits: {
       rpm: 50,
       tpm: 300000,
@@ -68,6 +70,7 @@ export const MODEL_QUOTA_CONFIG = {
     avatar: '🌐',
     color: '#10a37f',
     role: 'Alternative Paradigm & Robustness Auditor',
+    provider: 'openai_compatible',
     limits: {
       rpm: 120,
       tpm: 500000,
@@ -82,9 +85,6 @@ export const MODEL_QUOTA_CONFIG = {
   },
 };
 
-// Hard stop safety reserve threshold (85% limit = 15% reserve)
-export const SAFETY_STOP_THRESHOLD = 0.85;
-
 function ensureDir(dir) {
   if (!fs.existsSync(dir)) {
     try {
@@ -94,6 +94,224 @@ function ensureDir(dir) {
     }
   }
 }
+
+function safeWriteJson(filePath, data) {
+  ensureDir(path.dirname(filePath));
+  const content = JSON.stringify(data, null, 2);
+  const tmpFile = `${filePath}.tmp.${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  try {
+    fs.writeFileSync(tmpFile, content, 'utf8');
+    try {
+      fs.renameSync(tmpFile, filePath);
+    } catch {
+      // Windows concurrency / file lock fallback
+      fs.writeFileSync(filePath, content, 'utf8');
+      try { fs.unlinkSync(tmpFile); } catch {}
+    }
+  } catch (err) {
+    console.warn(`[BudgetTracker] Error saving ${filePath}:`, err.message);
+  }
+}
+
+const CUSTOM_MODELS_FILE = path.join(TOPOLOGY_DIR, 'models.json');
+const WORKSPACE_MODELS_FILE = path.resolve(process.cwd(), 'topology.models.json');
+
+let cachedCustomModels = {};
+
+export function loadCustomModels() {
+  const loaded = { ...cachedCustomModels };
+  // 1. Check workspace file topology.models.json
+  try {
+    if (fs.existsSync(WORKSPACE_MODELS_FILE)) {
+      const parsed = JSON.parse(fs.readFileSync(WORKSPACE_MODELS_FILE, 'utf8'));
+      if (Array.isArray(parsed)) {
+        parsed.forEach(m => { if (m?.id) loaded[m.id] = m; });
+      } else if (parsed && typeof parsed === 'object') {
+        Object.entries(parsed).forEach(([k, v]) => { if (v?.id || k) loaded[v.id || k] = { id: k, ...v }; });
+      }
+    }
+  } catch (err) {
+    console.warn('[BudgetTracker] Error reading workspace topology.models.json:', err.message);
+  }
+
+  // 2. Check .topology/models.json
+  try {
+    if (fs.existsSync(CUSTOM_MODELS_FILE)) {
+      const raw = fs.readFileSync(CUSTOM_MODELS_FILE, 'utf8');
+      if (raw && raw.trim()) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          parsed.forEach(m => { if (m?.id) loaded[m.id] = m; });
+        } else if (parsed && typeof parsed === 'object') {
+          Object.entries(parsed).forEach(([k, v]) => { if (v?.id || k) loaded[v.id || k] = { id: k, ...v }; });
+        }
+        cachedCustomModels = { ...loaded };
+      }
+    }
+  } catch (err) {
+    // If reading is transiently contended, return last known good cache
+    console.warn('[BudgetTracker] Error reading .topology/models.json (using cached fallback):', err.message);
+  }
+
+  return loaded;
+}
+
+export const MODEL_QUOTA_CONFIG = {
+  ...DEFAULT_MODEL_CONFIG,
+  ...loadCustomModels(),
+};
+
+export function getAllModelConfigs() {
+  const custom = loadCustomModels();
+  Object.assign(MODEL_QUOTA_CONFIG, custom);
+  return { ...MODEL_QUOTA_CONFIG };
+}
+
+export function getModelConfig(modelId) {
+  if (!modelId) return null;
+  const normalizedId = String(modelId).trim().toLowerCase();
+  if (!MODEL_QUOTA_CONFIG[normalizedId]) {
+    const custom = loadCustomModels();
+    if (custom[normalizedId]) {
+      MODEL_QUOTA_CONFIG[normalizedId] = custom[normalizedId];
+    }
+  }
+  return MODEL_QUOTA_CONFIG[normalizedId] || null;
+}
+
+export function registerCustomModel(modelInput) {
+  if (!modelInput || typeof modelInput !== 'object' || !modelInput.id) {
+    throw new Error('Model configuration must include an "id" field.');
+  }
+
+  const modelId = String(modelInput.id).trim().toLowerCase();
+  if (!modelId) {
+    throw new Error('Model ID cannot be empty or whitespace.');
+  }
+
+  const rpm = Math.max(1, parseInt(modelInput.limits?.rpm ?? '60', 10) || 60);
+  const tpm = Math.max(1000, parseInt(modelInput.limits?.tpm ?? '300000', 10) || 300000);
+  const dailyTokens = Math.max(10000, parseInt(modelInput.limits?.dailyTokens ?? '5000000', 10) || 5000000);
+  const rateIn = Math.max(0, parseFloat(modelInput.ratesPerMillion?.inputUsd ?? 0.20) || 0.20);
+  const rateOut = Math.max(0, parseFloat(modelInput.ratesPerMillion?.outputUsd ?? 0.80) || 0.80);
+
+  const normalized = {
+    id: modelId,
+    name: modelInput.name || modelId,
+    family: modelInput.family || 'Custom LLM / Provider',
+    avatar: modelInput.avatar || '🤖',
+    color: modelInput.color || '#6366f1',
+    role: modelInput.role || 'Specialist & Deliberation Member',
+    provider: modelInput.provider || 'openai_compatible',
+    endpoint: modelInput.endpoint || modelInput.baseUrl || '',
+    apiKeyEnv: modelInput.apiKeyEnv || null,
+    apiKey: modelInput.apiKey || null,
+    modelName: modelInput.modelName || modelInput.model || modelId,
+    limits: {
+      rpm,
+      tpm,
+      dailyTokens,
+    },
+    ratesPerMillion: {
+      inputUsd: rateIn,
+      outputUsd: rateOut,
+    },
+    defaultEstInputTokens: Math.max(100, parseInt(modelInput.defaultEstInputTokens || '1500', 10) || 1500),
+    defaultEstOutputTokens: Math.max(100, parseInt(modelInput.defaultEstOutputTokens || '3000', 10) || 3000),
+  };
+
+  MODEL_QUOTA_CONFIG[modelId] = normalized;
+
+  // Persist to .topology/models.json atomically
+  try {
+    let existing = {};
+    if (fs.existsSync(CUSTOM_MODELS_FILE)) {
+      try {
+        const raw = fs.readFileSync(CUSTOM_MODELS_FILE, 'utf8');
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          parsed.forEach(m => { if (m?.id) existing[m.id] = m; });
+        } else if (parsed && typeof parsed === 'object') {
+          existing = parsed;
+        }
+      } catch {}
+    }
+    existing[modelId] = normalized;
+    safeWriteJson(CUSTOM_MODELS_FILE, existing);
+    cachedCustomModels = { ...cachedCustomModels, [modelId]: normalized };
+  } catch (err) {
+    console.warn('[BudgetTracker] Failed saving custom model to disk:', err.message);
+  }
+
+  // Update budgetTracker in-memory state safely
+  if (typeof budgetTracker !== 'undefined' && budgetTracker?.state) {
+    if (!budgetTracker.state.models[modelId]) {
+      budgetTracker.state.models[modelId] = {
+        id: modelId,
+        name: normalized.name,
+        requests: [],
+        dailyRequests: 0,
+        dailyTokens: 0,
+        dailyResetAt: getUtcMidnightTimestamp(),
+        totalAllTimeTokens: 0,
+        totalAllTimeRequests: 0,
+        throttledUntil: null,
+      };
+      budgetTracker.saveState();
+    }
+  }
+
+  return normalized;
+}
+
+export function unregisterCustomModel(modelId) {
+  if (!modelId) return false;
+  const normalizedId = String(modelId).trim().toLowerCase();
+
+  // Protect default built-in models
+  if (DEFAULT_MODEL_CONFIG[normalizedId]) {
+    throw new Error(`Cannot unregister default core model "${normalizedId}".`);
+  }
+
+  let removed = false;
+  if (MODEL_QUOTA_CONFIG[normalizedId]) {
+    delete MODEL_QUOTA_CONFIG[normalizedId];
+    removed = true;
+  }
+  if (cachedCustomModels[normalizedId]) {
+    delete cachedCustomModels[normalizedId];
+    removed = true;
+  }
+
+  // Persist deletion to .topology/models.json atomically
+  try {
+    if (fs.existsSync(CUSTOM_MODELS_FILE)) {
+      const raw = fs.readFileSync(CUSTOM_MODELS_FILE, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object' && parsed[normalizedId]) {
+        delete parsed[normalizedId];
+        safeWriteJson(CUSTOM_MODELS_FILE, parsed);
+        removed = true;
+      }
+    }
+  } catch (err) {
+    console.warn('[BudgetTracker] Failed unregistering model from disk:', err.message);
+  }
+
+  // Remove from budgetTracker in-memory state
+  if (typeof budgetTracker !== 'undefined' && budgetTracker?.state?.models) {
+    if (budgetTracker.state.models[normalizedId]) {
+      delete budgetTracker.state.models[normalizedId];
+      budgetTracker.saveState();
+      removed = true;
+    }
+  }
+
+  return removed;
+}
+
+// Hard stop safety reserve threshold (85% limit = 15% reserve)
+export const SAFETY_STOP_THRESHOLD = 0.85;
 
 function getUtcMidnightTimestamp(now = Date.now()) {
   const d = new Date(now);
@@ -113,46 +331,45 @@ class BudgetTracker {
   }
 
   loadState() {
+    let existing = null;
     try {
       if (fs.existsSync(BUDGET_FILE)) {
         const raw = fs.readFileSync(BUDGET_FILE, 'utf8');
-        return JSON.parse(raw);
+        existing = JSON.parse(raw);
       }
     } catch (err) {
       console.warn('[BudgetTracker] Failed reading budget file, initializing default:', err.message);
     }
 
-    const initial = {
+    const initial = existing || {
       version: 1,
       lastUpdated: Date.now(),
       models: {},
     };
+    if (!initial.models) initial.models = {};
 
     for (const [modelId, cfg] of Object.entries(MODEL_QUOTA_CONFIG)) {
-      initial.models[modelId] = {
-        id: modelId,
-        name: cfg.name,
-        requests: [], // [{ timestamp, tokens }] in last 60s
-        dailyRequests: 0,
-        dailyTokens: 0,
-        dailyResetAt: getUtcMidnightTimestamp(),
-        totalAllTimeTokens: 0,
-        totalAllTimeRequests: 0,
-        throttledUntil: null,
-      };
+      if (!initial.models[modelId]) {
+        initial.models[modelId] = {
+          id: modelId,
+          name: cfg.name,
+          requests: [], // [{ timestamp, tokens }] in last 60s
+          dailyRequests: 0,
+          dailyTokens: 0,
+          dailyResetAt: getUtcMidnightTimestamp(),
+          totalAllTimeTokens: 0,
+          totalAllTimeRequests: 0,
+          throttledUntil: null,
+        };
+      }
     }
 
     return initial;
   }
 
   saveState() {
-    ensureDir(TOPOLOGY_DIR);
     this.state.lastUpdated = Date.now();
-    try {
-      fs.writeFileSync(BUDGET_FILE, JSON.stringify(this.state, null, 2), 'utf8');
-    } catch (err) {
-      console.warn('[BudgetTracker] Failed saving budget state:', err.message);
-    }
+    safeWriteJson(BUDGET_FILE, this.state);
   }
 
   /**
@@ -213,7 +430,8 @@ class BudgetTracker {
    */
   canConsume(modelId, estimatedTokens = 0, now = Date.now()) {
     this.prune(now);
-    const cfg = MODEL_QUOTA_CONFIG[modelId];
+    const sanitizedEstTokens = Math.max(0, parseInt(estimatedTokens, 10) || 0);
+    const cfg = getModelConfig(modelId);
     if (!cfg) {
       return { allowed: false, reason: `Unknown model ID: ${modelId}` };
     }
@@ -259,7 +477,7 @@ class BudgetTracker {
     }
 
     // Check TPM
-    if (currentTpm + estimatedTokens > maxSafeTpm) {
+    if (currentTpm + sanitizedEstTokens > maxSafeTpm) {
       const oldest = m.requests[0];
       const ttr = oldest ? Math.max(1, Math.ceil((oldest.timestamp + 60000 - now) / 1000)) : 60;
       return {
@@ -269,13 +487,13 @@ class BudgetTracker {
         limitTpm: cfg.limits.tpm,
         safeLimitTpm: maxSafeTpm,
         ttrSeconds: ttr,
-        message: `${cfg.name} TPM safe ceiling reached (${currentTpm + estimatedTokens}/${cfg.limits.tpm}). Refreshes in ${ttr}s.`,
+        message: `${cfg.name} TPM safe ceiling reached (${currentTpm + sanitizedEstTokens}/${cfg.limits.tpm}). Refreshes in ${ttr}s.`,
         recommendedFallback: 'gemini-3.8-flash',
       };
     }
 
     // Check Daily
-    if (currentDaily + estimatedTokens > maxSafeDaily) {
+    if (currentDaily + sanitizedEstTokens > maxSafeDaily) {
       const ttr = Math.max(1, Math.ceil((m.dailyResetAt - now) / 1000));
       return {
         allowed: false,
@@ -284,7 +502,7 @@ class BudgetTracker {
         limitDaily: cfg.limits.dailyTokens,
         safeLimitDaily: maxSafeDaily,
         ttrSeconds: ttr,
-        message: `${cfg.name} daily token ceiling reached (${currentDaily + estimatedTokens}/${cfg.limits.dailyTokens}). Resets at 00:00 UTC (${Math.ceil(ttr / 60)} mins).`,
+        message: `${cfg.name} daily token ceiling reached (${currentDaily + sanitizedEstTokens}/${cfg.limits.dailyTokens}). Resets at 00:00 UTC (${Math.ceil(ttr / 60)} mins).`,
         recommendedFallback: 'gemini-3.8-flash',
       };
     }
@@ -303,23 +521,43 @@ class BudgetTracker {
    */
   recordConsumption(modelId, tokensUsed = 0, now = Date.now(), options = {}) {
     this.prune(now);
-    const m = this.state.models[modelId];
-    if (!m) return { tokensUsed: 0, costUsd: 0 };
+    const sanitizedTokens = Math.max(0, parseInt(tokensUsed, 10) || 0);
+    let m = this.state.models[modelId];
+    if (!m) {
+      const cfg = getModelConfig(modelId);
+      if (cfg) {
+        m = this.state.models[modelId] = {
+          id: modelId,
+          name: cfg.name,
+          requests: [],
+          dailyRequests: 0,
+          dailyTokens: 0,
+          dailyCostUsd: 0,
+          dailyResetAt: getUtcMidnightTimestamp(now),
+          totalAllTimeTokens: 0,
+          totalAllTimeRequests: 0,
+          totalAllTimeCostUsd: 0,
+          throttledUntil: null,
+        };
+      } else {
+        return { tokensUsed: sanitizedTokens, costUsd: 0 };
+      }
+    }
 
-    const cfg = MODEL_QUOTA_CONFIG[modelId];
-    const inputTokens = options.inputTokens || Math.round(tokensUsed * 0.4);
-    const outputTokens = options.outputTokens || (tokensUsed - inputTokens);
+    const cfg = getModelConfig(modelId);
+    const inputTokens = Math.max(0, parseInt(options.inputTokens, 10) || Math.round(sanitizedTokens * 0.4));
+    const outputTokens = Math.max(0, parseInt(options.outputTokens, 10) || (sanitizedTokens - inputTokens));
 
-    const rateIn = cfg?.ratesPerMillion?.inputUsd || 0.1;
-    const rateOut = cfg?.ratesPerMillion?.outputUsd || 0.4;
+    const rateIn = cfg?.ratesPerMillion?.inputUsd ?? 0.1;
+    const rateOut = cfg?.ratesPerMillion?.outputUsd ?? 0.4;
     const costUsd = Number(((inputTokens * rateIn + outputTokens * rateOut) / 1000000).toFixed(6));
 
-    m.requests.push({ timestamp: now, tokens: tokensUsed, costUsd });
+    m.requests.push({ timestamp: now, tokens: sanitizedTokens, costUsd });
     m.dailyRequests += 1;
-    m.dailyTokens += tokensUsed;
+    m.dailyTokens += sanitizedTokens;
     m.dailyCostUsd = Number(((m.dailyCostUsd || 0) + costUsd).toFixed(5));
     m.totalAllTimeRequests += 1;
-    m.totalAllTimeTokens += tokensUsed;
+    m.totalAllTimeTokens += sanitizedTokens;
     m.totalAllTimeCostUsd = Number(((m.totalAllTimeCostUsd || 0) + costUsd).toFixed(5));
 
     this.saveState();
@@ -356,7 +594,8 @@ class BudgetTracker {
     let hasThrottled = false;
     let hasApproaching = false;
 
-    for (const [modelId, cfg] of Object.entries(MODEL_QUOTA_CONFIG)) {
+    const allConfigs = getAllModelConfigs();
+    for (const [modelId, cfg] of Object.entries(allConfigs)) {
       const m = this.state.models[modelId] || {
         requests: [],
         dailyRequests: 0,
@@ -473,6 +712,7 @@ class BudgetTracker {
    */
   resetBudget(modelId = null) {
     const now = Date.now();
+    const allConfigs = getAllModelConfigs();
     if (modelId && this.state.models[modelId]) {
       this.state.models[modelId].requests = [];
       this.state.models[modelId].dailyRequests = 0;
@@ -481,7 +721,7 @@ class BudgetTracker {
       this.state.models[modelId].dailyResetAt = getUtcMidnightTimestamp(now);
       this.state.models[modelId].throttledUntil = null;
     } else {
-      for (const id of Object.keys(MODEL_QUOTA_CONFIG)) {
+      for (const id of Object.keys(allConfigs)) {
         if (this.state.models[id]) {
           this.state.models[id].requests = [];
           this.state.models[id].dailyRequests = 0;
@@ -497,10 +737,11 @@ class BudgetTracker {
 }
 
 function formatDuration(seconds) {
-  if (!seconds || seconds <= 0) return '00:00';
-  const hrs = Math.floor(seconds / 3600);
-  const mins = Math.floor((seconds % 3600) / 60);
-  const secs = seconds % 60;
+  if (!seconds || typeof seconds !== 'number' || isNaN(seconds) || seconds <= 0) return '00:00';
+  const totalSecs = Math.floor(seconds);
+  const hrs = Math.floor(totalSecs / 3600);
+  const mins = Math.floor((totalSecs % 3600) / 60);
+  const secs = totalSecs % 60;
   if (hrs > 0) {
     return `${hrs}h ${mins.toString().padStart(2, '0')}m`;
   }
