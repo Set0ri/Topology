@@ -29,6 +29,8 @@ import {
 } from './serverSupervisor.js';
 import { budgetTracker, MODEL_QUOTA_CONFIG, getAllModelConfigs, registerCustomModel, unregisterCustomModel, getModelConfig } from './budgetTracker.js';
 import { councilOrchestrator } from './councilOrchestrator.js';
+import { getNodeBudgetMetrics, computePlanBudgetMetrics } from './planBudget.js';
+
 const TOPOLOGY_DIR = path.resolve(process.cwd(), '.topology');
 const PLAN_FILE = path.join(TOPOLOGY_DIR, 'plan.json');
 const PLANS_FILE = path.join(TOPOLOGY_DIR, 'plans.json');
@@ -254,6 +256,10 @@ export const TOOLS = [
         agentId: { type: 'string', description: 'Unique identifier of authoring agent (e.g. "agent-sage")' },
         agentRole: { type: 'string', description: 'Specialist persona (e.g. "Architect", "FrontendDeveloper", "DevOps")' },
         makeActive: { type: 'boolean', default: true, description: 'Whether to make this plan the currently visible plan on the visualizer canvas' },
+        budgetLimitUsd: { type: 'number', description: 'Allocated budget ceiling for the plan in USD (e.g. 1.00)' },
+        budgetUsd: { type: 'number', description: 'Allocated budget limit or target ceiling in USD (alias for budgetLimitUsd)' },
+        costUsd: { type: 'number', description: 'Initial consumed cost in USD' },
+        budget: { type: 'object', properties: { budgetLimitUsd: { type: 'number' }, costUsd: { type: 'number' } }, description: 'Plan budget specification' },
         nodes: {
           type: 'array',
           items: {
@@ -266,7 +272,12 @@ export const TOOLS = [
               description: { type: 'string', description: 'Detailed execution instructions, tools required, or acceptance criteria' },
               status: { type: 'string', enum: ['pending', 'ready', 'in_progress', 'completed', 'blocked', 'failed'], default: 'pending' },
               priority: { type: 'string', enum: ['low', 'medium', 'high', 'critical'], default: 'medium' },
-              requiresApproval: { type: 'boolean', description: 'Set true if human review is required before unblocking downstream steps', default: false }
+              requiresApproval: { type: 'boolean', description: 'Set true if human review is required before unblocking downstream steps', default: false },
+              budgetLimitUsd: { type: 'number', description: 'Allocated budget limit for this task node in USD' },
+              budgetUsd: { type: 'number', description: 'Allocated budget limit or target cost in USD (alias)' },
+              costUsd: { type: 'number', description: 'Actual consumed cost for this task node in USD' },
+              tokensUsed: { type: 'object', properties: { input: { type: 'number' }, output: { type: 'number' }, total: { type: 'number' } }, description: 'Token usage metrics for this node' },
+              budget: { type: 'object', properties: { budgetLimitUsd: { type: 'number' }, costUsd: { type: 'number' }, inputTokens: { type: 'number' }, outputTokens: { type: 'number' }, totalTokens: { type: 'number' } }, description: 'Node budget and token usage object' }
             },
             required: ['id', 'label']
           },
@@ -302,7 +313,12 @@ export const TOOLS = [
         thought: { type: 'string', description: 'Current live thought or reasoning step to display on the node card' },
         toolName: { type: 'string', description: 'Name of the tool currently being executed' },
         terminalLog: { type: 'string', description: 'A line of terminal output or log message to append to the node telemetry' },
-        outputArtifacts: { type: 'array', items: { type: 'string' }, description: 'Output artifact files created (e.g. ["src/auth.ts"])' }
+        outputArtifacts: { type: 'array', items: { type: 'string' }, description: 'Output artifact files created (e.g. ["src/auth.ts"])' },
+        budgetLimitUsd: { type: 'number', description: 'Allocated budget limit for this node in USD' },
+        budgetUsd: { type: 'number', description: 'Allocated budget limit for this node in USD (alias)' },
+        costUsd: { type: 'number', description: 'Actual consumed cost for this node in USD' },
+        tokensUsed: { type: 'object', properties: { input: { type: 'number' }, output: { type: 'number' }, total: { type: 'number' } }, description: 'Token usage metrics (input, output, total)' },
+        budget: { type: 'object', properties: { budgetLimitUsd: { type: 'number' }, costUsd: { type: 'number' }, inputTokens: { type: 'number' }, outputTokens: { type: 'number' }, totalTokens: { type: 'number' } }, description: 'Complete node budget metrics' }
       },
       required: ['nodeId']
     }
@@ -318,8 +334,27 @@ export const TOOLS = [
         summary: { type: 'string', description: 'Completion summary or verification notes for this task' },
         outputArtifacts: { type: 'array', items: { type: 'string' }, description: 'Output artifact files created or modified during this task (e.g. ["src/auth.ts", "tests/auth.test.ts"])' },
         advanceNextNode: { type: 'boolean', default: true, description: 'Whether to automatically advance the immediate next pending node to "in_progress" for seamless single-agent flow' },
-        autoCompletePlan: { type: 'boolean', default: true, description: 'Whether to automatically mark the entire plan as completed if all nodes are now complete' }
+        autoCompletePlan: { type: 'boolean', default: true, description: 'Whether to automatically mark the entire plan as completed if all nodes are now complete' },
+        costUsd: { type: 'number', description: 'Final actual consumed cost for this completed task in USD' },
+        budgetLimitUsd: { type: 'number', description: 'Allocated budget limit for this completed node in USD' },
+        budgetUsd: { type: 'number', description: 'Final cost or budget for this completed node in USD' },
+        tokensUsed: {
+          description: 'Token usage consumed during this task (number or object with input, output, total)',
+          oneOf: [
+            { type: 'number' },
+            {
+              type: 'object',
+              properties: {
+                input: { type: 'number' },
+                output: { type: 'number' },
+                total: { type: 'number' }
+              }
+            }
+          ]
+        },
+        budget: { type: 'object', properties: { budgetLimitUsd: { type: 'number' }, costUsd: { type: 'number' }, inputTokens: { type: 'number' }, outputTokens: { type: 'number' }, totalTokens: { type: 'number' } }, description: 'Complete node budget metrics' }
       },
+
       required: ['nodeId']
     }
   },
@@ -563,6 +598,35 @@ export const TOOLS = [
     }
   },
   {
+    name: 'topology_optimize_council_allocation',
+    description: 'Analyze live RPM, TPM, and daily token reserves across registered council models, projecting financial cost and quota consumption for multi-round deliberations. Generates ranked candidate model rosters that respect the 85% safe quota ceiling and target USD budget limits, with intelligent surrogate model recommendations.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        targetBudgetUsd: {
+          type: 'number',
+          description: 'Optional target USD budget ceiling for the deliberation session (e.g. 0.05, 0.10, 0.50, 1.00)'
+        },
+        rounds: {
+          type: 'number',
+          default: 3,
+          description: 'Number of deliberation rounds planned (1 to 3, default: 3)'
+        },
+        strategy: {
+          type: 'string',
+          enum: ['balanced', 'cost_optimized', 'maximum_reasoning', 'surrogate_fallback'],
+          default: 'balanced',
+          description: 'Optimization strategy: "balanced" (high quality within safe limits), "cost_optimized" (minimizes USD expenditure), "maximum_reasoning" (top frontier models), or "surrogate_fallback" (maximizes quota headroom)'
+        },
+        requiredSpecialists: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional array of specific model IDs that must be included in candidate rosters'
+        }
+      }
+    }
+  },
+  {
     name: 'topology_export_council_adr',
     description: 'Export the consensus of a council deliberation session into a standardized Architectural Decision Record (ADR) Markdown document, optionally written to docs/adr/.',
     inputSchema: {
@@ -780,7 +844,7 @@ export const TOOLS = [
 ];
 
 // Tool Handlers
-async function handleToolCall(name, args = {}) {
+export async function handleToolCall(name, args = {}) {
   if (name === 'topology_create_plan') {
     if (!args || typeof args !== 'object') {
       args = { title: 'Dynamic Workflow', nodes: [], edges: [] };
@@ -788,27 +852,57 @@ async function handleToolCall(name, args = {}) {
     const nodesList = Array.isArray(args.nodes) ? args.nodes : [];
     const edgesList = Array.isArray(args.edges) ? args.edges : [];
 
-    const formattedNodes = nodesList.map((n, idx) => ({
-      id: n.id || `node-${idx + 1}`,
-      label: n.label || `Task ${idx + 1}`,
-      type: n.type || 'task',
-      description: n.description || '',
-      status: n.status || (idx === 0 ? 'in_progress' : 'pending'),
-      priority: n.priority || 'medium',
-      position: { x: 80, y: 80 + idx * 240 },
-      context: {
-        role: n.role || args.agentRole || 'Worker',
-        promptTemplate: n.description || '',
-        toolsRequired: [],
-        inputArtifacts: [],
-        outputArtifacts: [],
-        validationCriteria: 'Invariants verified',
-        requiresHumanApproval: Boolean(n.requiresApproval),
-        approvalStatus: n.requiresApproval ? 'pending' : undefined,
-      },
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    }));
+    let sumNodeCost = 0;
+    let sumInTokens = 0;
+    let sumOutputTokens = 0;
+
+    const formattedNodes = nodesList.map((n, idx) => {
+      const nodeLimit = n.budgetLimitUsd !== undefined ? n.budgetLimitUsd : (n.budgetUsd !== undefined ? n.budgetUsd : n.budget?.budgetLimitUsd);
+      const nodeCost = n.costUsd !== undefined ? n.costUsd : n.budget?.costUsd;
+      const inTok = n.tokensUsed?.input !== undefined ? n.tokensUsed.input : n.budget?.inputTokens;
+      const outTok = n.tokensUsed?.output !== undefined ? n.tokensUsed.output : n.budget?.outputTokens;
+      const totTok = typeof n.tokensUsed === 'number' ? n.tokensUsed : (n.tokensUsed?.total !== undefined ? n.tokensUsed.total : n.budget?.totalTokens);
+
+      const nodeBudget = {
+        ...(n.budget || {}),
+        ...(nodeLimit !== undefined ? { budgetLimitUsd: nodeLimit } : {}),
+        ...(nodeCost !== undefined ? { costUsd: nodeCost } : {}),
+        ...(inTok !== undefined ? { inputTokens: inTok } : {}),
+        ...(outTok !== undefined ? { outputTokens: outTok } : {}),
+        ...(totTok !== undefined ? { totalTokens: totTok } : {}),
+      };
+
+      sumNodeCost += (nodeBudget.costUsd || 0);
+      sumInTokens += (nodeBudget.inputTokens || 0);
+      sumOutputTokens += (nodeBudget.outputTokens || 0);
+
+      return {
+        id: n.id || `node-${idx + 1}`,
+        label: n.label || `Task ${idx + 1}`,
+        type: n.type || 'task',
+        description: n.description || '',
+        status: n.status || (idx === 0 ? 'in_progress' : 'pending'),
+        priority: n.priority || 'medium',
+        position: { x: 80, y: 80 + idx * 240 },
+        budget: nodeBudget,
+        context: {
+          role: n.role || args.agentRole || 'Worker',
+          promptTemplate: n.description || '',
+          toolsRequired: [],
+          inputArtifacts: [],
+          outputArtifacts: [],
+          validationCriteria: 'Invariants verified',
+          requiresHumanApproval: Boolean(n.requiresApproval),
+          approvalStatus: n.requiresApproval ? 'pending' : undefined,
+          budget: nodeBudget,
+          budgetLimitUsd: nodeLimit,
+          costUsd: nodeCost,
+          tokensUsed: n.tokensUsed,
+        },
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+    });
 
     let formattedEdges = edgesList.map((e, idx) => ({
       id: e.id || `edge-${idx + 1}`,
@@ -839,6 +933,11 @@ async function handleToolCall(name, args = {}) {
     const agentRole = args.agentRole || 'Orchestrator';
     const agentId = args.agentId || `agent-${agentRole.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
 
+    const planLimit = args.budgetLimitUsd !== undefined 
+      ? args.budgetLimitUsd 
+      : (args.budgetUsd !== undefined ? args.budgetUsd : args.budget?.budgetLimitUsd);
+    const initialPlanCost = args.costUsd !== undefined ? args.costUsd : args.budget?.costUsd;
+
     const planPayload = {
       id: planId,
       planId,
@@ -849,8 +948,19 @@ async function handleToolCall(name, args = {}) {
       nodes: formattedNodes,
       edges: formattedEdges,
       makeActive: args.makeActive !== false,
+      budgetLimitUsd: typeof planLimit === 'number' && !isNaN(planLimit) && planLimit >= 0 ? Number(planLimit.toFixed(4)) : undefined,
+      costUsd: typeof initialPlanCost === 'number' && !isNaN(initialPlanCost) && initialPlanCost >= 0 ? Number(initialPlanCost.toFixed(4)) : undefined,
       updatedAt: Date.now(),
     };
+    planPayload.budget = computePlanBudgetMetrics(planPayload);
+    planPayload.budgetLimitUsd = planPayload.budget.budgetLimitUsd;
+    planPayload.costUsd = planPayload.budget.costUsd;
+
+    const totalPlanSpend = planPayload.budget.costUsd;
+    const planLimitVal = planPayload.budget.budgetLimitUsd;
+    const remainingHeadroom = planPayload.budget.remainingUsd;
+    const utilizationPct = planPayload.budget.utilizationPercent;
+
 
     // 1. Fallback save to disk (both multi-plan registry and legacy single file)
     const storedPlans = readJson(PLANS_FILE, {});
@@ -864,8 +974,8 @@ async function handleToolCall(name, args = {}) {
     appendLog({
       action: 'plan_init',
       planId,
-      thought: `Plan "${planPayload.title}" [${planId}] initialized with ${formattedNodes.length} nodes and ${formattedEdges.length} edges by ${agentRole}`,
-      payload: { planId, title: planPayload.title, nodeCount: formattedNodes.length, edgeCount: formattedEdges.length, agentRole },
+      thought: `Plan "${planPayload.title}" [${planId}] initialized with ${formattedNodes.length} nodes, ${formattedEdges.length} edges, and budget $${planLimitVal.toFixed(2)} by ${agentRole}`,
+      payload: { planId, title: planPayload.title, nodeCount: formattedNodes.length, edgeCount: formattedEdges.length, agentRole, budgetLimitUsd: planLimitVal, costUsd: totalPlanSpend },
     }).catch(() => {});
 
     // 2. Broadcast via bridge
@@ -884,6 +994,8 @@ async function handleToolCall(name, args = {}) {
                 `- **Authoring Agent**: ${agentRole} (\`${agentId}\`)\n` +
                 `- **Total Nodes**: ${formattedNodes.length}\n` +
                 `- **Total Dependencies**: ${formattedEdges.length}\n` +
+                `- **Plan Budget**: $${totalPlanSpend.toFixed(2)} / $${planLimitVal.toFixed(2)} (${utilizationPct}% utilized, $${remainingHeadroom.toFixed(2)} remaining)\n` +
+
                 `- **First Action**: \`${formattedNodes[0]?.label || 'Task'}\` (Status: ${formattedNodes[0]?.status || 'ready'})\n` +
                 `- **Live View**: [Open Topology Visualizer](http://localhost:5173)\n` +
                 `- **Status**: ${bridgeNotice}${resilientNotice}`
@@ -904,7 +1016,7 @@ async function handleToolCall(name, args = {}) {
       };
     }
 
-    const { planId, nodeId, status, thought, toolName, terminalLog, outputArtifacts } = args;
+    const { planId, nodeId, status, thought, toolName, terminalLog, outputArtifacts, budgetLimitUsd, budgetUsd, costUsd, tokensUsed, budget } = args;
 
     // 1. Fallback update to disk
     const storedPlans = readJson(PLANS_FILE, {});
@@ -941,6 +1053,44 @@ async function handleToolCall(name, args = {}) {
         }
         if (outputArtifacts) target.context.outputArtifacts = outputArtifacts;
 
+        // Node budget update
+        const isClearingLimit = Boolean(args.clearBudgetLimit || budgetLimitUsd === null);
+        const rawLimit = budgetLimitUsd !== undefined ? budgetLimitUsd : (budgetUsd !== undefined ? budgetUsd : budget?.budgetLimitUsd);
+        const nodeLimit = (typeof rawLimit === 'number' && !isNaN(rawLimit) && rawLimit >= 0) ? Number(rawLimit.toFixed(4)) : undefined;
+        const rawNodeCost = costUsd !== undefined ? costUsd : budget?.costUsd;
+        const nodeCost = (typeof rawNodeCost === 'number' && !isNaN(rawNodeCost) && rawNodeCost >= 0) ? Number(rawNodeCost.toFixed(4)) : undefined;
+        const inTokens = tokensUsed?.input !== undefined ? tokensUsed.input : budget?.inputTokens;
+        const outTokens = tokensUsed?.output !== undefined ? tokensUsed.output : budget?.outputTokens;
+        const totTokens = typeof tokensUsed === 'number' ? tokensUsed : (tokensUsed?.total !== undefined ? tokensUsed.total : budget?.totalTokens);
+
+        if (isClearingLimit || nodeLimit !== undefined || nodeCost !== undefined || inTokens !== undefined || outTokens !== undefined || totTokens !== undefined || budget) {
+          const prevBudget = target.budget || target.context?.budget || {};
+          const newBudget = {
+            ...prevBudget,
+            ...(budget || {}),
+            ...(nodeCost !== undefined ? { costUsd: nodeCost } : {}),
+            ...(inTokens !== undefined ? { inputTokens: Math.round(inTokens) } : {}),
+            ...(outTokens !== undefined ? { outputTokens: Math.round(outTokens) } : {}),
+            ...(totTokens !== undefined ? { totalTokens: Math.round(totTokens) } : {}),
+          };
+          if (isClearingLimit) {
+            delete newBudget.budgetLimitUsd;
+            delete target.context.budgetLimitUsd;
+          } else if (nodeLimit !== undefined) {
+            newBudget.budgetLimitUsd = nodeLimit;
+            target.context.budgetLimitUsd = nodeLimit;
+          }
+          target.budget = newBudget;
+          target.context.budget = newBudget;
+          if (nodeCost !== undefined) target.context.costUsd = nodeCost;
+          if (tokensUsed !== undefined) target.context.tokensUsed = tokensUsed;
+        }
+
+        // Recompute plan spend
+        storedPlans[targetPlanKey].budget = computePlanBudgetMetrics(storedPlans[targetPlanKey]);
+        storedPlans[targetPlanKey].budgetLimitUsd = storedPlans[targetPlanKey].budget.budgetLimitUsd;
+        storedPlans[targetPlanKey].costUsd = storedPlans[targetPlanKey].budget.costUsd;
+
         // Clean up previous in_progress nodes when single agent moves to next node
         if (status === 'in_progress') {
           storedPlans[targetPlanKey].nodes.forEach(n => {
@@ -971,7 +1121,19 @@ async function handleToolCall(name, args = {}) {
     }
 
     // 2. Broadcast via bridge & append to Git log
-    const bridgeResult = await sendToBridge('node', { planId: targetPlanKey, nodeId, status, thought, toolName, terminalLog, outputArtifacts });
+    const bridgeResult = await sendToBridge('node', {
+      planId: targetPlanKey,
+      nodeId,
+      status,
+      thought,
+      toolName,
+      terminalLog,
+      outputArtifacts,
+      budgetLimitUsd,
+      costUsd,
+      tokensUsed,
+      budget,
+    });
     appendLog({
       action: 'node_update',
       planId: targetPlanKey,
@@ -979,15 +1141,21 @@ async function handleToolCall(name, args = {}) {
       status,
       thought,
       toolName,
-      payload: { outputArtifacts },
+      payload: { outputArtifacts, costUsd, budgetLimitUsd, tokensUsed },
     }).catch(() => {});
     const resilientNotice = formatResilientNotice(bridgeResult);
 
+    const nodeCostVal = (targetPlanKey ? storedPlans[targetPlanKey]?.nodes?.find(n => n.id === nodeId)?.budget?.costUsd : undefined) ?? costUsd;
+    const costSnippet = nodeCostVal !== undefined ? ` | Cost: $${Number(nodeCostVal).toFixed(4)}` : '';
+    const planBudgetData = targetPlanKey ? storedPlans[targetPlanKey]?.budget : null;
+    const planBudgetSnippet = planBudgetData
+      ? ` | Plan Budget: $${planBudgetData.costUsd.toFixed(2)}/$${planBudgetData.budgetLimitUsd.toFixed(2)} (${planBudgetData.utilizationPercent}%)`
+      : '';
     return {
       content: [
         {
           type: 'text',
-          text: `✅ **Node Updated** [\`${nodeId}\`${targetPlanKey ? ` in plan \`${targetPlanKey}\`` : ''}]: Status: \`${status || 'unchanged'}\`${thought ? ` | Thought: "${thought}"` : ''}${resilientNotice}`
+          text: `✅ **Node Updated** [\`${nodeId}\`${targetPlanKey ? ` in plan \`${targetPlanKey}\`` : ''}]: Status: \`${status || 'unchanged'}\`${thought ? ` | Thought: "${thought}"` : ''}${costSnippet}${planBudgetSnippet}${resilientNotice}`
         }
       ]
     };
@@ -1005,7 +1173,7 @@ async function handleToolCall(name, args = {}) {
       };
     }
 
-    const { planId, nodeId, summary, outputArtifacts, advanceNextNode = true, autoCompletePlan = true } = args;
+    const { planId, nodeId, summary, outputArtifacts, advanceNextNode = true, autoCompletePlan = true, costUsd, budgetLimitUsd, budgetUsd, tokensUsed, budget } = args;
 
     // 1. Locate target plan
     const storedPlans = readJson(PLANS_FILE, {});
@@ -1021,12 +1189,14 @@ async function handleToolCall(name, args = {}) {
 
     let nextNodeToAdvance = null;
     let isPlanFullyCompleted = false;
+    let targetNode = null;
 
     if (targetPlanKey && storedPlans[targetPlanKey] && Array.isArray(storedPlans[targetPlanKey].nodes)) {
       const planNodes = storedPlans[targetPlanKey].nodes;
       const targetIdx = planNodes.findIndex(n => n.id === nodeId);
       if (targetIdx !== -1) {
         const target = planNodes[targetIdx];
+        targetNode = target;
         target.status = 'completed';
         target.updatedAt = Date.now();
         target.context = target.context || {};
@@ -1043,6 +1213,38 @@ async function handleToolCall(name, args = {}) {
         if (outputArtifacts && Array.isArray(outputArtifacts)) {
           target.context.outputArtifacts = outputArtifacts;
         }
+
+        // Complete node budget update
+        const rawNodeLimit = budgetLimitUsd !== undefined ? budgetLimitUsd : budget?.budgetLimitUsd;
+        const nodeLimit = (typeof rawNodeLimit === 'number' && !isNaN(rawNodeLimit) && rawNodeLimit >= 0) ? Number(rawNodeLimit.toFixed(4)) : undefined;
+        const rawNodeCost = costUsd !== undefined ? costUsd : (budgetUsd !== undefined ? budgetUsd : budget?.costUsd);
+        const nodeCost = (typeof rawNodeCost === 'number' && !isNaN(rawNodeCost) && rawNodeCost >= 0) ? Number(rawNodeCost.toFixed(4)) : undefined;
+        const inTokens = tokensUsed?.input !== undefined ? tokensUsed.input : budget?.inputTokens;
+        const outTokens = tokensUsed?.output !== undefined ? tokensUsed.output : budget?.outputTokens;
+        const totTokens = typeof tokensUsed === 'number' ? tokensUsed : (tokensUsed?.total !== undefined ? tokensUsed.total : budget?.totalTokens);
+
+        if (nodeLimit !== undefined || nodeCost !== undefined || inTokens !== undefined || outTokens !== undefined || totTokens !== undefined || budget) {
+          const prevBudget = target.budget || target.context?.budget || {};
+          const newBudget = {
+            ...prevBudget,
+            ...(budget || {}),
+            ...(nodeLimit !== undefined ? { budgetLimitUsd: nodeLimit } : {}),
+            ...(nodeCost !== undefined ? { costUsd: nodeCost } : {}),
+            ...(inTokens !== undefined ? { inputTokens: Math.round(inTokens) } : {}),
+            ...(outTokens !== undefined ? { outputTokens: Math.round(outTokens) } : {}),
+            ...(totTokens !== undefined ? { totalTokens: Math.round(totTokens) } : {}),
+          };
+          target.budget = newBudget;
+          target.context.budget = newBudget;
+          if (nodeLimit !== undefined) target.context.budgetLimitUsd = nodeLimit;
+          if (nodeCost !== undefined) target.context.costUsd = nodeCost;
+          if (tokensUsed !== undefined) target.context.tokensUsed = tokensUsed;
+        }
+
+        // Recompute plan spend using pure planBudget engine
+        storedPlans[targetPlanKey].budget = computePlanBudgetMetrics(storedPlans[targetPlanKey]);
+        storedPlans[targetPlanKey].budgetLimitUsd = storedPlans[targetPlanKey].budget.budgetLimitUsd;
+        storedPlans[targetPlanKey].costUsd = storedPlans[targetPlanKey].budget.costUsd;
 
         // Clean up any other node erroneously lingering in in_progress
         planNodes.forEach((n, idx) => {
@@ -1091,6 +1293,10 @@ async function handleToolCall(name, args = {}) {
       outputArtifacts,
       advanceNextNodeId: nextNodeToAdvance?.id,
       autoCompletePlan: isPlanFullyCompleted,
+      costUsd,
+      budgetLimitUsd: targetNode?.budget?.budgetLimitUsd,
+      tokensUsed,
+      budget: targetNode?.budget,
     });
 
     appendLog({
@@ -1099,7 +1305,7 @@ async function handleToolCall(name, args = {}) {
       nodeId,
       status: 'completed',
       thought: summary,
-      payload: { outputArtifacts, nextNodeId: nextNodeToAdvance?.id, planCompleted: isPlanFullyCompleted },
+      payload: { outputArtifacts, nextNodeId: nextNodeToAdvance?.id, planCompleted: isPlanFullyCompleted, costUsd },
     }).catch(() => {});
 
     const resilientNotice = formatResilientNotice(bridgeResult);
@@ -1110,11 +1316,22 @@ async function handleToolCall(name, args = {}) {
       ? `\n\n⏩ **Workflow Advanced**: Next task [\`${nextNodeToAdvance.id}\`] ("${nextNodeToAdvance.label}") is now \`in_progress\`.`
       : '';
 
+    const budgetSummary = targetNode?.budget?.costUsd !== undefined
+      ? `\n- **Node Spend**: $${targetNode.budget.costUsd.toFixed(4)}${targetNode.budget.budgetLimitUsd ? ` / $${targetNode.budget.budgetLimitUsd.toFixed(2)} limit` : ''}`
+      : (costUsd !== undefined ? `\n- **Node Spend**: $${Number(costUsd).toFixed(4)}` : '');
+    const tokensSummary = tokensUsed !== undefined
+      ? `\n- **Tokens Used**: ${typeof tokensUsed === 'number' ? tokensUsed.toLocaleString() : (tokensUsed.total || 0).toLocaleString()}`
+      : '';
+    const planBudgetData = targetPlanKey ? storedPlans[targetPlanKey]?.budget : null;
+    const planBudgetSummary = planBudgetData
+      ? `\n- **Plan Budget Status**: $${planBudgetData.costUsd.toFixed(4)} / $${planBudgetData.budgetLimitUsd.toFixed(2)} (${planBudgetData.utilizationPercent}% utilized, $${planBudgetData.remainingUsd.toFixed(4)} headroom remaining)`
+      : '';
+
     return {
       content: [
         {
           type: 'text',
-          text: `✅ **Task Completed** [\`${nodeId}\`${targetPlanKey ? ` in plan \`${targetPlanKey}\`` : ''}]: Status marked \`completed\`.${summary ? `\n- **Summary**: ${summary}` : ''}${outputArtifacts?.length ? `\n- **Artifacts**: ${outputArtifacts.join(', ')}` : ''}${completionMsg}${resilientNotice}`
+          text: `✅ **Task Completed** [\`${nodeId}\`${targetPlanKey ? ` in plan \`${targetPlanKey}\`` : ''}]: Status marked \`completed\`.${summary ? `\n- **Summary**: ${summary}` : ''}${budgetSummary}${tokensSummary}${planBudgetSummary}${outputArtifacts?.length ? `\n- **Artifacts**: ${outputArtifacts.join(', ')}` : ''}${completionMsg}${resilientNotice}`
         }
       ]
     };
@@ -1745,6 +1962,55 @@ async function handleToolCall(name, args = {}) {
     };
   }
 
+  if (name === 'topology_optimize_council_allocation') {
+    const { targetBudgetUsd, rounds = 3, strategy = 'balanced', requiredSpecialists = [] } = args;
+    const result = budgetTracker.optimizeCouncilAllocation({
+      targetBudgetUsd,
+      rounds,
+      strategy,
+      requiredSpecialists
+    });
+
+    let out = `⚡ **Topology Council Quota & Cost Allocation Optimizer**\n\n`;
+    out += `**Safety Ceiling Threshold**: \`85%\` (15% reserve buffer enforced)\n`;
+    out += `**Deliberation Rounds**: \`${result.options.rounds}\` | **Strategy**: \`${result.options.strategy}\``;
+    if (result.options.targetBudgetUsd != null) {
+      out += ` | **Target Budget**: \`$${Number(result.options.targetBudgetUsd).toFixed(4)} USD\``;
+    }
+    out += `\n\n`;
+
+    out += `### 🏆 Recommended Roster: **${result.recommendedRoster.rosterName}** (Suitability: ${result.recommendedRoster.suitabilityScore}/100)\n`;
+    out += `- **Models**: ${result.recommendedRoster.models.map(m => `\`${m}\``).join(', ')}\n`;
+    out += `- **Projected Session Cost**: \`$${result.recommendedRoster.projectedCostUsd.toFixed(4)} USD\`\n`;
+    out += `- **Max RPM Utilization**: \`${result.recommendedRoster.maxRpmUtilizationPct}%\` (< 85% safe ceiling: ${result.recommendedRoster.safeCeilingSatisfied ? '✅ Satisfied' : '❌ Exceeded'})\n`;
+    out += `- **Max TPM Utilization**: \`${result.recommendedRoster.maxTpmUtilizationPct}%\` (< 85% safe ceiling: ${result.recommendedRoster.safeCeilingSatisfied ? '✅ Satisfied' : '❌ Exceeded'})\n\n`;
+
+    if (result.recommendedRoster.surrogateSubstitutions?.length > 0) {
+      out += `#### 🔄 Surrogate Substitutions Applied:\n`;
+      for (const s of result.recommendedRoster.surrogateSubstitutions) {
+        out += `- **${s.original}** ➔ **${s.surrogate}**: ${s.rationale}\n`;
+      }
+      out += `\n`;
+    }
+
+    out += `### 📋 Ranked Candidate Rosters:\n\n`;
+    out += `| Rank | Roster | Members | Projected Cost | Max RPM | Max TPM | Safe Ceiling (<85%) | Score |\n`;
+    out += `| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n`;
+    for (const r of result.candidateRosters) {
+      const safeIcon = r.safeCeilingSatisfied ? '✅ Safe' : '⚠️ Exceeded';
+      out += `| #${r.rank} | **${r.rosterName}** | ${r.models.join(', ')} | $${r.projectedCostUsd.toFixed(4)} | ${r.maxRpmUtilizationPct}% | ${r.maxTpmUtilizationPct}% | ${safeIcon} | **${r.suitabilityScore}** |\n`;
+    }
+
+    out += `\n\`\`\`json\n${JSON.stringify(result, null, 2)}\n\`\`\`\n`;
+
+    return {
+      content: [{
+        type: 'text',
+        text: out
+      }]
+    };
+  }
+
   if (name === 'topology_export_council_adr') {
     const { sessionId, title, saveToDisk = true } = args;
     const session = sessionId ? councilOrchestrator.getCouncilSession(sessionId) : councilOrchestrator.getLastSession();
@@ -1822,6 +2088,8 @@ async function handleToolCall(name, args = {}) {
         }]
       };
     }
+  }
+
   if (name === 'topology_unregister_model') {
     const { modelId } = args;
     if (!modelId) {
@@ -2501,7 +2769,7 @@ async function handleToolCall(name, args = {}) {
 }
 
 // JSON-RPC Message Processing
-const rl = readline.createInterface({
+export const rl = readline.createInterface({
   input: process.stdin,
   output: process.stdout,
   terminal: false

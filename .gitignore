@@ -38,3 +38,4 @@ tmp/
 .topology/*
 !.topology/topology.log
 !.topology/config.json
+.agents/teamwork/

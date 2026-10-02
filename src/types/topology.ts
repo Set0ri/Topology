@@ -182,7 +182,37 @@ export interface AgentActionContext {
     evaluatedResult?: boolean;
     evaluatedAt?: number;
   };
+  // Budget & Token Consumption Metrics
+  budgetLimitUsd?: number;
+  costUsd?: number;
+  tokensUsed?: {
+    input?: number;
+    output?: number;
+    total?: number;
+  } | number;
+  budget?: NodeBudgetMetrics;
 }
+
+export interface NodeBudgetMetrics {
+  budgetLimitUsd?: number; // Allocated ceiling/budget limit for this node in USD
+  costUsd?: number;        // Actual consumed cost for this node in USD
+  inputTokens?: number;    // Prompt tokens consumed
+  outputTokens?: number;   // Completion tokens consumed
+  totalTokens?: number;    // Total tokens consumed
+}
+
+export interface PlanBudgetMetrics {
+  budgetLimitUsd?: number;     // Total allocated budget ceiling for the plan in USD
+  costUsd?: number;            // Total consumed spend in USD across all nodes
+  remainingUsd?: number;       // Remaining budget headroom in USD
+  utilizationPercent?: number; // Budget utilization percentage (0 - 100%)
+  totalInputTokens?: number;   // Total prompt tokens across all nodes
+  totalOutputTokens?: number;  // Total completion tokens across all nodes
+  totalTokens?: number;        // Grand total tokens across all nodes
+}
+
+export type ResolvedNodeBudgetMetrics = Required<Omit<NodeBudgetMetrics, 'budgetLimitUsd'>> & { budgetLimitUsd?: number };
+export type ResolvedPlanBudgetMetrics = Required<PlanBudgetMetrics>;
 
 export interface TopologyNode {
   id: string;
@@ -196,6 +226,7 @@ export interface TopologyNode {
   position: { x: number; y: number };
   progress?: number; // 0 to 100
   subgraph?: SubgraphData; // Nested sub-graph of same topology type
+  budget?: NodeBudgetMetrics;
   createdAt: number;
   updatedAt: number;
 }
@@ -346,6 +377,9 @@ export interface TopologyPlanRecord {
   latestThought?: string;
   activeTool?: string;
   oodaLoop?: OodaLoopTelemetry;
+  budgetLimitUsd?: number;
+  costUsd?: number;
+  budget?: PlanBudgetMetrics;
 }
 
 export interface PlanSummary {
@@ -374,6 +408,9 @@ export interface PlanSummary {
   latestThought?: string;
   activeTool?: string;
   oodaLoop?: OodaLoopTelemetry;
+  budgetLimitUsd?: number;
+  costUsd?: number;
+  budget?: PlanBudgetMetrics;
 }
 
 export interface ModelQuotaMetric {
@@ -516,6 +553,50 @@ export interface CouncilSession {
   adr?: CouncilAdrReport;
   estimatedCostUsd?: number;
   budgetReport?: CouncilBudgetReport;
+  benchmarkReport?: CouncilBenchmarkReport;
+}
+
+// --------------------------------------------------------------------------
+// Automated Benchmark & Consensus Confidence Scoring Types
+// --------------------------------------------------------------------------
+
+export interface ArchitecturalCoherenceReport {
+  hasCycle: boolean;
+  cycleNodeIds: string[];
+  isCoherent: boolean;
+  disconnectedNodeCount: number;
+  terminalMilestoneCount: number;
+  scorePct: number;
+}
+
+export interface ConstraintEvaluation {
+  constraint: string;
+  satisfied: boolean;
+  confidence?: number;
+  evidenceSnippet?: string;
+  verifiedInLocation?: string;
+}
+
+export interface CritiqueResolution {
+  critique: string;
+  raisedBy?: string;
+  resolvedBy?: string;
+  mitigationAction?: string;
+  resolved: boolean;
+}
+
+export interface CouncilBenchmarkReport {
+  sessionId: string;
+  timestamp: string;
+  constraintSatisfactionPct: number;
+  adversarialResolutionScorePct: number;
+  consensusConfidencePct: number;
+  architecturalCoherence: ArchitecturalCoherenceReport;
+  overallScorePct: number;
+  status: 'OPTIMAL' | 'VIABLE' | 'NEEDS_REFINEMENT';
+  summary: string;
+  constraintEvaluations?: ConstraintEvaluation[];
+  critiqueResolutions?: CritiqueResolution[];
 }
 
 // --------------------------------------------------------------------------
@@ -577,5 +658,55 @@ export interface OodaLoopTelemetry {
   isConverged: boolean;
   history: OodaLoopIteration[];
   updatedAt: number;
+}
+
+// --------------------------------------------------------------------------
+// Real-Time Inter-Model Debate Streaming Types
+// --------------------------------------------------------------------------
+
+export type DeliberationPhase = 'ideate' | 'critique' | 'synthesize';
+
+export type DebateChunkType =
+  | 'thought'
+  | 'proposal'
+  | 'critique'
+  | 'rebuttal'
+  | 'synthesis'
+  | 'status';
+
+export interface CouncilDebateChunk {
+  sessionId: string;
+  planId: string;
+  round: number;
+  phase: DeliberationPhase;
+  modelId: string;
+  deltaText: string;
+  tokensUsedDelta: number;
+  costUsdDelta: number;
+  timestamp: number;
+  isComplete?: boolean;
+  modelName?: string;
+  avatar?: string;
+  color?: string;
+  chunkIndex?: number;
+  chunkType?: DebateChunkType;
+  totalTokensUsed?: number;
+  totalCostUsd?: number;
+}
+
+export interface CouncilDebateMessage {
+  id: string;
+  sessionId: string;
+  round: number;
+  phase: DeliberationPhase;
+  modelId: string;
+  modelName: string;
+  avatar: string;
+  color: string;
+  text: string;
+  chunkType: DebateChunkType;
+  timestamp: number;
+  tokensUsed?: number;
+  costUsd?: number;
 }
 

@@ -758,6 +758,68 @@ async function main() {
       break;
     }
 
+    case 'optimize-budget': {
+      const rawBudget = args.budget || args.maxCost || args['target-budget'] || args.targetBudgetUsd || args.b;
+      const targetBudgetUsd = rawBudget != null ? parseFloat(rawBudget) : undefined;
+      const rounds = parseInt(args.rounds || args.r || 3, 10) || 3;
+      const strategy = args.strategy || args.s || 'balanced';
+      const rawSpecialists = args.specialists || args.models || args.requiredSpecialists;
+      const requiredSpecialists = rawSpecialists ? String(rawSpecialists).split(',').map(s => s.trim()).filter(Boolean) : [];
+
+      const result = budgetTracker.optimizeCouncilAllocation({
+        targetBudgetUsd,
+        rounds,
+        strategy,
+        requiredSpecialists,
+      });
+
+      if (args.json) {
+        console.log(JSON.stringify(result, null, 2));
+        break;
+      }
+
+      console.log(`\n⚡ Topology Multi-Model Council Quota & Budget Optimizer:`);
+      console.log(`   Strategy: ${result.options.strategy} | Rounds: ${result.options.rounds}${result.options.targetBudgetUsd != null ? ` | Target Budget: $${Number(result.options.targetBudgetUsd).toFixed(4)}` : ''}`);
+      console.log(`   Safety Stop Reserve: 15% (Strict < 85% ceiling enforced)\n`);
+
+      console.log(`🏆 Recommended Roster: [Rank #1] ${result.recommendedRoster.rosterName}`);
+      console.log(`   Models:            ${result.recommendedRoster.models.join(', ')}`);
+      console.log(`   Projected Cost:    $${result.recommendedRoster.projectedCostUsd.toFixed(4)} USD`);
+      console.log(`   Max RPM / TPM:     ${result.recommendedRoster.maxRpmUtilizationPct}% RPM / ${result.recommendedRoster.maxTpmUtilizationPct}% TPM`);
+      console.log(`   Safe Ceiling:      ${result.recommendedRoster.safeCeilingSatisfied ? '✅ Satisfied (< 85%)' : '⚠️ Ceilings Exceeded'}`);
+      console.log(`   Suitability Score: ${result.recommendedRoster.suitabilityScore} / 100\n`);
+
+      if (result.recommendedRoster.surrogateSubstitutions?.length > 0) {
+        console.log(`🔄 Surrogate Recommendations:`);
+        for (const s of result.recommendedRoster.surrogateSubstitutions) {
+          console.log(`   • ${s.original} ➔ ${s.surrogate}: ${s.rationale}`);
+        }
+        console.log('');
+      }
+
+      console.log(`Candidate Rosters:`);
+      console.log(`┌──────┬────────────────────────────────┬──────────────────────────────────────┬─────────────┬───────────┬───────────┬─────────────┬────────┐`);
+      console.log(`│ Rank │ Roster Name                    │ Members                              │ Est Cost ($)│ Max RPM % │ Max TPM % │ Safe (<85%) │ Score  │`);
+      console.log(`├──────┼────────────────────────────────┼──────────────────────────────────────┼─────────────┼───────────┼───────────┼─────────────┼────────┤`);
+      for (const r of result.candidateRosters) {
+        const rankStr = String(r.rank).padEnd(4);
+        const nameStr = r.rosterName.slice(0, 30).padEnd(30);
+        const membersStr = r.models.join(', ').slice(0, 36).padEnd(36);
+        const costStr = `$${r.projectedCostUsd.toFixed(4)}`.padEnd(11);
+        const rpmStr = `${r.maxRpmUtilizationPct}%`.padEnd(9);
+        const tpmStr = `${r.maxTpmUtilizationPct}%`.padEnd(9);
+        const safeStr = (r.safeCeilingSatisfied ? 'YES' : 'NO').padEnd(11);
+        const scoreStr = String(r.suitabilityScore).padEnd(6);
+        console.log(`│ ${rankStr} │ ${nameStr} │ ${membersStr} │ ${costStr} │ ${rpmStr} │ ${tpmStr} │ ${safeStr} │ ${scoreStr} │`);
+      }
+      console.log(`└──────┴────────────────────────────────┴──────────────────────────────────────┴─────────────┴───────────┴───────────┴─────────────┴────────┘`);
+
+      const commandModels = result.recommendedRoster.models.join(',');
+      console.log(`\n💡 To convene council with recommended roster:`);
+      console.log(`   node scripts/topology-log.mjs council --models="${commandModels}" --rounds=${result.options.rounds} --goal="<your architectural goal>"\n`);
+      break;
+    }
+
     case 'ooda':
     case 'loop': {
       const planId = args.plan || args.planId || args._[1];
@@ -962,6 +1024,7 @@ Usage:
   node scripts/topology-log.mjs sessions        List recorded council deliberation sessions
   node scripts/topology-log.mjs adr             [--session <id>] [--save] Export consensus ADR Markdown
   node scripts/topology-log.mjs budget          Display live model quotas, usage, costs, and TTR countdowns
+  node scripts/topology-log.mjs optimize-budget [--budget <usd>] [--rounds <n>] [--strategy <str>] Optimize council roster
   node scripts/topology-log.mjs loop            --plan <id> --loop <N> --max-loops <M> --stage <stage> [--thought <text>] Emit OODA telemetry
   node scripts/topology-log.mjs loops           [--plan <id>] Inspect OODA loop iterations and history
   node scripts/topology-log.mjs log             --action <action> [--plan <planId>] [--nodeId <id>] [--agent <name>] [--thought <text>] [--status <status>]

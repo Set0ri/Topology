@@ -28,14 +28,15 @@ import {
   ShieldAlert,
   Play,
   Users,
-  Brain
+  Brain,
+  Coins
 } from 'lucide-react';
-import { useTopologyStore, createSyntheticArtifactPayload } from '../../store/useTopologyStore';
+import { useTopologyStore, createSyntheticArtifactPayload, getNodeBudgetMetrics } from '../../store/useTopologyStore';
 import { NodeStatus, Priority, AgentRole, ArtifactPayload, ExecutionType, ModelEngine, MultiAgentCollaborationMode, AgentWorker } from '../../types/topology';
 import { getNodeTypeColor, getStatusColor } from '../../utils/catppuccin';
 import { generateAgentPromptPayload } from '../../utils/agentHandoff';
 
-type InspectorTab = 'overview' | 'squad' | 'artifacts' | 'context' | 'telemetry' | 'hitl';
+type InspectorTab = 'overview' | 'budget' | 'squad' | 'artifacts' | 'context' | 'telemetry' | 'hitl';
 
 export const NodeInspector: React.FC = () => {
   const selectedNodeId = useTopologyStore(s => s.selectedNodeId);
@@ -59,6 +60,7 @@ export const NodeInspector: React.FC = () => {
   const writeSharedContext = useTopologyStore(s => s.writeSharedContext);
   const clearSharedContext = useTopologyStore(s => s.clearSharedContext);
   const setViewingArtifact = useTopologyStore(s => s.setViewingArtifact);
+  const setNodeBudget = useTopologyStore(s => s.setNodeBudget);
 
   const [activeTab, setActiveTab] = useState<InspectorTab>('overview');
   const [selectedArtifactName, setSelectedArtifactName] = useState<string | null>(null);
@@ -81,10 +83,34 @@ export const NodeInspector: React.FC = () => {
   const [newTool, setNewTool] = useState('');
   const [newInput, setNewInput] = useState('');
   const [newOutput, setNewOutput] = useState('');
+  const [budgetLimitInput, setBudgetLimitInput] = useState('');
+  const [budgetSavedFeedback, setBudgetSavedFeedback] = useState(false);
 
   const node = nodes.find(n => n.id === selectedNodeId);
 
+  const nodeBudget = React.useMemo(() => (node ? getNodeBudgetMetrics(node) : {
+    costUsd: 0,
+    budgetLimitUsd: undefined,
+    inputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+    utilizationPercent: 0,
+  }), [node]);
+
+  React.useEffect(() => {
+    if (node && nodeBudget.budgetLimitUsd !== undefined) {
+      setBudgetLimitInput(String(nodeBudget.budgetLimitUsd));
+    } else {
+      setBudgetLimitInput('');
+    }
+  }, [node?.id, nodeBudget.budgetLimitUsd]);
+
   if (!node) return null;
+
+  const nodeBudgetUtilization = (typeof nodeBudget.budgetLimitUsd === 'number' && nodeBudget.budgetLimitUsd > 0)
+    ? Math.round((nodeBudget.costUsd / nodeBudget.budgetLimitUsd) * 100)
+    : (nodeBudget.costUsd > 0 && nodeBudget.budgetLimitUsd === 0 ? 100 : 0);
+
 
   const nodeContextMap = (sharedContext?.nodes && node) ? (sharedContext.nodes[node.id] || {}) : {};
   const nodeContextEntries = Object.values(nodeContextMap);
@@ -252,6 +278,24 @@ export const NodeInspector: React.FC = () => {
 
           <button
             type="button"
+            onClick={() => setActiveTab('budget')}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-xl text-xs font-medium transition-all border-none cursor-pointer ${
+              activeTab === 'budget'
+                ? 'bg-white dark:bg-cat-mocha-mantle text-amber-600 dark:text-amber-400 shadow-elevated-sm font-semibold'
+                : 'text-cat-latte-subtext0 dark:text-cat-mocha-subtext0 hover:text-cat-latte-text dark:hover:text-cat-mocha-text'
+            }`}
+          >
+            <Coins size={13} />
+            <span>Budget</span>
+            {nodeBudget.costUsd > 0 && (
+              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 font-mono font-semibold">
+                ${nodeBudget.costUsd.toFixed(2)}
+              </span>
+            )}
+          </button>
+
+          <button
+            type="button"
             onClick={() => setActiveTab('squad')}
             className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-xl text-xs font-medium transition-all border-none cursor-pointer ${
               activeTab === 'squad'
@@ -399,6 +443,63 @@ export const NodeInspector: React.FC = () => {
                 onChange={(e) => updateNode(node.id, { description: e.target.value })}
                 className="w-full px-3 py-2 rounded-xl text-xs leading-relaxed bg-cat-latte-surface0/70 dark:bg-cat-mocha-surface0/60 text-cat-latte-text dark:text-cat-mocha-text placeholder-cat-latte-overlay0 dark:placeholder-cat-mocha-overlay1 focus:outline-none focus:ring-1 focus:ring-cat-mocha-sapphire/50 border-none resize-none transition-all"
               />
+            </div>
+
+            {/* Inline Budget & Cost Summary */}
+            <div className="p-3.5 rounded-2xl bg-cat-latte-surface0/60 dark:bg-cat-mocha-surface0/40 space-y-2.5 border-none">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
+                  <Coins size={13} />
+                  Budget & Spend
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('budget')}
+                  className="text-[10px] font-mono text-cat-latte-sapphire dark:text-cat-mocha-sapphire hover:underline border-none bg-transparent cursor-pointer"
+                >
+                  Configure Limit →
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between text-xs font-mono">
+                <span className="opacity-70 text-[11px]">Consumed:</span>
+                <span className="font-semibold text-cat-latte-text dark:text-cat-mocha-text">
+                  ${nodeBudget.costUsd.toFixed(4)}
+                  {nodeBudget.budgetLimitUsd ? (
+                    <span className="opacity-60 font-normal"> / ${nodeBudget.budgetLimitUsd.toFixed(2)}</span>
+                  ) : null}
+                </span>
+              </div>
+
+              {nodeBudget.budgetLimitUsd !== undefined && nodeBudget.budgetLimitUsd > 0 && (
+                <div className="space-y-1">
+                  <div className="w-full bg-black/5 dark:bg-white/10 h-1.5 rounded-full overflow-hidden border-none">
+                    <div
+                      className={`h-full rounded-full transition-all duration-300 ${
+                        nodeBudgetUtilization >= 100
+                          ? 'bg-rose-500'
+                          : nodeBudgetUtilization >= 75
+                          ? 'bg-amber-500'
+                          : 'bg-emerald-500'
+                      }`}
+                      style={{ width: `${Math.min(100, Math.max(0, nodeBudgetUtilization))}%` }}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between text-[10px] font-mono opacity-60">
+                    <span>{nodeBudgetUtilization}% utilized</span>
+                    <span>
+                      ${Math.max(0, nodeBudget.budgetLimitUsd - nodeBudget.costUsd).toFixed(4)} remaining
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {nodeBudget.totalTokens > 0 && (
+                <div className="text-[10px] font-mono opacity-60 flex items-center justify-between pt-0.5">
+                  <span>Tokens Used:</span>
+                  <span>{nodeBudget.totalTokens.toLocaleString()}</span>
+                </div>
+              )}
             </div>
 
             {/* Execution Mode & Engine Model Assignment */}
@@ -568,6 +669,201 @@ export const NodeInspector: React.FC = () => {
                   className="w-full px-3 py-1.5 rounded-xl text-xs font-mono bg-cat-latte-surface0/70 dark:bg-cat-mocha-surface0/60 text-cat-latte-text dark:text-cat-mocha-text focus:outline-none border-none"
                 />
               )}
+            </div>
+          </div>
+        )}
+
+        {/* Tab: Node Budget & Cost Allocation */}
+        {activeTab === 'budget' && (
+          <div className="flex-1 overflow-y-auto pr-1 space-y-4 custom-scrollbar">
+            {/* Top Cost Metric Card */}
+            <div className="p-4 rounded-2xl bg-cat-latte-surface0/70 dark:bg-cat-mocha-surface0/50 backdrop-blur-xl shadow-elevated-sm space-y-3 border-none">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
+                  <Coins size={14} />
+                  Budget Utilization
+                </span>
+                {nodeBudget.budgetLimitUsd !== undefined && nodeBudget.budgetLimitUsd > 0 && (
+                  <span
+                    className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border-none ${
+                      nodeBudgetUtilization >= 100
+                        ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400'
+                        : nodeBudgetUtilization >= 75
+                        ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300'
+                        : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                    }`}
+                  >
+                    {nodeBudgetUtilization}%
+                  </span>
+                )}
+              </div>
+
+              {/* Amount Display */}
+              <div className="flex items-baseline justify-between">
+                <div>
+                  <div className="text-[10px] font-medium uppercase tracking-wider text-cat-latte-overlay1 dark:text-cat-mocha-overlay2">
+                    Actual Spend
+                  </div>
+                  <div className="text-xl font-bold font-mono text-cat-latte-text dark:text-cat-mocha-text mt-0.5">
+                    ${nodeBudget.costUsd.toFixed(4)}
+                  </div>
+                </div>
+
+                <div className="text-right">
+                  <div className="text-[10px] font-medium uppercase tracking-wider text-cat-latte-overlay1 dark:text-cat-mocha-overlay2">
+                    Budget Ceiling
+                  </div>
+                  <div className="text-xl font-bold font-mono text-cat-latte-text dark:text-cat-mocha-text mt-0.5">
+                    {nodeBudget.budgetLimitUsd !== undefined && nodeBudget.budgetLimitUsd > 0
+                      ? `$${nodeBudget.budgetLimitUsd.toFixed(2)}`
+                      : 'None'}
+                  </div>
+                </div>
+              </div>
+
+              {/* Progress Bar */}
+              {nodeBudget.budgetLimitUsd !== undefined && nodeBudget.budgetLimitUsd > 0 && (
+                <div className="space-y-1.5 pt-1">
+                  <div className="w-full bg-black/10 dark:bg-white/10 h-2 rounded-full overflow-hidden border-none">
+                    <div
+                      className={`h-full rounded-full transition-all duration-300 ${
+                        nodeBudgetUtilization >= 100
+                          ? 'bg-rose-500'
+                          : nodeBudgetUtilization >= 75
+                          ? 'bg-amber-500'
+                          : 'bg-emerald-500'
+                      }`}
+                      style={{ width: `${Math.min(100, Math.max(0, nodeBudgetUtilization))}%` }}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between text-[11px] font-mono text-cat-latte-subtext0 dark:text-cat-mocha-subtext0">
+                    <span>
+                      {nodeBudgetUtilization >= 100 ? (
+                        <span className="text-rose-500 font-semibold">Over Budget by ${(nodeBudget.costUsd - nodeBudget.budgetLimitUsd).toFixed(4)}</span>
+                      ) : (
+                        <span>${(nodeBudget.budgetLimitUsd - nodeBudget.costUsd).toFixed(4)} Headroom</span>
+                      )}
+                    </span>
+                    <span>Cap: ${nodeBudget.budgetLimitUsd.toFixed(2)}</span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Token Consumption Card */}
+            <div className="p-3.5 rounded-2xl bg-cat-latte-surface0/60 dark:bg-cat-mocha-surface0/40 space-y-2 border-none">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-cat-latte-overlay1 dark:text-cat-mocha-overlay2 block">
+                Token Consumption Metrics
+              </span>
+
+              <div className="grid grid-cols-3 gap-2 pt-1 font-mono">
+                <div className="p-2 rounded-xl bg-cat-latte-surface1/50 dark:bg-cat-mocha-surface0/60 border-none text-center">
+                  <div className="text-[9px] uppercase tracking-wider text-cat-latte-overlay0 dark:text-cat-mocha-overlay1">
+                    Input
+                  </div>
+                  <div className="text-xs font-semibold text-cat-latte-text dark:text-cat-mocha-text mt-0.5">
+                    {(nodeBudget.inputTokens || 0).toLocaleString()}
+                  </div>
+                </div>
+
+                <div className="p-2 rounded-xl bg-cat-latte-surface1/50 dark:bg-cat-mocha-surface0/60 border-none text-center">
+                  <div className="text-[9px] uppercase tracking-wider text-cat-latte-overlay0 dark:text-cat-mocha-overlay1">
+                    Output
+                  </div>
+                  <div className="text-xs font-semibold text-cat-latte-text dark:text-cat-mocha-text mt-0.5">
+                    {(nodeBudget.outputTokens || 0).toLocaleString()}
+                  </div>
+                </div>
+
+                <div className="p-2 rounded-xl bg-cat-latte-surface1/50 dark:bg-cat-mocha-surface0/60 border-none text-center">
+                  <div className="text-[9px] uppercase tracking-wider text-cat-latte-overlay0 dark:text-cat-mocha-overlay1">
+                    Total
+                  </div>
+                  <div className="text-xs font-bold text-cat-latte-sapphire dark:text-cat-mocha-sapphire mt-0.5">
+                    {(nodeBudget.totalTokens || 0).toLocaleString()}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Set / Adjust Budget Limit */}
+            <div className="p-4 rounded-2xl bg-cat-latte-surface0/60 dark:bg-cat-mocha-surface0/40 space-y-3 border-none">
+              <label className="text-[11px] font-bold uppercase tracking-wider text-cat-latte-overlay1 dark:text-cat-mocha-overlay2 block">
+                Configure Node Budget Limit (USD)
+              </label>
+
+              <div className="flex items-center gap-2">
+                <div className="relative flex-1">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-mono font-bold opacity-60">
+                    $
+                  </span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    placeholder="e.g. 0.25"
+                    value={budgetLimitInput}
+                    onChange={(e) => setBudgetLimitInput(e.target.value)}
+                    className="w-full pl-7 pr-3 py-2 rounded-xl text-xs font-mono font-semibold bg-cat-latte-surface1/60 dark:bg-cat-mocha-surface0/70 text-cat-latte-text dark:text-cat-mocha-text focus:outline-none focus:ring-1 focus:ring-amber-500/50 border-none"
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const parsed = parseFloat(budgetLimitInput);
+                    if (!isNaN(parsed) && parsed >= 0) {
+                      setNodeBudget(node.id, { budgetLimitUsd: parsed });
+                      setBudgetSavedFeedback(true);
+                      setTimeout(() => setBudgetSavedFeedback(false), 2000);
+                    }
+                  }}
+                  className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-amber-500 hover:bg-amber-600 text-white transition-all border-none cursor-pointer shadow-elevated-xs active:scale-95 flex items-center gap-1"
+                >
+                  {budgetSavedFeedback ? <Check size={13} /> : <Coins size={13} />}
+                  <span>{budgetSavedFeedback ? 'Saved' : 'Save Limit'}</span>
+                </button>
+              </div>
+
+              {/* Quick Presets */}
+              <div className="space-y-1.5 pt-1">
+                <span className="text-[10px] font-medium uppercase tracking-wider text-cat-latte-overlay0 dark:text-cat-mocha-overlay1 block">
+                  Quick Presets
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {[0.05, 0.10, 0.25, 0.50, 1.00, 2.50].map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => {
+                        setBudgetLimitInput(String(preset));
+                        setNodeBudget(node.id, { budgetLimitUsd: preset });
+                        setBudgetSavedFeedback(true);
+                        setTimeout(() => setBudgetSavedFeedback(false), 2000);
+                      }}
+                      className={`px-2.5 py-1 rounded-xl text-[11px] font-mono transition-all border-none cursor-pointer ${
+                        nodeBudget.budgetLimitUsd === preset
+                          ? 'bg-amber-500 text-white font-bold shadow-elevated-xs'
+                          : 'bg-cat-latte-surface1/60 dark:bg-cat-mocha-surface0/70 text-cat-latte-subtext0 dark:text-cat-mocha-subtext0 hover:bg-cat-latte-surface2/80 dark:hover:bg-cat-mocha-surface1'
+                      }`}
+                    >
+                      ${preset.toFixed(2)}
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setBudgetLimitInput('');
+                      setNodeBudget(node.id, { budgetLimitUsd: undefined });
+                      setBudgetSavedFeedback(true);
+                      setTimeout(() => setBudgetSavedFeedback(false), 2000);
+                    }}
+                    className="px-2.5 py-1 rounded-xl text-[11px] font-mono bg-cat-latte-surface1/60 dark:bg-cat-mocha-surface0/70 text-cat-latte-subtext0 dark:text-cat-mocha-subtext0 hover:bg-rose-500/15 hover:text-rose-600 transition-all border-none cursor-pointer"
+                  >
+                    Clear Limit
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         )}
@@ -809,7 +1105,7 @@ export const NodeInspector: React.FC = () => {
             {/* Artifact Payload Viewer */}
             {activePayload ? (
               <div className="p-3 rounded-2xl bg-cat-latte-surface0/60 dark:bg-cat-mocha-surface0/40 space-y-2 flex-1 flex flex-col">
-                <div className="flex items-center justify-between pb-1 border-b border-cat-latte-surface1 dark:border-cat-mocha-surface0/50">
+                <div className="flex items-center justify-between pb-1 border-none">
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-mono font-bold text-cat-latte-teal dark:text-cat-mocha-teal">
                       {activePayload.name}

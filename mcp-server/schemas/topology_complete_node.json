@@ -1,0 +1,96 @@
+{
+  "name": "topology_complete_node",
+  "description": "Mark a specific node as completed in the Topology workflow DAG. Records deliverable artifacts, summary notes, consumed costs, and token usage. Automatically transitions the completed node out of \"in_progress\", advances the next pending node to \"in_progress\" (if advanceNextNode is true), and automatically marks the entire plan completed if all nodes are done—preventing hanging plans.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "nodeId": {
+        "type": "string",
+        "description": "The ID of the node to mark as completed"
+      },
+      "planId": {
+        "type": "string",
+        "description": "Optional plan ID owning the node. If omitted, the server automatically resolves which plan owns the node."
+      },
+      "summary": {
+        "type": "string",
+        "description": "Completion summary or verification notes for this task"
+      },
+      "outputArtifacts": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Output artifact files created or modified during this task (e.g. [\"src/auth.ts\", \"tests/auth.test.ts\"])"
+      },
+      "advanceNextNode": {
+        "type": "boolean",
+        "default": true,
+        "description": "Whether to automatically advance the immediate next pending node to \"in_progress\" for seamless single-agent flow"
+      },
+      "autoCompletePlan": {
+        "type": "boolean",
+        "default": true,
+        "description": "Whether to automatically mark the entire plan as completed if all nodes are now complete"
+      },
+      "costUsd": {
+        "type": "number",
+        "description": "Final actual consumed cost for this completed task in USD"
+      },
+      "budgetLimitUsd": {
+        "type": "number",
+        "description": "Allocated budget limit for this completed node in USD"
+      },
+      "budgetUsd": {
+        "type": "number",
+        "description": "Final cost or budget for this completed node in USD (alias)"
+      },
+      "tokensUsed": {
+        "description": "Token usage consumed during this task (number or object with input, output, total)",
+        "oneOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "input": {
+                "type": "number"
+              },
+              "output": {
+                "type": "number"
+              },
+              "total": {
+                "type": "number"
+              }
+            }
+          }
+        ]
+      },
+      "budget": {
+        "type": "object",
+        "description": "Complete node budget metrics",
+        "properties": {
+          "budgetLimitUsd": {
+            "type": "number"
+          },
+          "costUsd": {
+            "type": "number"
+          },
+          "inputTokens": {
+            "type": "number"
+          },
+          "outputTokens": {
+            "type": "number"
+          },
+          "totalTokens": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    "required": [
+      "nodeId"
+    ]
+  }
+}

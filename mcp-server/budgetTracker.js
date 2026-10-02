@@ -734,6 +734,438 @@ class BudgetTracker {
     this.saveState();
     return this.getBudgetStatus(now);
   }
+
+  /**
+   * Dynamic Quota & Cost Allocation Optimizer
+   * Analyzes live RPM/TPM quota headroom (< 85% ceiling), sliding window TTR,
+   * target financial budget in USD, and multi-round consumption projections.
+   * Generates and ranks 4 candidate roster archetypes with intelligent surrogate substitution.
+   *
+   * @param {Object} [options={}]
+   * @param {number} [options.targetBudgetUsd] - Target financial ceiling in USD
+   * @param {number} [options.rounds=3] - Number of deliberation rounds planned (1 to 10)
+   * @param {'balanced'|'cost_optimized'|'maximum_reasoning'|'surrogate_fallback'} [options.strategy='balanced']
+   * @param {string[]} [options.requiredSpecialists=[]] - Model IDs required to be included
+   * @param {number} [options.now] - Optional timestamp override
+   * @returns {Object} QuotaOptimizationResult
+   */
+  optimizeCouncilAllocation(options = {}) {
+    const now = typeof options.now === 'number' ? options.now : Date.now();
+    this.prune(now);
+
+    const rounds = Math.max(1, Math.min(10, parseInt(options.rounds ?? 3, 10) || 3));
+    let targetBudgetUsd = undefined;
+    if (typeof options.targetBudgetUsd === 'number' && !isNaN(options.targetBudgetUsd) && options.targetBudgetUsd > 0) {
+      targetBudgetUsd = options.targetBudgetUsd;
+    } else if (typeof options.targetBudgetUsd === 'string' && !isNaN(parseFloat(options.targetBudgetUsd)) && parseFloat(options.targetBudgetUsd) > 0) {
+      targetBudgetUsd = parseFloat(options.targetBudgetUsd);
+    }
+
+    const validStrategies = ['balanced', 'cost_optimized', 'maximum_reasoning', 'surrogate_fallback'];
+    const strategy = validStrategies.includes(options.strategy) ? options.strategy : 'balanced';
+
+    const requiredSpecialists = Array.isArray(options.requiredSpecialists)
+      ? options.requiredSpecialists.map(s => String(s).trim().toLowerCase()).filter(Boolean)
+      : [];
+
+    const allConfigs = getAllModelConfigs();
+    const modelEvaluations = {};
+
+    // 1. Evaluate live quota headroom and multi-round consumption for every registered model
+    for (const [modelId, cfg] of Object.entries(allConfigs)) {
+      const m = this.state.models[modelId] || {
+        requests: [],
+        dailyRequests: 0,
+        dailyTokens: 0,
+        dailyCostUsd: 0,
+        dailyResetAt: getUtcMidnightTimestamp(now),
+        throttledUntil: null,
+      };
+
+      const isThrottled = Boolean(m.throttledUntil && now < m.throttledUntil);
+      const waitSeconds = isThrottled ? Math.max(1, Math.ceil((m.throttledUntil - now) / 1000)) : 0;
+
+      const currentRpm = m.requests.length;
+      const currentTpm = m.requests.reduce((sum, r) => sum + (r.tokens || 0), 0);
+      const currentDaily = m.dailyTokens;
+
+      const rpmLimit = cfg.limits?.rpm || 60;
+      const tpmLimit = cfg.limits?.tpm || 300000;
+      const dailyLimit = cfg.limits?.dailyTokens || 5000000;
+
+      const safeRpmLimit = Math.floor(rpmLimit * SAFETY_STOP_THRESHOLD);
+      const safeTpmLimit = Math.floor(tpmLimit * SAFETY_STOP_THRESHOLD);
+      const safeDailyLimit = Math.floor(dailyLimit * SAFETY_STOP_THRESHOLD);
+
+      // Remaining effective headroom: H_effective = min(0.85 * limit - current, limit * 0.85)
+      const effectiveRpmHeadroom = Math.max(0, Math.min(safeRpmLimit - currentRpm, Math.floor(rpmLimit * SAFETY_STOP_THRESHOLD)));
+      const effectiveTpmHeadroom = Math.max(0, Math.min(safeTpmLimit - currentTpm, Math.floor(tpmLimit * SAFETY_STOP_THRESHOLD)));
+      const effectiveDailyHeadroom = Math.max(0, Math.min(safeDailyLimit - currentDaily, Math.floor(dailyLimit * SAFETY_STOP_THRESHOLD)));
+
+      const rpmHeadroomPct = safeRpmLimit > 0 ? (effectiveRpmHeadroom / safeRpmLimit) * 100 : 0;
+      const tpmHeadroomPct = safeTpmLimit > 0 ? (effectiveTpmHeadroom / safeTpmLimit) * 100 : 0;
+      const dailyHeadroomPct = safeDailyLimit > 0 ? (effectiveDailyHeadroom / safeDailyLimit) * 100 : 0;
+      const effectiveHeadroomPct = isThrottled ? 0 : Math.max(0, Math.min(rpmHeadroomPct, tpmHeadroomPct, dailyHeadroomPct));
+
+      // Multi-round token projection
+      const estInputPerRound = cfg.defaultEstInputTokens || 1500;
+      const estOutputPerRound = cfg.defaultEstOutputTokens || 3000;
+      const projectedInputTokens = rounds * estInputPerRound;
+      const projectedOutputTokens = rounds * estOutputPerRound;
+      const projectedTokens = projectedInputTokens + projectedOutputTokens;
+
+      const rateIn = cfg.ratesPerMillion?.inputUsd ?? 0.10;
+      const rateOut = cfg.ratesPerMillion?.outputUsd ?? 0.40;
+      const projectedCostUsd = Number(((projectedInputTokens * rateIn + projectedOutputTokens * rateOut) / 1000000).toFixed(6));
+
+      const projectedRpm = currentRpm + rounds;
+      const projectedTpm = currentTpm + projectedTokens;
+      const projectedDaily = currentDaily + projectedTokens;
+
+      const projectedRpmPct = Number(((projectedRpm / rpmLimit) * 100).toFixed(1));
+      const projectedTpmPct = Number(((projectedTpm / tpmLimit) * 100).toFixed(1));
+      const projectedDailyPct = Number(((projectedDaily / dailyLimit) * 100).toFixed(1));
+
+      const satisfiesCeiling = !isThrottled &&
+        (projectedRpm <= safeRpmLimit) &&
+        (projectedTpm <= safeTpmLimit) &&
+        (projectedDaily <= safeDailyLimit);
+
+      // Relative capability score
+      let capabilityTier = 0.80;
+      if (modelId === 'claude-4.6-opus') capabilityTier = 1.0;
+      else if (modelId.includes('deepseek-r1')) capabilityTier = 0.95;
+      else if (modelId.includes('deepseek-v3') || modelId.includes('gpt-4o')) capabilityTier = 0.90;
+      else if (modelId === 'gemini-3.8-flash') capabilityTier = 0.85;
+      else if (modelId === 'gpt-oss-120b') capabilityTier = 0.80;
+
+      modelEvaluations[modelId] = {
+        modelId,
+        cfg,
+        isThrottled,
+        ttrSeconds: waitSeconds,
+        currentRpm,
+        currentTpm,
+        currentDaily,
+        safeRpmLimit,
+        safeTpmLimit,
+        safeDailyLimit,
+        effectiveRpmHeadroom,
+        effectiveTpmHeadroom,
+        effectiveDailyHeadroom,
+        effectiveHeadroomPct: Number(effectiveHeadroomPct.toFixed(1)),
+        projectedCostUsd,
+        projectedRpmPct,
+        projectedTpmPct,
+        projectedDailyPct,
+        satisfiesCeiling,
+        capabilityTier,
+      };
+    }
+
+    // 2. Intelligent surrogate finder tailored to deliberation roles
+    const findSurrogateFor = (targetModelId, currentRosterModels, reason) => {
+      const origCfg = allConfigs[targetModelId] || { name: targetModelId };
+      const currentSet = new Set(currentRosterModels.map(id => String(id).toLowerCase()));
+      currentSet.add(targetModelId.toLowerCase());
+
+      let candidateIds = [];
+      if (targetModelId === 'claude-4.6-opus') {
+        candidateIds = ['deepseek-v3', 'deepseek-r1', 'gpt-4o', 'gpt-oss-120b', 'gemini-3.8-flash'];
+      } else if (targetModelId === 'gemini-3.8-flash') {
+        candidateIds = ['gpt-oss-120b', 'deepseek-v3', 'claude-4.6-opus'];
+      } else if (targetModelId === 'gpt-oss-120b') {
+        candidateIds = ['deepseek-v3', 'llama-3.3-70b', 'gemini-3.8-flash', 'claude-4.6-opus'];
+      } else {
+        candidateIds = ['gpt-oss-120b', 'gemini-3.8-flash', 'claude-4.6-opus'];
+      }
+
+      // Check prioritized candidates first
+      for (const cid of candidateIds) {
+        if (allConfigs[cid] && !currentSet.has(cid.toLowerCase()) && modelEvaluations[cid]?.satisfiesCeiling) {
+          const surrCfg = allConfigs[cid];
+          return {
+            surrogateId: cid,
+            rationale: `${origCfg.name} ${reason}. Substituted with ${surrCfg.name} (${modelEvaluations[cid].effectiveHeadroomPct}% safe headroom).`,
+          };
+        }
+      }
+
+      // Check any registered model that satisfies the ceiling
+      for (const [mid, ev] of Object.entries(modelEvaluations)) {
+        if (!currentSet.has(mid.toLowerCase()) && ev.satisfiesCeiling) {
+          const surrCfg = allConfigs[mid];
+          return {
+            surrogateId: mid,
+            rationale: `${origCfg.name} ${reason}. Substituted with ${surrCfg.name} (${ev.effectiveHeadroomPct}% safe headroom).`,
+          };
+        }
+      }
+
+      // Fallback: highest headroom model not already in roster
+      const sortedByHeadroom = Object.values(modelEvaluations)
+        .filter(ev => !currentSet.has(ev.modelId.toLowerCase()))
+        .sort((a, b) => b.effectiveHeadroomPct - a.effectiveHeadroomPct);
+
+      if (sortedByHeadroom.length > 0) {
+        const fallback = sortedByHeadroom[0];
+        return {
+          surrogateId: fallback.modelId,
+          rationale: `${origCfg.name} ${reason}. Substituted with highest-headroom available model ${fallback.cfg.name}.`,
+        };
+      }
+
+      return null;
+    };
+
+    // 3. Helper to evaluate and score a candidate roster
+    const evaluateRoster = (rosterName, rawModels, substitutions, archetypeKey) => {
+      let models = [];
+      const seen = new Set();
+      for (const id of rawModels) {
+        const norm = String(id).toLowerCase();
+        if (allConfigs[norm] && !seen.has(norm)) {
+          seen.add(norm);
+          models.push(norm);
+        }
+      }
+
+      // Ensure required specialists are always included
+      for (const req of requiredSpecialists) {
+        if (allConfigs[req] && !seen.has(req)) {
+          seen.add(req);
+          models.push(req);
+        }
+      }
+
+      // If fewer than 3 models and more exist, fill up to 3
+      if (models.length < 3) {
+        for (const id of Object.keys(allConfigs)) {
+          if (!seen.has(id)) {
+            seen.add(id);
+            models.push(id);
+            if (models.length >= 3) break;
+          }
+        }
+      }
+
+      const memberEvals = models.map(id => modelEvaluations[id] || {
+        modelId: id,
+        cfg: allConfigs[id] || { name: id, family: 'Custom' },
+        isThrottled: false,
+        effectiveHeadroomPct: 50,
+        projectedCostUsd: 0.005,
+        projectedRpmPct: 5,
+        projectedTpmPct: 5,
+        projectedDailyPct: 1,
+        satisfiesCeiling: true,
+        capabilityTier: 0.8,
+      });
+
+      const projectedCostUsd = Number(memberEvals.reduce((sum, m) => sum + m.projectedCostUsd, 0).toFixed(5));
+      const maxRpmUtilizationPct = Math.max(...memberEvals.map(m => m.projectedRpmPct));
+      const maxTpmUtilizationPct = Math.max(...memberEvals.map(m => m.projectedTpmPct));
+      const maxDailyUtilizationPct = Math.max(...memberEvals.map(m => m.projectedDailyPct));
+      const minHeadroomPct = Math.min(...memberEvals.map(m => m.effectiveHeadroomPct));
+
+      const safeCeilingSatisfied = maxRpmUtilizationPct <= (SAFETY_STOP_THRESHOLD * 100) &&
+        maxTpmUtilizationPct <= (SAFETY_STOP_THRESHOLD * 100) &&
+        maxDailyUtilizationPct <= (SAFETY_STOP_THRESHOLD * 100) &&
+        !memberEvals.some(m => m.isThrottled);
+
+      // Scoring model (0 - 100)
+      // 1. Headroom Score: 0 to 35 pts
+      const headroomScore = Math.min(35, Math.max(0, (minHeadroomPct / 100) * 35));
+
+      // 2. Cost Score: 0 to 30 pts
+      let costScore = 0;
+      if (targetBudgetUsd != null && targetBudgetUsd > 0) {
+        if (projectedCostUsd <= targetBudgetUsd) {
+          costScore = 30 * (1 - (projectedCostUsd / targetBudgetUsd));
+        } else {
+          const overrunRatio = (projectedCostUsd - targetBudgetUsd) / targetBudgetUsd;
+          costScore = -40 * Math.min(2.5, overrunRatio); // Penalize over-budget rosters
+        }
+      } else {
+        costScore = 30 / (1 + projectedCostUsd * 2.5);
+      }
+
+      // 3. Capability Score: 0 to 20 pts
+      const avgCapability = memberEvals.reduce((sum, m) => sum + m.capabilityTier, 0) / memberEvals.length;
+      const capabilityScore = avgCapability * 20;
+
+      // 4. Provider Diversity Score: 0 to 15 pts
+      const providers = new Set(memberEvals.map(m => m.cfg.provider || m.cfg.family || m.modelId));
+      let diversityScore = 5;
+      if (providers.size >= 3) diversityScore = 15;
+      else if (providers.size === 2) diversityScore = 10;
+
+      // 5. Strategy Alignment Bonus: +15 pts
+      let strategyBonus = 0;
+      if (strategy === archetypeKey) {
+        strategyBonus = 15;
+      }
+
+      // 6. Penalties
+      let penalty = 0;
+      if (!safeCeilingSatisfied) penalty += 50;
+      if (memberEvals.some(m => m.isThrottled)) penalty += 30;
+
+      const rawSuitability = headroomScore + costScore + capabilityScore + diversityScore + strategyBonus - penalty;
+      const suitabilityScore = Number(Math.max(0, Math.min(100, rawSuitability)).toFixed(1));
+
+      return {
+        rosterName,
+        models,
+        projectedCostUsd,
+        maxRpmUtilizationPct,
+        maxTpmUtilizationPct,
+        safeCeilingSatisfied,
+        surrogateSubstitutions: substitutions,
+        suitabilityScore,
+        strategy: archetypeKey,
+      };
+    };
+
+    // 4. Generate 4 Candidate Roster Archetypes:
+
+    // --- Archetype 1: Balanced Frontier Triad ---
+    const balancedSubstitutions = [];
+    const balancedModels = [];
+    const baseBalancedTargets = ['gemini-3.8-flash', 'claude-4.6-opus', 'gpt-oss-120b'];
+    for (const targetId of baseBalancedTargets) {
+      if (!allConfigs[targetId]) continue;
+      const ev = modelEvaluations[targetId];
+      const exceedsBudgetCeiling = targetBudgetUsd != null && ev && ev.projectedCostUsd > targetBudgetUsd;
+
+      if (ev && !ev.isThrottled && ev.satisfiesCeiling && !exceedsBudgetCeiling) {
+        balancedModels.push(targetId);
+      } else {
+        let reason = 'is unavailable';
+        if (ev?.isThrottled) reason = `is throttled (TTR: ${ev.ttrSeconds}s)`;
+        else if (ev && !ev.satisfiesCeiling) reason = `exceeds 85% safe ceiling (${Math.max(ev.projectedRpmPct, ev.projectedTpmPct)}% projected)`;
+        else if (exceedsBudgetCeiling) reason = `projected cost ($${ev.projectedCostUsd.toFixed(4)}) exceeds target session budget ($${targetBudgetUsd.toFixed(4)})`;
+
+        const surrogate = findSurrogateFor(targetId, balancedModels, reason);
+        if (surrogate) {
+          balancedModels.push(surrogate.surrogateId);
+          balancedSubstitutions.push({
+            original: targetId,
+            surrogate: surrogate.surrogateId,
+            rationale: surrogate.rationale,
+          });
+        } else {
+          balancedModels.push(targetId);
+        }
+      }
+    }
+    const rosterBalanced = evaluateRoster('Balanced Frontier Triad', balancedModels, balancedSubstitutions, 'balanced');
+
+    // --- Archetype 2: Cost-Optimized (Frugal) ---
+    const costOptSubstitutions = [];
+    const costOptModels = [];
+    // Sort all safe models by projected cost ascending
+    const sortedByCost = Object.values(modelEvaluations)
+      .filter(ev => ev.satisfiesCeiling)
+      .sort((a, b) => a.projectedCostUsd - b.projectedCostUsd);
+
+    for (const ev of sortedByCost) {
+      if (costOptModels.length < 3) {
+        costOptModels.push(ev.modelId);
+      }
+    }
+    // If Opus was in default triad and replaced by lower cost model
+    if (allConfigs['claude-4.6-opus'] && !costOptModels.includes('claude-4.6-opus')) {
+      const cheapestAlternative = costOptModels.find(id => id !== 'gemini-3.8-flash') || costOptModels[0] || 'gpt-oss-120b';
+      const savings = Math.max(0, (modelEvaluations['claude-4.6-opus']?.projectedCostUsd || 0.87) - (modelEvaluations[cheapestAlternative]?.projectedCostUsd || 0.005));
+      costOptSubstitutions.push({
+        original: 'claude-4.6-opus',
+        surrogate: cheapestAlternative,
+        rationale: `Substituted Claude 4.6 Opus with ${allConfigs[cheapestAlternative]?.name || cheapestAlternative} to minimize financial cost ($${savings.toFixed(4)} savings) within safe quotas.`,
+      });
+    }
+    const rosterCostOpt = evaluateRoster('Cost-Optimized (Frugal)', costOptModels, costOptSubstitutions, 'cost_optimized');
+
+    // --- Archetype 3: Maximum Reasoning Frontier ---
+    const maxReasonSubstitutions = [];
+    const maxReasonModels = [];
+    const reasoningTargets = ['claude-4.6-opus', 'gemini-3.8-flash', 'gpt-oss-120b'];
+    for (const targetId of reasoningTargets) {
+      if (!allConfigs[targetId]) continue;
+      const ev = modelEvaluations[targetId];
+      if (ev && !ev.isThrottled && ev.satisfiesCeiling) {
+        maxReasonModels.push(targetId);
+      } else {
+        const reason = ev?.isThrottled ? `is throttled (TTR: ${ev.ttrSeconds}s)` : `exceeds 85% safe ceiling (${Math.max(ev?.projectedRpmPct || 0, ev?.projectedTpmPct || 0)}%)`;
+        const surrogate = findSurrogateFor(targetId, maxReasonModels, reason);
+        if (surrogate) {
+          maxReasonModels.push(surrogate.surrogateId);
+          maxReasonSubstitutions.push({
+            original: targetId,
+            surrogate: surrogate.surrogateId,
+            rationale: surrogate.rationale,
+          });
+        } else {
+          maxReasonModels.push(targetId);
+        }
+      }
+    }
+    const rosterMaxReason = evaluateRoster('Maximum Reasoning Frontier', maxReasonModels, maxReasonSubstitutions, 'maximum_reasoning');
+
+    // --- Archetype 4: High-Headroom Surrogate Fallback ---
+    const surrogateFallbackSubstitutions = [];
+    const surrogateFallbackModels = [];
+    // Prioritize models with highest effective headroom
+    const sortedByHeadroom = Object.values(modelEvaluations)
+      .sort((a, b) => b.effectiveHeadroomPct - a.effectiveHeadroomPct);
+
+    for (const ev of sortedByHeadroom) {
+      if (surrogateFallbackModels.length < 3) {
+        surrogateFallbackModels.push(ev.modelId);
+      }
+    }
+    // Record any substitutions relative to default base
+    for (const baseId of ['claude-4.6-opus', 'gpt-oss-120b']) {
+      if (allConfigs[baseId] && !surrogateFallbackModels.includes(baseId)) {
+        const highHeadroomModel = surrogateFallbackModels.find(id => id !== 'gemini-3.8-flash') || surrogateFallbackModels[0];
+        surrogateFallbackSubstitutions.push({
+          original: baseId,
+          surrogate: highHeadroomModel,
+          rationale: `${allConfigs[baseId]?.name || baseId} safe headroom (${modelEvaluations[baseId]?.effectiveHeadroomPct || 0}%) bypassed in favor of ${allConfigs[highHeadroomModel]?.name || highHeadroomModel} (${modelEvaluations[highHeadroomModel]?.effectiveHeadroomPct || 0}% headroom) for burst safety.`,
+        });
+      }
+    }
+    const rosterSurrogate = evaluateRoster('High-Headroom Surrogate Fallback', surrogateFallbackModels, surrogateFallbackSubstitutions, 'surrogate_fallback');
+
+    // 5. Rank candidate rosters by suitabilityScore descending
+    const rawRosters = [rosterBalanced, rosterCostOpt, rosterMaxReason, rosterSurrogate];
+    rawRosters.sort((a, b) => b.suitabilityScore - a.suitabilityScore);
+
+    const candidateRosters = rawRosters.map((r, index) => ({
+      rank: index + 1,
+      rosterName: r.rosterName,
+      models: r.models,
+      projectedCostUsd: r.projectedCostUsd,
+      maxRpmUtilizationPct: r.maxRpmUtilizationPct,
+      maxTpmUtilizationPct: r.maxTpmUtilizationPct,
+      safeCeilingSatisfied: r.safeCeilingSatisfied,
+      surrogateSubstitutions: r.surrogateSubstitutions,
+      suitabilityScore: r.suitabilityScore,
+    }));
+
+    return {
+      options: {
+        targetBudgetUsd,
+        rounds,
+        strategy,
+        requiredSpecialists,
+      },
+      candidateRosters,
+      recommendedRoster: candidateRosters[0],
+      safetyCeilingThreshold: SAFETY_STOP_THRESHOLD,
+      generatedAt: new Date(now).toISOString(),
+    };
+  }
 }
 
 function formatDuration(seconds) {
@@ -749,3 +1181,8 @@ function formatDuration(seconds) {
 }
 
 export const budgetTracker = new BudgetTracker();
+
+export function optimizeCouncilAllocation(options = {}) {
+  return budgetTracker.optimizeCouncilAllocation(options);
+}
+

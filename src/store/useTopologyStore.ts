@@ -28,10 +28,15 @@ import {
   TopologyPlanRecord,
   PlanSummary,
   PlanStatus,
+  NodeBudgetMetrics,
+  PlanBudgetMetrics,
+  ResolvedNodeBudgetMetrics,
+  ResolvedPlanBudgetMetrics,
   CouncilBudgetReport,
   CouncilSession,
   CouncilAdrReport,
   CouncilSessionSummary,
+  CouncilDebateChunk,
   OodaLoopTelemetry,
   OodaLoopIteration,
   OodaStage,
@@ -42,6 +47,9 @@ import { CANONICAL_ARCHETYPES, CanonicalArchetype } from '../data/topologyRegist
 import { calculateDagreLayout, detectCycles, getTopologicalBatches } from '../utils/graphAlgorithms';
 import { importFromObsidianCanvas } from '../utils/obsidianCanvas';
 import { validateGraphCoherence } from '../utils/graphValidation';
+import { getNodeBudgetMetrics, computePlanBudgetMetrics } from '../utils/budgetCalculations';
+
+export { getNodeBudgetMetrics, computePlanBudgetMetrics };
 
 export function createSyntheticArtifactPayload(name: string, engine: string = 'gemini-2.5-pro', label = 'Task'): ArtifactPayload {
   const isTs = name.endsWith('.ts') || name.endsWith('.tsx');
@@ -303,15 +311,25 @@ interface TopologyStore {
   setPlanStatus: (planId: string, status: PlanStatus, reasonOrSummary?: string) => Promise<void>;
   cleanAndReconcilePlans: () => Promise<void>;
 
+  // Plan & Node Budget Tracking
+  setNodeBudget: (nodeId: string, budget: Partial<NodeBudgetMetrics>, planId?: string) => void;
+  setPlanBudget: (planId: string, budgetLimitUsd?: number | null) => void;
+  updatePlanBudget: (planId: string, budgetUpdates: Partial<PlanBudgetMetrics>) => void;
+
+
   // Multi-Model Council & Gemini Ultra Quota Monitor
   councilBudget: CouncilBudgetReport | null;
   councilSessions: CouncilSessionSummary[];
   isCouncilModalOpen: boolean;
   isCouncilSpawning: boolean;
   activeCouncilSession: CouncilSession | null;
+  activeDebateChunks: CouncilDebateChunk[];
+  streamingDebateSessionId: string | null;
   setCouncilModalOpen: (open: boolean) => void;
   setCouncilBudget: (budget: CouncilBudgetReport) => void;
   setActiveCouncilSession: (session: CouncilSession | null) => void;
+  appendDebateChunk: (chunk: CouncilDebateChunk) => void;
+  clearDebateChunks: () => void;
   fetchCouncilBudget: () => Promise<void>;
   fetchCouncilSessions: (limit?: number) => Promise<void>;
   fetchCouncilSessionDetails: (sessionId: string) => Promise<CouncilSession | null>;
@@ -525,6 +543,7 @@ export const computePlanSummaries = (plans: Record<string, TopologyPlanRecord>):
     );
     const latestThought = plan.latestThought || (nodes.find((n) => n.context?.telemetry?.liveThought)?.context?.telemetry?.liveThought);
     const activeTool = plan.activeTool || (nodes.find((n) => n.context?.telemetry?.activeTool)?.context?.telemetry?.activeTool);
+    const budget = computePlanBudgetMetrics(plan);
 
     return {
       id: plan.id,
@@ -551,6 +570,9 @@ export const computePlanSummaries = (plans: Record<string, TopologyPlanRecord>):
       hasActiveWork,
       latestThought,
       activeTool,
+      budgetLimitUsd: budget.budgetLimitUsd,
+      costUsd: budget.costUsd,
+      budget,
     };
   });
 };
@@ -569,7 +591,10 @@ const initialDefaultPlan: TopologyPlanRecord = {
   createdAt: Date.now(),
   updatedAt: Date.now(),
   status: 'active',
+  budgetLimitUsd: 1.00,
+  costUsd: 0,
 };
+initialDefaultPlan.budget = computePlanBudgetMetrics(initialDefaultPlan);
 
 // LocalStorage Persistence for Real Plans across all lifecycle states
 const STORAGE_KEY_PLANS = 'topology_plans_registry_v1';
@@ -658,6 +683,8 @@ export const useTopologyStore = create<TopologyStore>((set, get) => {
     isCouncilModalOpen: false,
     isCouncilSpawning: false,
     activeCouncilSession: null,
+    activeDebateChunks: [],
+    streamingDebateSessionId: null,
     activeLoopTelemetry: initialActiveRecord.oodaLoop || null,
     isLoopModalOpen: false,
     nodes: initialCanvasNodes,
@@ -1357,10 +1384,16 @@ export const useTopologyStore = create<TopologyStore>((set, get) => {
       }
       const updatedNodes = get().nodes.map(node => {
         if (node.id === id) {
+          const prevBudget = getNodeBudgetMetrics(node);
+          const nextBudget = updates.budget 
+            ? { ...prevBudget, ...updates.budget } 
+            : (updates.context?.budget ? { ...prevBudget, ...updates.context.budget } : prevBudget);
+
           return {
             ...node,
             ...updates,
-            context: updates.context ? { ...node.context, ...updates.context } : node.context,
+            budget: nextBudget,
+            context: updates.context ? { ...node.context, ...updates.context, budget: nextBudget } : { ...node.context, budget: nextBudget },
             updatedAt: Date.now(),
           };
         }
@@ -1392,7 +1425,14 @@ export const useTopologyStore = create<TopologyStore>((set, get) => {
             planUpdates.summary = 'All workflow plan tasks completed successfully.';
           }
         }
-        const mergedPlan = { ...currentPlan, ...planUpdates };
+        const mergedPlan: TopologyPlanRecord = { 
+          ...currentPlan, 
+          ...planUpdates 
+        };
+        const planBudget = computePlanBudgetMetrics(mergedPlan);
+        mergedPlan.budget = planBudget;
+        mergedPlan.costUsd = planBudget.costUsd;
+
         updatedPlans = { ...plans, [activePlanId]: mergedPlan };
         persistPlansToLocalStorage(updatedPlans, activePlanId);
       }
@@ -3098,7 +3138,19 @@ export const useTopologyStore = create<TopologyStore>((set, get) => {
       const nodeIdx = targetPlan.nodes.findIndex(n => n.id === nodeId);
       if (nodeIdx === -1) return;
 
-      const updatedNode = { ...targetPlan.nodes[nodeIdx], ...updates, updatedAt: Date.now() };
+      const existingNode = targetPlan.nodes[nodeIdx];
+      const prevBudget = getNodeBudgetMetrics(existingNode);
+      const nextBudget = updates.budget 
+        ? { ...prevBudget, ...updates.budget } 
+        : (updates.context?.budget ? { ...prevBudget, ...updates.context.budget } : prevBudget);
+
+      const updatedNode = { 
+        ...existingNode, 
+        ...updates, 
+        budget: nextBudget,
+        context: updates.context ? { ...existingNode.context, ...updates.context, budget: nextBudget } : { ...existingNode.context, budget: nextBudget },
+        updatedAt: Date.now() 
+      };
       const updatedNodes = [...targetPlan.nodes];
       updatedNodes[nodeIdx] = updatedNode;
 
@@ -3109,6 +3161,9 @@ export const useTopologyStore = create<TopologyStore>((set, get) => {
         latestThought: (updates.context?.telemetry?.liveThought as string) || targetPlan.latestThought,
         activeTool: (updates.context?.telemetry?.activeTool as string) || targetPlan.activeTool,
       };
+      const planBudget = computePlanBudgetMetrics(updatedPlan);
+      updatedPlan.budget = planBudget;
+      updatedPlan.costUsd = planBudget.costUsd;
 
       // If setting to in_progress, ensure single-agent flow by completing any previous in_progress node
       if (updates.status === 'in_progress') {
@@ -3330,9 +3385,193 @@ export const useTopologyStore = create<TopologyStore>((set, get) => {
       }
     },
 
+    setNodeBudget: (nodeId: string, budgetUpdates: Partial<NodeBudgetMetrics>, planId?: string) => {
+      const { plans, activePlanId, nodes } = get();
+      const targetPlanId = planId || activePlanId;
+      const targetPlan = plans[targetPlanId];
+      if (!targetPlan || !Array.isArray(targetPlan.nodes)) return;
+
+      const nodeIdx = targetPlan.nodes.findIndex(n => n.id === nodeId);
+      if (nodeIdx === -1) return;
+
+      const existingNode = targetPlan.nodes[nodeIdx];
+      const prevBudget = getNodeBudgetMetrics(existingNode);
+      const isClearingLimit = budgetUpdates.budgetLimitUsd === undefined || budgetUpdates.budgetLimitUsd === null;
+
+      const mergedBudget: NodeBudgetMetrics = {
+        ...prevBudget,
+        ...budgetUpdates,
+      };
+      if (isClearingLimit) {
+        delete mergedBudget.budgetLimitUsd;
+      } else if (typeof mergedBudget.budgetLimitUsd === 'number') {
+        mergedBudget.budgetLimitUsd = Number(mergedBudget.budgetLimitUsd.toFixed(4));
+      }
+      if (typeof mergedBudget.costUsd === 'number') {
+        mergedBudget.costUsd = Number(mergedBudget.costUsd.toFixed(4));
+      }
+
+      const updatedContext = {
+        ...existingNode.context,
+        budget: mergedBudget,
+        costUsd: mergedBudget.costUsd,
+        tokensUsed: {
+          input: mergedBudget.inputTokens,
+          output: mergedBudget.outputTokens,
+          total: mergedBudget.totalTokens,
+        },
+      };
+      if (isClearingLimit) {
+        delete (updatedContext as Record<string, unknown>).budgetLimitUsd;
+      } else {
+        updatedContext.budgetLimitUsd = mergedBudget.budgetLimitUsd;
+      }
+
+      const updatedNode: TopologyNode = {
+        ...existingNode,
+        budget: mergedBudget,
+        context: updatedContext,
+        updatedAt: Date.now(),
+      };
+
+      const updatedNodes = [...targetPlan.nodes];
+      updatedNodes[nodeIdx] = updatedNode;
+
+      const updatedPlan: TopologyPlanRecord = {
+        ...targetPlan,
+        nodes: updatedNodes,
+        updatedAt: Date.now(),
+      };
+      const planBudget = computePlanBudgetMetrics(updatedPlan);
+      updatedPlan.budget = planBudget;
+      updatedPlan.costUsd = planBudget.costUsd;
+
+      const updatedPlans = { ...plans, [targetPlanId]: updatedPlan };
+      persistPlansToLocalStorage(updatedPlans, activePlanId);
+
+      if (targetPlanId === activePlanId) {
+        set({
+          plans: updatedPlans,
+          nodes: nodes.map(n => n.id === nodeId ? updatedNode : n),
+          plansList: computePlanSummaries(updatedPlans),
+        });
+      } else {
+        set({
+          plans: updatedPlans,
+          plansList: computePlanSummaries(updatedPlans),
+        });
+      }
+
+      if (typeof window !== 'undefined') {
+        fetch('/api/topology/node', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            planId: targetPlanId,
+            nodeId,
+            clearBudgetLimit: isClearingLimit,
+            budgetLimitUsd: isClearingLimit ? null : mergedBudget.budgetLimitUsd,
+            costUsd: mergedBudget.costUsd,
+            tokensUsed: {
+              input: mergedBudget.inputTokens,
+              output: mergedBudget.outputTokens,
+              total: mergedBudget.totalTokens,
+            },
+            budget: mergedBudget,
+          }),
+        }).catch(() => {});
+      }
+    },
+
+    setPlanBudget: (planId: string, budgetLimitUsd?: number | null) => {
+      const { plans, activePlanId } = get();
+      const targetPlan = plans[planId];
+      if (!targetPlan) return;
+
+      const isClearing = budgetLimitUsd === null || budgetLimitUsd === undefined || isNaN(budgetLimitUsd) || (typeof budgetLimitUsd === 'number' && budgetLimitUsd < 0);
+      const updatedPlan: TopologyPlanRecord = {
+        ...targetPlan,
+        budgetLimitUsd: isClearing ? undefined : Number(budgetLimitUsd.toFixed(4)),
+        updatedAt: Date.now(),
+      };
+      if (isClearing && updatedPlan.budget) {
+        delete updatedPlan.budget.budgetLimitUsd;
+      }
+      const planBudget = computePlanBudgetMetrics(updatedPlan);
+      updatedPlan.budget = planBudget;
+      updatedPlan.costUsd = planBudget.costUsd;
+
+      const updatedPlans = { ...plans, [planId]: updatedPlan };
+      persistPlansToLocalStorage(updatedPlans, activePlanId);
+
+      set({
+        plans: updatedPlans,
+        plansList: computePlanSummaries(updatedPlans),
+      });
+
+      if (typeof window !== 'undefined') {
+        fetch('/api/topology/plan/budget', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            planId,
+            clearBudgetLimit: isClearing,
+            budgetLimitUsd: isClearing ? null : Number(budgetLimitUsd.toFixed(4)),
+          }),
+        }).catch(() => {});
+      }
+    },
+
+    updatePlanBudget: (planId: string, budgetUpdates: Partial<PlanBudgetMetrics>) => {
+      const { plans, activePlanId } = get();
+      const targetPlan = plans[planId];
+      if (!targetPlan) return;
+
+      const currentMetrics = computePlanBudgetMetrics(targetPlan);
+      const mergedMetrics: PlanBudgetMetrics = {
+        ...currentMetrics,
+        ...budgetUpdates,
+      };
+
+      const updatedPlan: TopologyPlanRecord = {
+        ...targetPlan,
+        budgetLimitUsd: mergedMetrics.budgetLimitUsd,
+        costUsd: mergedMetrics.costUsd,
+        budget: mergedMetrics,
+        updatedAt: Date.now(),
+      };
+
+      const updatedPlans = { ...plans, [planId]: updatedPlan };
+      persistPlansToLocalStorage(updatedPlans, activePlanId);
+
+      set({
+        plans: updatedPlans,
+        plansList: computePlanSummaries(updatedPlans),
+      });
+    },
+
     setCouncilModalOpen: (open: boolean) => set({ isCouncilModalOpen: open }),
     setCouncilBudget: (budget: CouncilBudgetReport) => set({ councilBudget: budget }),
     setActiveCouncilSession: (session: CouncilSession | null) => set({ activeCouncilSession: session }),
+
+    appendDebateChunk: (chunk: CouncilDebateChunk) => {
+      set((state) => {
+        const updated = state.activeDebateChunks.length >= 1000
+          ? [...state.activeDebateChunks.slice(-999), chunk]
+          : [...state.activeDebateChunks, chunk];
+        return {
+          activeDebateChunks: updated,
+          streamingDebateSessionId: chunk.sessionId || state.streamingDebateSessionId,
+        };
+      });
+    },
+
+    clearDebateChunks: () => {
+      set({
+        activeDebateChunks: [],
+        streamingDebateSessionId: null,
+      });
+    },
 
     fetchCouncilBudget: async () => {
       if (typeof window === 'undefined') return;

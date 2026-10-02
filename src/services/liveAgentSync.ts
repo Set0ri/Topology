@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useTopologyStore, ensureSequentialEdges } from '../store/useTopologyStore';
 import { calculateDagreLayout } from '../utils/graphAlgorithms';
-import { TopologyNode, TopologyEdge, AgentActivityEvent } from '../types/topology';
+import { TopologyNode, TopologyEdge, AgentActivityEvent, CouncilDebateChunk } from '../types/topology';
 
 // Pleasant Web Audio API Synthesizer (zero external assets)
 class ChimeSynthesizer {
@@ -575,6 +575,19 @@ export function useLiveAgentSync() {
           chimeSynthesizer.play('complete');
         } catch {
           // ignore
+        }
+      });
+
+      // 11b. Council Debate Chunk Streamed
+      es.addEventListener('council_debate_chunk', (e: MessageEvent) => {
+        if (!isSubscribed) return;
+        try {
+          const chunk = JSON.parse(e.data) as CouncilDebateChunk;
+          if (chunk && chunk.sessionId) {
+            useTopologyStore.getState().appendDebateChunk(chunk);
+          }
+        } catch {
+          // ignore malformed chunk
         }
       });
 

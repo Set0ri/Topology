@@ -2214,3 +2214,59 @@ flowchart TD
 | `useTopologyStore.ts` | `emitLoopTelemetry(params)` | `OodaLoopTelemetryParams` | `Promise<OodaLoopTelemetry>` | Enforces strict `maxLoops` parameter (clamped 1-10) directly within store state. Updates local Zustand store optimistically for instant UI reactivity. Asynchronously pushes to bridge and WAL. |
 | `useTopologyStore.ts` | `advanceOodaStage(planId, maxLoops)` | `planId, maxLoopsParam` | `Promise<void>` | Automatically steps sequentially through the 9 OODA stages. Caps loop count at `maxLoops`. Guards against re-advancing after convergence (`activeTelemetry.isConverged`). |
 
+
+---
+
+### 7. Plan & Node Budget Tracking Dataflow Architecture
+
+Topology provides end-to-end multi-agent financial and token budget tracking across both macroscopic execution plans and microscopic task nodes.
+
+```mermaid
+flowchart TD
+    subgraph Execution_Sources ["Telemetry & Budget Injection Sources"]
+        M1["MCP Tools: topology_create_plan (budgetLimitUsd)"]
+        M2["MCP Tools: topology_update_node / complete_node (costUsd, tokensUsed)"]
+        M3["NodeInspector UI: Custom Node Ceiling & Presets ($0.05 - $5.00)"]
+        M4["Header UI: Custom Plan Ceiling & Presets ($0.50 - $10.00)"]
+    end
+
+    subgraph Bridge_Layer ["Vite Connect Bridge & Persistence (plugins/topologyBridgePlugin.js)"]
+        B1["POST /api/topology/plan (Extract & attach budget)"]
+        B2["POST /api/topology/node (Update node spend & recompute plan budget)"]
+        B3["POST /api/topology/plan/budget (Update plan budget limit ceiling)"]
+        B4[".topology/topology.log (WAL Event stream) & LocalStorage"]
+    end
+
+    subgraph Store_Layer ["Zustand State Hub (src/store/useTopologyStore.ts)"]
+        Z1["getNodeBudgetMetrics(node) -> ResolvedNodeBudgetMetrics"]
+        Z2["computePlanBudgetMetrics(plan) -> ResolvedPlanBudgetMetrics"]
+        Z3["setNodeBudget(nodeId, budgetUpdates)"]
+        Z4["setPlanBudget(planId, limitUsd)"]
+        Z5["computePlanSummaries(plans)"]
+    end
+
+    subgraph UI_Surfaces ["Minimal, Elevated Zero-Border UI (Catppuccin Theme)"]
+        U1["TopologyCustomNode: Subtle budget pill + Hover token & cost card"]
+        U2["NodeInspector: Overview inline spend card + Dedicated Budget Tab"]
+        U3["Header: Plan budget utilization pill ($0.04 / $1.00) + Popover breakdown"]
+    end
+
+    Execution_Sources --> Bridge_Layer
+    Bridge_Layer --> Store_Layer
+    Store_Layer --> UI_Surfaces
+    M3 -->|Optimistic mutation| Store_Layer
+    M4 -->|Optimistic mutation| Store_Layer
+```
+
+#### Invariants & Calculations:
+1. **Node Cost & Ceiling**:
+   - `costUsd`: Actual consumed cost in USD (formatted to 4 decimals).
+   - `budgetLimitUsd`: Optional ceiling for an individual node.
+   - `utilizationPercent`: `(costUsd / budgetLimitUsd) * 100` (clamped 0-100% for progress bars, alerts if >= 100%).
+2. **Plan Aggregate Budget**:
+   - Total plan spend is dynamically aggregated from all constituent nodes: `sum(node.costUsd)`.
+   - Explicit plan cost overrides (if passed from an external orchestrator) take precedence via `Math.max(explicitPlanCost, calculatedCost)`.
+   - Default budget ceiling falls back to the sum of individual node ceilings or `$1.00` fallback if unconfigured.
+   - Remaining headroom is computed as `Math.max(0, budgetLimitUsd - costUsd)`.
+3. **Zero-Border Glassmorphic Design**:
+   - All budget UI components strictly conform to the system design language: `border-none` only, `backdrop-blur-*`, `shadow-elevated-*`, and Catppuccin color-coded status pills (emerald < 75%, amber 75-99%, rose >= 100%).

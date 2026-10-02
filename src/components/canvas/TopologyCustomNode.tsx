@@ -32,10 +32,11 @@ import {
   Brain,
   Lock,
   Activity,
-  WifiOff
+  WifiOff,
+  Coins
 } from 'lucide-react';
 import { TopologyNode, AgentWorker } from '../../types/topology';
-import { useTopologyStore } from '../../store/useTopologyStore';
+import { useTopologyStore, getNodeBudgetMetrics } from '../../store/useTopologyStore';
 import { AgentSatelliteNodes } from './AgentSatelliteNodes';
 import { getNodeTypeColor, getStatusColor, hexToRgba, getNodeCardStyling } from '../../utils/catppuccin';
 import { generateAgentPromptPayload } from '../../utils/agentHandoff';
@@ -140,6 +141,17 @@ const TopologyCustomNodeComponent: React.FC<NodeProps> = ({ id, data, selected }
   const assignedAgents = node.context?.assignedAgents || [];
   const collaborationMode = node.context?.collaborationMode || (assignedAgents.length > 1 ? 'parallel_subtasks' : 'solo');
   const isMultiAgent = assignedAgents.length > 1;
+
+  const nodeBudget = React.useMemo(() => getNodeBudgetMetrics(node), [node]);
+  const hasBudgetMetrics = Boolean(
+    (nodeBudget.costUsd > 0) || 
+    (nodeBudget.budgetLimitUsd !== undefined) || 
+    (nodeBudget.totalTokens > 0)
+  );
+  const budgetUtilization = (typeof nodeBudget.budgetLimitUsd === 'number' && nodeBudget.budgetLimitUsd > 0)
+    ? Math.round((nodeBudget.costUsd / nodeBudget.budgetLimitUsd) * 100)
+    : (nodeBudget.costUsd > 0 && nodeBudget.budgetLimitUsd === 0 ? 100 : 0);
+
 
   const isNodeActivelyWorking = node.status === 'in_progress' || isAgentActive || Boolean(nodeLock);
 
@@ -721,6 +733,28 @@ const TopologyCustomNodeComponent: React.FC<NodeProps> = ({ id, data, selected }
               <span>No Stop Rule!</span>
             </span>
           )}
+
+          {/* Minimal Subtle Budget Pill */}
+          {hasBudgetMetrics && (
+            <div
+              className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono border-none shrink-0 ${
+                budgetUtilization >= 100
+                  ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 font-semibold'
+                  : budgetUtilization >= 75
+                  ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300 font-medium'
+                  : isDark
+                  ? 'bg-cat-mocha-surface0/70 text-cat-mocha-subtext0'
+                  : 'bg-cat-latte-surface0 text-cat-latte-subtext0'
+              }`}
+              title={`Node Spend: $${nodeBudget.costUsd.toFixed(4)}${nodeBudget.budgetLimitUsd ? ` / $${nodeBudget.budgetLimitUsd.toFixed(2)} limit` : ''}${nodeBudget.totalTokens ? ` • ${nodeBudget.totalTokens.toLocaleString()} tokens` : ''}`}
+            >
+              <Coins size={10} className="text-amber-500 shrink-0" />
+              <span>${nodeBudget.costUsd.toFixed(2)}</span>
+              {nodeBudget.budgetLimitUsd ? (
+                <span className="opacity-60 text-[9px]">/${nodeBudget.budgetLimitUsd.toFixed(2)}</span>
+              ) : null}
+            </div>
+          )}
         </div>
 
         {/* Inline HITL Human Review Gate Banner */}
@@ -875,6 +909,56 @@ const TopologyCustomNodeComponent: React.FC<NodeProps> = ({ id, data, selected }
                   )}
                 </div>
               </div>
+
+              {/* Budget & Token Consumption Metrics (Progressive Reveal on Hover) */}
+              {hasBudgetMetrics && (
+                <div
+                  className={`p-2 rounded-xl border-none backdrop-blur-md transition-all duration-200 ${
+                    isDark ? 'bg-cat-mocha-surface0/60' : 'bg-cat-latte-surface0/60'
+                  } shadow-xs space-y-1.5`}
+                >
+                  <div className="flex items-center justify-between text-[10px] font-mono">
+                    <span className="flex items-center gap-1 opacity-70">
+                      <Coins size={10} className="text-amber-500 shrink-0" />
+                      <span>Spend / Budget</span>
+                    </span>
+                    <span className="font-semibold">
+                      ${nodeBudget.costUsd.toFixed(4)}
+                      {nodeBudget.budgetLimitUsd ? (
+                        <span className="opacity-60 font-normal"> / ${nodeBudget.budgetLimitUsd.toFixed(2)}</span>
+                      ) : null}
+                    </span>
+                  </div>
+
+                  {/* Utilization Bar */}
+                  {nodeBudget.budgetLimitUsd !== undefined && nodeBudget.budgetLimitUsd > 0 && (
+                    <div className="w-full bg-cat-mocha-surface1/40 dark:bg-cat-mocha-surface1/40 h-1.5 rounded-full overflow-hidden border-none">
+                      <div
+                        className={`h-full rounded-full transition-all duration-500 ${
+                          budgetUtilization >= 100
+                            ? 'bg-rose-500'
+                            : budgetUtilization >= 75
+                            ? 'bg-amber-500'
+                            : 'bg-emerald-500'
+                        }`}
+                        style={{ width: `${Math.min(100, Math.max(0, budgetUtilization))}%` }}
+                      />
+                    </div>
+                  )}
+
+                  {/* Token breakdown */}
+                  {nodeBudget.totalTokens > 0 && (
+                    <div className="flex items-center justify-between text-[9px] font-mono opacity-65">
+                      <span>Tokens</span>
+                      <span className="flex items-center gap-1.5">
+                        {nodeBudget.inputTokens ? <span>In: {nodeBudget.inputTokens.toLocaleString()}</span> : null}
+                        {nodeBudget.outputTokens ? <span>Out: {nodeBudget.outputTokens.toLocaleString()}</span> : null}
+                        <span>Tot: {nodeBudget.totalTokens.toLocaleString()}</span>
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Deliverable Artifact Chips */}
               {outputArtifactNames.length > 0 && (

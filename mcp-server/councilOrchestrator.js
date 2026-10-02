@@ -21,6 +21,8 @@ import path from 'path';
 import { budgetTracker, MODEL_QUOTA_CONFIG, getModelConfig, registerCustomModel } from './budgetTracker.js';
 import { providerClient } from './providerClient.js';
 import { appendLog } from './gitLock.js';
+import { emitDebateChunk } from './debateStreamBus.js';
+import { evaluateCouncilBenchmark, formatBenchmarkMarkdown } from './benchmarkEvaluator.js';
 
 const BRIDGE_HOST = '127.0.0.1';
 const BRIDGE_PORT = 5173;
@@ -598,6 +600,181 @@ export class CouncilOrchestrator {
           contribution.liveOutputSnippet = liveResult.text.slice(0, 300) + '...';
         }
 
+        // Emit incremental debate stream chunks via debateStreamBus
+        const phase = round === 1 ? 'ideate' : (round === 2 ? 'critique' : 'synthesize');
+        const costTotal = consumption.costUsd || 0;
+
+        if (liveResult.usedLiveApi && liveResult.text) {
+          // Live API streaming: split live text into 3 incremental chunks
+          const fullText = liveResult.text;
+          const len = fullText.length;
+          const p1 = Math.floor(len / 3);
+          const p2 = Math.floor((2 * len) / 3);
+
+          const t1 = Math.round(actualTokens * 0.35);
+          const t2 = Math.round(actualTokens * 0.45);
+          const t3 = Math.max(0, actualTokens - t1 - t2);
+
+          const c1 = Number((costTotal * 0.35).toFixed(6));
+          const c2 = Number((costTotal * 0.45).toFixed(6));
+          const c3 = Number(Math.max(0, costTotal - c1 - c2).toFixed(6));
+
+          // Chunk 1: Thought & Introduction
+          await emitDebateChunk({
+            sessionId,
+            planId: sessionPlanId,
+            round,
+            phase,
+            modelId: activeModelId,
+            modelName: activeCfg?.name || activeModelId,
+            avatar: activeCfg?.avatar || '🤖',
+            color: activeCfg?.color || '#6366f1',
+            deltaText: fullText.slice(0, p1),
+            chunkIndex: 1,
+            chunkType: 'thought',
+            tokensUsedDelta: t1,
+            totalTokensUsed: t1,
+            costUsdDelta: c1,
+            totalCostUsd: c1,
+            timestamp: Date.now(),
+            isComplete: false,
+          });
+
+          // Chunk 2: Core Proposals / Critiques
+          await emitDebateChunk({
+            sessionId,
+            planId: sessionPlanId,
+            round,
+            phase,
+            modelId: activeModelId,
+            modelName: activeCfg?.name || activeModelId,
+            avatar: activeCfg?.avatar || '🤖',
+            color: activeCfg?.color || '#6366f1',
+            deltaText: fullText.slice(p1, p2),
+            chunkIndex: 2,
+            chunkType: phase === 'ideate' ? 'proposal' : phase === 'critique' ? 'critique' : 'synthesis',
+            tokensUsedDelta: t2,
+            totalTokensUsed: t1 + t2,
+            costUsdDelta: c2,
+            totalCostUsd: Number((c1 + c2).toFixed(6)),
+            timestamp: Date.now(),
+            isComplete: false,
+          });
+
+          // Chunk 3: Conclusion & Synthesis
+          await emitDebateChunk({
+            sessionId,
+            planId: sessionPlanId,
+            round,
+            phase,
+            modelId: activeModelId,
+            modelName: activeCfg?.name || activeModelId,
+            avatar: activeCfg?.avatar || '🤖',
+            color: activeCfg?.color || '#6366f1',
+            deltaText: fullText.slice(p2),
+            chunkIndex: 3,
+            chunkType: 'status',
+            tokensUsedDelta: t3,
+            totalTokensUsed: actualTokens,
+            costUsdDelta: c3,
+            totalCostUsd: costTotal,
+            timestamp: Date.now(),
+            isComplete: true,
+          });
+        } else {
+          // Deterministic cognitive synthesis streaming: emit structured incremental chunks
+          const t1 = Math.round(actualTokens * 0.35);
+          const t2 = Math.round(actualTokens * 0.50);
+          const t3 = Math.max(0, actualTokens - t1 - t2);
+
+          const c1 = Number((costTotal * 0.35).toFixed(6));
+          const c2 = Number((costTotal * 0.50).toFixed(6));
+          const c3 = Number(Math.max(0, costTotal - c1 - c2).toFixed(6));
+
+          // 1. Initial reasoning & thought
+          const thoughtSnippet = contribution.thought || `Analyzing invariants for ${goal}...`;
+          await emitDebateChunk({
+            sessionId,
+            planId: sessionPlanId,
+            round,
+            phase,
+            modelId: activeModelId,
+            modelName: activeCfg?.name || activeModelId,
+            avatar: activeCfg?.avatar || '🤖',
+            color: activeCfg?.color || '#6366f1',
+            deltaText: `[${activeCfg?.name || activeModelId} (${contribution.perspective || 'Architect'})]:\n${thoughtSnippet}\n`,
+            chunkIndex: 1,
+            chunkType: 'thought',
+            tokensUsedDelta: t1,
+            totalTokensUsed: t1,
+            costUsdDelta: c1,
+            totalCostUsd: c1,
+            timestamp: Date.now(),
+            isComplete: false,
+          });
+
+          // 2. Core content (proposals / critiques / consensus summary)
+          let bodyText = '';
+          let chunkType = 'proposal';
+          if (round === 1) {
+            bodyText = (contribution.proposals || []).map((p, idx) => `• [Proposal ${idx + 1}] ${p}`).join('\n') + '\n';
+            chunkType = 'proposal';
+          } else if (round === 2) {
+            const critText = (contribution.critiques || []).map((c, idx) => `⚠️ [Risk ${idx + 1}] ${c}`).join('\n');
+            const amendText = contribution.suggestedAmendments ? `\nSuggested Amendments:\n${contribution.suggestedAmendments}` : '';
+            bodyText = critText + (amendText ? '\n' + amendText : '') + '\n';
+            chunkType = 'critique';
+          } else {
+            const summary = contribution.consensusSummary || 'Consensus reached on unified architecture.';
+            const dagText = Array.isArray(contribution.dag) && contribution.dag.length > 0
+              ? `\nKey Tasks:\n` + contribution.dag.map(t => `- [${t.role}] ${t.label}: ${t.description}`).join('\n')
+              : '';
+            bodyText = `Consensus Summary:\n${summary}${dagText}\n`;
+            chunkType = 'synthesis';
+          }
+
+          await emitDebateChunk({
+            sessionId,
+            planId: sessionPlanId,
+            round,
+            phase,
+            modelId: activeModelId,
+            modelName: activeCfg?.name || activeModelId,
+            avatar: activeCfg?.avatar || '🤖',
+            color: activeCfg?.color || '#6366f1',
+            deltaText: bodyText,
+            chunkIndex: 2,
+            chunkType,
+            tokensUsedDelta: t2,
+            totalTokensUsed: t1 + t2,
+            costUsdDelta: c2,
+            totalCostUsd: Number((c1 + c2).toFixed(6)),
+            timestamp: Date.now(),
+            isComplete: false,
+          });
+
+          // 3. Round completion marker
+          await emitDebateChunk({
+            sessionId,
+            planId: sessionPlanId,
+            round,
+            phase,
+            modelId: activeModelId,
+            modelName: activeCfg?.name || activeModelId,
+            avatar: activeCfg?.avatar || '🤖',
+            color: activeCfg?.color || '#6366f1',
+            deltaText: `[${activeCfg?.name || activeModelId} completed Round ${round} (${phase})]\n`,
+            chunkIndex: 3,
+            chunkType: 'status',
+            tokensUsedDelta: t3,
+            totalTokensUsed: actualTokens,
+            costUsdDelta: c3,
+            totalCostUsd: costTotal,
+            timestamp: Date.now(),
+            isComplete: true,
+          });
+        }
+
         return {
           halted: false,
           contribution,
@@ -763,7 +940,16 @@ export class CouncilOrchestrator {
       budgetReport: budgetTracker.getBudgetStatus(),
     };
 
-    // 5. Generate Architectural Decision Record (ADR) if requested
+    // 5. Evaluate Deliberation Benchmark & Consensus Confidence
+    const benchmarkReport = evaluateCouncilBenchmark({
+      session: sessionRecord,
+      constraints,
+      dag: sessionRecord.consensus?.dag,
+      edges: sessionRecord.consensus?.edges,
+    });
+    sessionRecord.benchmarkReport = benchmarkReport;
+
+    // 6. Generate Architectural Decision Record (ADR) if requested
     let adrReport = null;
     if (saveAdr !== false) {
       adrReport = this.generateAdrMarkdown(sessionRecord, { saveToDisk: true });
@@ -883,7 +1069,18 @@ export class CouncilOrchestrator {
     md += `## Compliance & Invariants Verification\n`;
     md += `- [x] Cross-model consensus validated across 3 distinct LLM families\n`;
     md += `- [x] 15% Gemini Ultra quota safety buffer preserved without provider lockout\n`;
-    md += `- [x] Actionable DAG ready for autonomous execution\n`;
+    md += `- [x] Actionable DAG ready for autonomous execution\n\n`;
+
+    const benchmark = session.benchmarkReport || evaluateCouncilBenchmark({
+      session,
+      constraints: session.constraints,
+      dag: session.consensus?.dag,
+      edges: session.consensus?.edges,
+    });
+
+    if (benchmark) {
+      md += `${formatBenchmarkMarkdown(benchmark)}\n\n`;
+    }
 
     if (options.saveToDisk !== false) {
       try {

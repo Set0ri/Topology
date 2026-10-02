@@ -11,6 +11,8 @@ import {
 } from '../mcp-server/gitLock.js';
 import { budgetTracker } from '../mcp-server/budgetTracker.js';
 import { councilOrchestrator } from '../mcp-server/councilOrchestrator.js';
+import { getNodeBudgetMetrics, computePlanBudgetMetrics } from '../mcp-server/planBudget.js';
+
 
 export function topologyBridgePlugin() {
   const clients = new Map();
@@ -273,6 +275,9 @@ export function topologyBridgePlugin() {
         hasActiveWork,
         latestThought,
         activeTool,
+        budgetLimitUsd: plan.budgetLimitUsd ?? plan.budget?.budgetLimitUsd,
+        costUsd: plan.costUsd ?? plan.budget?.costUsd,
+        budget: plan.budget,
       };
     });
   };
@@ -690,7 +695,37 @@ export function topologyBridgePlugin() {
                 (data.agentRole || '').toLowerCase().includes('security') ? '🛡️' : '🤖'
               ),
               agentColor: data.agentColor || existingPlan.agentColor || '#1a73e8',
-              nodes: data.nodes || existingPlan.nodes || [],
+              nodes: (data.nodes || existingPlan.nodes || []).map(n => {
+                if (!n || typeof n !== 'object') return n;
+                const nodeLimit = n.budgetLimitUsd !== undefined ? n.budgetLimitUsd : (n.budgetUsd !== undefined ? n.budgetUsd : n.budget?.budgetLimitUsd);
+                const nodeCost = n.costUsd !== undefined ? n.costUsd : n.budget?.costUsd;
+                const inTokens = n.tokensUsed?.input !== undefined ? n.tokensUsed.input : n.budget?.inputTokens;
+                const outTokens = n.tokensUsed?.output !== undefined ? n.tokensUsed.output : n.budget?.outputTokens;
+                const totTokens = typeof n.tokensUsed === 'number' ? n.tokensUsed : (n.tokensUsed?.total !== undefined ? n.tokensUsed.total : n.budget?.totalTokens);
+
+                const nodeBudget = {
+                  ...(n.budget || {}),
+                  ...(nodeLimit !== undefined ? { budgetLimitUsd: nodeLimit } : {}),
+                  ...(nodeCost !== undefined ? { costUsd: nodeCost } : {}),
+                  ...(inTokens !== undefined ? { inputTokens: inTokens } : {}),
+                  ...(outTokens !== undefined ? { outputTokens: outTokens } : {}),
+                  ...(totTokens !== undefined ? { totalTokens: totTokens } : {}),
+                };
+
+                const contextObj = {
+                  ...(n.context || {}),
+                  budget: nodeBudget,
+                  ...(nodeLimit !== undefined ? { budgetLimitUsd: nodeLimit } : {}),
+                  ...(nodeCost !== undefined ? { costUsd: nodeCost } : {}),
+                  ...(n.tokensUsed !== undefined ? { tokensUsed: n.tokensUsed } : {}),
+                };
+
+                return {
+                  ...n,
+                  budget: nodeBudget,
+                  context: contextObj,
+                };
+              }),
               edges: ensureSequentialEdges(data.nodes || existingPlan.nodes || [], data.edges || existingPlan.edges || []),
               createdAt: existingPlan.createdAt || Date.now(),
               updatedAt: Date.now(),
@@ -701,6 +736,21 @@ export function topologyBridgePlugin() {
               source: data.source || existingPlan.source || 'antigravity_agent',
               latestThought: data.latestThought || existingPlan.latestThought,
             };
+
+            // Compute and attach plan budget ceiling and metrics
+            const planLimit = data.budgetLimitUsd !== undefined 
+              ? data.budgetLimitUsd 
+              : (data.budgetUsd !== undefined ? data.budgetUsd : (data.budget?.budgetLimitUsd ?? existingPlan.budgetLimitUsd));
+            const planCost = data.costUsd !== undefined ? data.costUsd : (data.budget?.costUsd ?? existingPlan.costUsd);
+
+            planPayload.budgetLimitUsd = typeof planLimit === 'number' && !isNaN(planLimit) && planLimit >= 0 ? Number(planLimit.toFixed(4)) : undefined;
+            if (typeof planCost === 'number' && !isNaN(planCost) && planCost >= 0) {
+              planPayload.costUsd = Number(planCost.toFixed(4));
+            }
+            planPayload.budget = computePlanBudgetMetrics(planPayload);
+            planPayload.budgetLimitUsd = planPayload.budget.budgetLimitUsd;
+            planPayload.costUsd = planPayload.budget.costUsd;
+
 
             allPlans[planId] = planPayload;
 
@@ -979,6 +1029,46 @@ export function topologyBridgePlugin() {
                   targetNode.context.outputArtifacts = outputArtifacts;
                 }
 
+                // Node Budget & Token consumption update
+                const isClearingLimit = Boolean(data.clearBudgetLimit || data.budgetLimitUsd === null);
+                const rawNodeLimit = data.budgetLimitUsd !== undefined ? data.budgetLimitUsd : (data.budgetUsd !== undefined ? data.budgetUsd : data.budget?.budgetLimitUsd);
+                const nodeLimit = (typeof rawNodeLimit === 'number' && !isNaN(rawNodeLimit) && rawNodeLimit >= 0)
+                  ? Number(rawNodeLimit.toFixed(4))
+                  : undefined;
+                const nodeCost = data.costUsd !== undefined ? data.costUsd : data.budget?.costUsd;
+                const inTokens = data.tokensUsed?.input !== undefined ? data.tokensUsed.input : data.budget?.inputTokens;
+                const outTokens = data.tokensUsed?.output !== undefined ? data.tokensUsed.output : data.budget?.outputTokens;
+                const totTokens = typeof data.tokensUsed === 'number' ? data.tokensUsed : (data.tokensUsed?.total !== undefined ? data.tokensUsed.total : data.budget?.totalTokens);
+
+                if (isClearingLimit || nodeLimit !== undefined || nodeCost !== undefined || inTokens !== undefined || outTokens !== undefined || totTokens !== undefined || data.budget) {
+                  const prevBudget = targetNode.budget || targetNode.context?.budget || {};
+                  const newBudget = {
+                    ...prevBudget,
+                    ...(data.budget || {}),
+                    ...(nodeCost !== undefined ? { costUsd: Number(nodeCost.toFixed(4)) } : {}),
+                    ...(inTokens !== undefined ? { inputTokens: Math.round(inTokens) } : {}),
+                    ...(outTokens !== undefined ? { outputTokens: Math.round(outTokens) } : {}),
+                    ...(totTokens !== undefined ? { totalTokens: Math.round(totTokens) } : {}),
+                  };
+                  if (isClearingLimit) {
+                    delete newBudget.budgetLimitUsd;
+                    delete targetNode.context.budgetLimitUsd;
+                  } else if (nodeLimit !== undefined) {
+                    newBudget.budgetLimitUsd = nodeLimit;
+                    targetNode.context.budgetLimitUsd = nodeLimit;
+                  }
+                  targetNode.budget = newBudget;
+                  targetNode.context.budget = newBudget;
+                  if (nodeCost !== undefined) targetNode.context.costUsd = Number(nodeCost.toFixed(4));
+                  if (data.tokensUsed !== undefined) targetNode.context.tokensUsed = data.tokensUsed;
+                }
+
+                // Recompute plan spend and headroom using pure planBudget engine
+                allPlans[targetPlanId].budget = computePlanBudgetMetrics(allPlans[targetPlanId]);
+                allPlans[targetPlanId].budgetLimitUsd = allPlans[targetPlanId].budget.budgetLimitUsd;
+                allPlans[targetPlanId].costUsd = allPlans[targetPlanId].budget.costUsd;
+
+
                 // If moving to in_progress, ensure earlier in_progress node is marked completed for single-agent flow
                 if (status === 'in_progress') {
                   planNodes.forEach((n, idx) => {
@@ -1027,6 +1117,7 @@ export function topologyBridgePlugin() {
               }
             }
 
+            const targetNode = allPlans[targetPlanId]?.nodes?.find(n => n.id === nodeId);
             const updatePayload = {
               planId: targetPlanId,
               nodeId,
@@ -1037,6 +1128,10 @@ export function topologyBridgePlugin() {
               outputArtifacts,
               progress,
               assignedAgent,
+              budget: targetNode?.budget,
+              costUsd: targetNode?.budget?.costUsd,
+              budgetLimitUsd: targetNode?.budget?.budgetLimitUsd,
+              tokensUsed: targetNode?.context?.tokensUsed,
               timestamp: Date.now(),
             };
 
@@ -1044,7 +1139,53 @@ export function topologyBridgePlugin() {
             broadcast('plans_list_updated', { activePlanId, plans: getPlanSummaries(allPlans) });
 
             res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: true, planId: targetPlanId, updatedNodeId: nodeId }));
+            res.end(JSON.stringify({ success: true, planId: targetPlanId, updatedNodeId: nodeId, budget: targetNode?.budget }));
+          } catch (err) {
+            sendError(res, 400, TOPOLOGY_ERROR_CODES.INVALID_SCHEMA, err.message || 'Invalid JSON body');
+          }
+          return;
+        }
+
+        // 5b. Update Plan Budget Ceiling: /api/topology/plan/budget (POST)
+        if (pathname === '/api/topology/plan/budget' && req.method === 'POST') {
+          try {
+            const data = await parseJsonBody(req);
+            const isClearing = Boolean(data.clearBudgetLimit || data.budgetLimitUsd === null);
+            if (!isClearing && (budgetLimitUsd === undefined || isNaN(Number(budgetLimitUsd)))) {
+              sendError(res, 400, TOPOLOGY_ERROR_CODES.INVALID_SCHEMA, 'budgetLimitUsd is required');
+              return;
+            }
+            const allPlans = loadAllPlans();
+            const activePlanId = getActivePlanId(allPlans);
+            const targetPlanId = requestedPlanId || activePlanId;
+            const targetPlan = allPlans[targetPlanId];
+            if (!targetPlan) {
+              sendError(res, 404, TOPOLOGY_ERROR_CODES.NOT_FOUND, `Plan ${targetPlanId} not found`);
+              return;
+            }
+
+            if (isClearing) {
+              delete targetPlan.budgetLimitUsd;
+              if (targetPlan.budget) delete targetPlan.budget.budgetLimitUsd;
+            } else {
+              targetPlan.budgetLimitUsd = Number(Number(budgetLimitUsd).toFixed(4));
+            }
+            targetPlan.budget = computePlanBudgetMetrics(targetPlan);
+            targetPlan.budgetLimitUsd = targetPlan.budget.budgetLimitUsd;
+            targetPlan.costUsd = targetPlan.budget.costUsd;
+            targetPlan.updatedAt = Date.now();
+            saveAllPlans(allPlans, activePlanId);
+
+            broadcast('plan_updated', targetPlan);
+            broadcast('plans_list_updated', { activePlanId, plans: getPlanSummaries(allPlans) });
+
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ 
+              success: true, 
+              planId: targetPlanId, 
+              budgetLimitUsd: targetPlan.budgetLimitUsd, 
+              budget: targetPlan.budget 
+            }));
           } catch (err) {
             sendError(res, 400, TOPOLOGY_ERROR_CODES.INVALID_SCHEMA, err.message || 'Invalid JSON body');
           }
@@ -1434,6 +1575,23 @@ export function topologyBridgePlugin() {
             res.end(JSON.stringify({ success: true, adr }));
           } catch (err) {
             sendError(res, 500, TOPOLOGY_ERROR_CODES.INTERNAL_ERROR, err.message);
+          }
+          return;
+        }
+
+        // 21b. Ingress Council Debate Chunk: /api/topology/council/chunk (POST)
+        if (pathname === '/api/topology/council/chunk' && req.method === 'POST') {
+          try {
+            const chunk = await parseJsonBody(req);
+            if (!chunk || !chunk.sessionId || !chunk.modelId || !chunk.phase) {
+              sendError(res, 400, TOPOLOGY_ERROR_CODES.INVALID_SCHEMA, 'Missing required chunk fields (sessionId, modelId, phase).');
+              return;
+            }
+            broadcast('council_debate_chunk', chunk);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: true, success: true }));
+          } catch (err) {
+            sendError(res, 400, TOPOLOGY_ERROR_CODES.INVALID_SCHEMA, err.message);
           }
           return;
         }

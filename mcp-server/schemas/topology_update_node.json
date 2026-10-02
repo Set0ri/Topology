@@ -1,0 +1,106 @@
+{
+  "name": "topology_update_node",
+  "description": "Update a specific node's progress, status, active thought, tool execution, terminal logs, budget limits, cost, or emitted artifact payloads in the Topology UI. Automatically routes to the correct plan if multiple plans are running.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "planId": {
+        "type": "string",
+        "description": "Optional plan ID owning the node. If omitted, the server automatically resolves which plan owns the node."
+      },
+      "nodeId": {
+        "type": "string",
+        "description": "The ID of the node to update"
+      },
+      "status": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "ready",
+          "in_progress",
+          "completed",
+          "blocked",
+          "failed"
+        ],
+        "description": "Updated lifecycle status of the node"
+      },
+      "thought": {
+        "type": "string",
+        "description": "Current live thought or reasoning step to display on the node card"
+      },
+      "toolName": {
+        "type": "string",
+        "description": "Name of the tool currently being executed"
+      },
+      "terminalLog": {
+        "type": "string",
+        "description": "A line of terminal output or log message to append to the node telemetry"
+      },
+      "outputArtifacts": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Output artifact files created (e.g. [\"src/auth.ts\"])"
+      },
+      "budgetLimitUsd": {
+        "type": "number",
+        "description": "Allocated budget limit for this node in USD"
+      },
+      "budgetUsd": {
+        "type": "number",
+        "description": "Allocated budget limit for this node in USD (alias)"
+      },
+      "costUsd": {
+        "type": "number",
+        "description": "Actual consumed cost for this node in USD"
+      },
+      "tokensUsed": {
+        "description": "Token usage metrics (number or object with input, output, total)",
+        "oneOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "input": {
+                "type": "number"
+              },
+              "output": {
+                "type": "number"
+              },
+              "total": {
+                "type": "number"
+              }
+            }
+          }
+        ]
+      },
+      "budget": {
+        "type": "object",
+        "description": "Complete node budget metrics",
+        "properties": {
+          "budgetLimitUsd": {
+            "type": "number"
+          },
+          "costUsd": {
+            "type": "number"
+          },
+          "inputTokens": {
+            "type": "number"
+          },
+          "outputTokens": {
+            "type": "number"
+          },
+          "totalTokens": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    "required": [
+      "nodeId"
+    ]
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "name": "topology_optimize_council_allocation",
+  "description": "Analyze live RPM, TPM, and daily token reserves across registered council models, projecting financial cost and quota consumption for multi-round deliberations. Generates ranked candidate model rosters that respect the 85% safe quota ceiling and target USD budget limits, with intelligent surrogate model recommendations.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "targetBudgetUsd": {
+        "type": "number",
+        "description": "Optional target USD budget ceiling for the deliberation session (e.g. 0.05, 0.10, 0.50, 1.00)"
+      },
+      "rounds": {
+        "type": "number",
+        "default": 3,
+        "description": "Number of deliberation rounds planned (1 to 3, default: 3)"
+      },
+      "strategy": {
+        "type": "string",
+        "enum": [
+          "balanced",
+          "cost_optimized",
+          "maximum_reasoning",
+          "surrogate_fallback"
+        ],
+        "default": "balanced",
+        "description": "Optimization strategy: balanced (high quality within safe limits), cost_optimized (minimizes USD expenditure), maximum_reasoning (top frontier models), or surrogate_fallback (maximizes quota headroom)"
+      },
+      "requiredSpecialists": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Optional array of specific model IDs that must be included in candidate rosters"
+      }
+    }
+  }
+}

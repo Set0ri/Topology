@@ -1,0 +1,220 @@
+{
+  "name": "topology_create_plan",
+  "description": "Initialize or update a workflow DAG in Topology. Supports multiple concurrent plans running across different agents. Pass the planId, high-level goal, decomposed tasks/nodes, causal dependency edges, and allocated plan/node budget limits and costs.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "planId": {
+        "type": "string",
+        "description": "Unique identifier for this workflow plan (e.g. \"backend-refactor\", \"frontend-ui\", \"security-audit\"). If omitted, auto-generated from title."
+      },
+      "title": {
+        "type": "string",
+        "description": "Title of the goal or workflow plan"
+      },
+      "description": {
+        "type": "string",
+        "description": "Overview summary of the plan"
+      },
+      "agentId": {
+        "type": "string",
+        "description": "Unique identifier of authoring agent (e.g. \"agent-sage\")"
+      },
+      "agentRole": {
+        "type": "string",
+        "description": "Specialist persona (e.g. \"Architect\", \"FrontendDeveloper\", \"DevOps\")"
+      },
+      "makeActive": {
+        "type": "boolean",
+        "default": true,
+        "description": "Whether to make this plan the currently visible plan on the visualizer canvas"
+      },
+      "budgetLimitUsd": {
+        "type": "number",
+        "description": "Allocated budget ceiling for the plan in USD (e.g. 1.00)"
+      },
+      "budgetUsd": {
+        "type": "number",
+        "description": "Allocated budget limit or target ceiling in USD (alias for budgetLimitUsd)"
+      },
+      "costUsd": {
+        "type": "number",
+        "description": "Initial consumed cost for the plan in USD"
+      },
+      "budget": {
+        "type": "object",
+        "description": "Plan budget specification object",
+        "properties": {
+          "budgetLimitUsd": {
+            "type": "number"
+          },
+          "costUsd": {
+            "type": "number"
+          }
+        }
+      },
+      "nodes": {
+        "type": "array",
+        "description": "List of execution nodes in the workflow",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "Unique node ID (e.g., \"spec-1\", \"backend-impl\", \"test-eval\")"
+            },
+            "label": {
+              "type": "string",
+              "description": "Concise, human-readable task title"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "goal",
+                "task",
+                "decision",
+                "milestone",
+                "artifact",
+                "agent"
+              ],
+              "default": "task"
+            },
+            "role": {
+              "type": "string",
+              "description": "Assigned specialist persona (e.g., \"Architect\", \"SecurityAnalyst\", \"CodeGenerator\")"
+            },
+            "description": {
+              "type": "string",
+              "description": "Detailed execution instructions, tools required, or acceptance criteria"
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "ready",
+                "in_progress",
+                "completed",
+                "blocked",
+                "failed"
+              ],
+              "default": "pending"
+            },
+            "priority": {
+              "type": "string",
+              "enum": [
+                "low",
+                "medium",
+                "high",
+                "critical"
+              ],
+              "default": "medium"
+            },
+            "requiresApproval": {
+              "type": "boolean",
+              "default": false,
+              "description": "Set true if human review is required before unblocking downstream steps"
+            },
+            "budgetLimitUsd": {
+              "type": "number",
+              "description": "Allocated budget limit for this task node in USD"
+            },
+            "budgetUsd": {
+              "type": "number",
+              "description": "Allocated budget limit in USD (alias)"
+            },
+            "costUsd": {
+              "type": "number",
+              "description": "Actual consumed cost for this task node in USD"
+            },
+            "tokensUsed": {
+              "description": "Token usage metrics for this node (number or object with input, output, total)",
+              "oneOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "input": {
+                      "type": "number"
+                    },
+                    "output": {
+                      "type": "number"
+                    },
+                    "total": {
+                      "type": "number"
+                    }
+                  }
+                }
+              ]
+            },
+            "budget": {
+              "type": "object",
+              "description": "Detailed budget and token consumption object",
+              "properties": {
+                "budgetLimitUsd": {
+                  "type": "number"
+                },
+                "costUsd": {
+                  "type": "number"
+                },
+                "inputTokens": {
+                  "type": "number"
+                },
+                "outputTokens": {
+                  "type": "number"
+                },
+                "totalTokens": {
+                  "type": "number"
+                }
+              }
+            }
+          },
+          "required": [
+            "id",
+            "label"
+          ]
+        }
+      },
+      "edges": {
+        "type": "array",
+        "description": "Causal dependency edges connecting nodes",
+        "items": {
+          "type": "object",
+          "properties": {
+            "source": {
+              "type": "string",
+              "description": "Prerequisite node ID"
+            },
+            "target": {
+              "type": "string",
+              "description": "Dependent node ID"
+            },
+            "label": {
+              "type": "string",
+              "description": "Relationship label (e.g. \"contracts\", \"depends_on\", \"validates\")"
+            },
+            "condition": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false",
+                "always"
+              ],
+              "default": "always"
+            }
+          },
+          "required": [
+            "source",
+            "target"
+          ]
+        }
+      }
+    },
+    "required": [
+      "title",
+      "nodes",
+      "edges"
+    ]
+  }
+}

@@ -20,9 +20,12 @@ import {
   Radio,
   Brain,
   Activity,
-  RotateCw
+  RotateCw,
+  Coins,
+  X,
+  ChevronRight
 } from 'lucide-react';
-import { useTopologyStore } from '../../store/useTopologyStore';
+import { useTopologyStore, computePlanBudgetMetrics, getNodeBudgetMetrics } from '../../store/useTopologyStore';
 import { exportToObsidianCanvas, exportToMermaid, exportToUniversalAgentManifest } from '../../utils/obsidianCanvas';
 import { generateHeadlessCliRunner } from '../../utils/agentHandoff';
 import { SAMPLE_TOPOLOGIES } from '../../data/sampleTopologies';
@@ -86,12 +89,67 @@ export const Header: React.FC<HeaderProps> = ({
   const activeLoopTelemetry = useTopologyStore(s => s.activeLoopTelemetry);
   const activePlanId = useTopologyStore(s => s.activePlanId);
   const plans = useTopologyStore(s => s.plans);
+  const selectNode = useTopologyStore(s => s.selectNode);
+  const setPlanBudget = useTopologyStore(s => s.setPlanBudget);
   const activePlan = plans[activePlanId];
   const loopTelemetry = activeLoopTelemetry || activePlan?.oodaLoop;
 
   const [isExportOpen, setIsExportOpen] = useState(false);
+  const [isBudgetPopoverOpen, setIsBudgetPopoverOpen] = useState(false);
+  const [budgetLimitInput, setBudgetLimitInput] = useState('');
+  const [budgetSavedFeedback, setBudgetSavedFeedback] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const exportMenuRef = useRef<HTMLDivElement>(null);
+  const budgetPopoverRef = useRef<HTMLDivElement>(null);
+
+  const planBudget = React.useMemo(() => {
+    if (activePlan && (!activePlan.nodes || activePlan.nodes.length === 0) && nodes.length > 0) {
+      return computePlanBudgetMetrics({ ...activePlan, nodes });
+    }
+    return computePlanBudgetMetrics(activePlan);
+  }, [activePlan, nodes]);
+
+
+  React.useEffect(() => {
+    if (planBudget.budgetLimitUsd !== undefined) {
+      setBudgetLimitInput(String(planBudget.budgetLimitUsd));
+    }
+  }, [planBudget.budgetLimitUsd, activePlanId]);
+
+  // Close budget popover on outside click or Escape
+  React.useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (budgetPopoverRef.current && !budgetPopoverRef.current.contains(e.target as Node)) {
+        setIsBudgetPopoverOpen(false);
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsBudgetPopoverOpen(false);
+      }
+    };
+    if (isBudgetPopoverOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      document.addEventListener('keydown', handleKeyDown);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isBudgetPopoverOpen]);
+
+  // Ranked top consuming nodes
+  const topConsumingNodes = React.useMemo(() => {
+    const planNodes = activePlan && Array.isArray(activePlan.nodes) ? activePlan.nodes : nodes;
+    return [...planNodes]
+      .map(n => ({
+        node: n,
+        metrics: getNodeBudgetMetrics(n),
+      }))
+      .filter(item => item.metrics.costUsd > 0 || (item.metrics.totalTokens > 0))
+      .sort((a, b) => b.metrics.costUsd - a.metrics.costUsd)
+      .slice(0, 5);
+  }, [activePlan, nodes]);
 
   // Close export menu on outside click or Escape
   React.useEffect(() => {
@@ -237,6 +295,244 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Workspace Plan Selector Dropdown (Clean, responsive, non-scrolling) */}
         <PlanSelectorDropdown onOpenFleetModal={onOpenFleetModal} className="min-w-0" />
+
+        {/* Current Plan Budget Utilization Pill & Progressive Reveal Popover */}
+        <div className="relative shrink-0" ref={budgetPopoverRef}>
+          <button
+            type="button"
+            onClick={() => setIsBudgetPopoverOpen(!isBudgetPopoverOpen)}
+            title={`Plan Budget: $${planBudget.costUsd.toFixed(4)} / $${planBudget.budgetLimitUsd.toFixed(2)} (${planBudget.utilizationPercent}%) - Click for breakdown`}
+            className={`flex items-center gap-1.5 px-2 sm:px-2.5 py-1 rounded-xl text-xs font-mono font-medium transition-all duration-150 border-none cursor-pointer shadow-xs ${
+              planBudget.utilizationPercent >= 100
+                ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 font-semibold'
+                : planBudget.utilizationPercent >= 75
+                ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300 font-medium'
+                : isLight
+                ? 'bg-black/5 hover:bg-black/10 text-cat-latte-text'
+                : 'bg-white/5 hover:bg-white/10 text-cat-mocha-text'
+            }`}
+          >
+            <Coins size={13} className="text-amber-500 shrink-0" />
+            <span className="hidden sm:inline">
+              ${planBudget.costUsd.toFixed(2)}
+              <span className="opacity-60 text-[10px]"> / ${planBudget.budgetLimitUsd.toFixed(2)}</span>
+            </span>
+            <span className="sm:hidden">
+              ${planBudget.costUsd.toFixed(2)}
+            </span>
+            <span className={`text-[10px] px-1 rounded-md font-bold ${
+              planBudget.utilizationPercent >= 100 ? 'bg-rose-500/20 text-rose-600' :
+              planBudget.utilizationPercent >= 75 ? 'bg-amber-500/20 text-amber-600' :
+              'opacity-60'
+            }`}>
+              {planBudget.utilizationPercent}%
+            </span>
+          </button>
+
+          {isBudgetPopoverOpen && (
+            <div className="absolute top-full left-0 mt-2 w-80 sm:w-96 p-4 rounded-2xl bg-white/95 dark:bg-[#181a24]/95 text-[#202124] dark:text-[#f8fafc] backdrop-blur-2xl shadow-elevated-2xl border-none z-50 transition-all duration-200 space-y-3.5">
+              {/* Header */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <Coins size={15} className="text-amber-500" />
+                  <span className="text-xs font-bold uppercase tracking-wider font-mono">
+                    Plan Budget Overview
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsBudgetPopoverOpen(false)}
+                  className="p-1 rounded-lg hover:bg-black/5 dark:hover:bg-white/10 opacity-70 hover:opacity-100 transition-colors border-none cursor-pointer"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+
+              {/* Active Plan Name */}
+              <div className="text-[11px] text-cat-latte-subtext0 dark:text-cat-mocha-subtext0 font-mono truncate">
+                Plan: <span className="font-semibold text-cat-latte-text dark:text-cat-mocha-text">{activePlan?.title || activePlanId}</span>
+              </div>
+
+              {/* Metrics Grid */}
+              <div className="grid grid-cols-2 gap-2 p-2.5 rounded-xl bg-cat-latte-surface0/60 dark:bg-cat-mocha-surface0/40 border-none font-mono">
+                <div>
+                  <div className="text-[9px] uppercase tracking-wider opacity-60">Consumed</div>
+                  <div className="text-sm font-bold text-cat-latte-text dark:text-cat-mocha-text">
+                    ${planBudget.costUsd.toFixed(4)}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[9px] uppercase tracking-wider opacity-60">Ceiling</div>
+                  <div className="text-sm font-bold text-cat-latte-text dark:text-cat-mocha-text">
+                    ${planBudget.budgetLimitUsd.toFixed(2)}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[9px] uppercase tracking-wider opacity-60">Headroom</div>
+                  <div className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+                    ${planBudget.remainingUsd.toFixed(4)}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[9px] uppercase tracking-wider opacity-60">Utilization</div>
+                  <div className={`text-xs font-bold ${
+                    planBudget.utilizationPercent >= 100
+                      ? 'text-rose-600 dark:text-rose-400'
+                      : planBudget.utilizationPercent >= 75
+                      ? 'text-amber-600 dark:text-amber-400'
+                      : 'text-emerald-600 dark:text-emerald-400'
+                  }`}>
+                    {planBudget.utilizationPercent}%
+                  </div>
+                </div>
+              </div>
+
+              {/* Progress Bar */}
+              <div className="space-y-1">
+                <div className="w-full bg-black/10 dark:bg-white/10 h-2 rounded-full overflow-hidden border-none">
+                  <div
+                    className={`h-full rounded-full transition-all duration-300 ${
+                      planBudget.utilizationPercent >= 100
+                        ? 'bg-rose-500'
+                        : planBudget.utilizationPercent >= 75
+                        ? 'bg-amber-500'
+                        : 'bg-emerald-500'
+                    }`}
+                    style={{ width: `${Math.min(100, Math.max(0, planBudget.utilizationPercent))}%` }}
+                  />
+                </div>
+                <div className="flex items-center justify-between text-[10px] font-mono opacity-60">
+                  <span>Spend: ${planBudget.costUsd.toFixed(2)}</span>
+                  <span>Limit: ${planBudget.budgetLimitUsd.toFixed(2)}</span>
+                </div>
+              </div>
+
+              {/* Tokens Summary */}
+              {planBudget.totalTokens > 0 && (
+                <div className="flex items-center justify-between text-[10px] font-mono p-2 rounded-xl bg-cat-latte-surface0/40 dark:bg-cat-mocha-surface0/30 border-none">
+                  <span className="opacity-70">Total Tokens:</span>
+                  <span className="font-semibold">{planBudget.totalTokens.toLocaleString()}</span>
+                  {planBudget.totalInputTokens > 0 && (
+                    <span className="opacity-60 text-[9px]">(In: {planBudget.totalInputTokens.toLocaleString()} • Out: {planBudget.totalOutputTokens.toLocaleString()})</span>
+                  )}
+                </div>
+              )}
+
+              {/* Top Consuming Nodes List */}
+              <div className="space-y-1.5 pt-1">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-cat-latte-overlay1 dark:text-cat-mocha-overlay2 block">
+                  Top Consuming Nodes
+                </span>
+
+                {topConsumingNodes.length === 0 ? (
+                  <p className="text-[11px] opacity-60 italic py-1 font-mono">
+                    No individual node costs recorded yet.
+                  </p>
+                ) : (
+                  <div className="space-y-1 max-h-36 overflow-y-auto pr-1">
+                    {topConsumingNodes.map(({ node: n, metrics }) => (
+                      <button
+                        key={n.id}
+                        type="button"
+                        onClick={() => {
+                          selectNode(n.id);
+                          setIsBudgetPopoverOpen(false);
+                        }}
+                        className="w-full flex items-center justify-between p-1.5 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 transition-colors border-none cursor-pointer text-left font-mono"
+                      >
+                        <div className="truncate mr-2">
+                          <div className="text-xs font-medium truncate">{n.label}</div>
+                          <div className="text-[9px] opacity-60 truncate">
+                            {metrics.totalTokens ? `${metrics.totalTokens.toLocaleString()} tokens` : n.status}
+                          </div>
+                        </div>
+                        <div className="text-right shrink-0 flex items-center gap-1">
+                          <span className="text-xs font-semibold text-amber-600 dark:text-amber-400">
+                            ${metrics.costUsd.toFixed(4)}
+                          </span>
+                          <ChevronRight size={12} className="opacity-40" />
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Quick Limit Adjustment */}
+              <div className="pt-2 border-none space-y-2">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-cat-latte-overlay1 dark:text-cat-mocha-overlay2 block">
+                  Adjust Plan Budget Ceiling
+                </span>
+                <div className="flex items-center gap-1.5">
+                  <div className="relative flex-1">
+                    <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs font-mono font-bold opacity-60">
+                      $
+                    </span>
+                    <input
+                      type="number"
+                      step="0.10"
+                      min="0"
+                      value={budgetLimitInput}
+                      onChange={(e) => setBudgetLimitInput(e.target.value)}
+                      placeholder="1.00"
+                      className="w-full pl-6 pr-2 py-1.5 rounded-xl text-xs font-mono bg-cat-latte-surface1/60 dark:bg-cat-mocha-surface0/70 text-cat-latte-text dark:text-cat-mocha-text focus:outline-none focus:ring-1 focus:ring-amber-500/50 border-none"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const parsed = parseFloat(budgetLimitInput);
+                      if (!isNaN(parsed) && parsed > 0) {
+                        setPlanBudget(activePlanId, parsed);
+                        setBudgetSavedFeedback(true);
+                        setTimeout(() => setBudgetSavedFeedback(false), 2000);
+                      }
+                    }}
+                    className="px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-amber-500 hover:bg-amber-600 text-white transition-all border-none cursor-pointer shadow-elevated-xs"
+                  >
+                    {budgetSavedFeedback ? 'Saved' : 'Save'}
+                  </button>
+                </div>
+
+                <div className="flex flex-wrap gap-1">
+                  {[0.50, 1.00, 2.00, 5.00, 10.00].map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => {
+                        setBudgetLimitInput(String(preset));
+                        setPlanBudget(activePlanId, preset);
+                        setBudgetSavedFeedback(true);
+                        setTimeout(() => setBudgetSavedFeedback(false), 2000);
+                      }}
+                      className={`px-2 py-0.5 rounded-lg text-[10px] font-mono transition-all border-none cursor-pointer ${
+                        planBudget.budgetLimitUsd === preset
+                          ? 'bg-amber-500 text-white font-bold'
+                          : 'bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 opacity-80'
+                      }`}
+                    >
+                      ${preset.toFixed(2)}
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setBudgetLimitInput('');
+                      setPlanBudget(activePlanId, null);
+                      setBudgetSavedFeedback(true);
+                      setTimeout(() => setBudgetSavedFeedback(false), 2000);
+                    }}
+                    className="px-2 py-0.5 rounded-lg text-[10px] font-mono bg-black/5 dark:bg-white/5 hover:bg-rose-500/15 hover:text-rose-600 transition-all border-none cursor-pointer opacity-80"
+                    title="Clear explicit ceiling and use auto sum-of-nodes / default"
+                  >
+                    Auto
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+        </div>
       </div>
 
       {/* Right: Health, AI Plan, Minimal Swarm Observability, Telemetry & Export */}
