@@ -1,6 +1,6 @@
 {
   "name": "topology_emit_loop_telemetry",
-  "description": "Emit OODA / Council iteration loop telemetry across the 9 stages (observe -> understand -> evaluate_with_council -> adversarial_council_evaluation -> each_member_plans -> share_and_vote_on_plan -> iterate_on_plan -> propose_plan -> update). Tracks loop iteration count (Loop N of M), member votes, amendments, and convergence status.",
+  "description": "Emit OODA / Council iteration loop telemetry across the 9 stages (observe -> understand -> evaluate_with_council -> adversarial_council_evaluation -> each_member_plans -> share_and_vote_on_plan -> iterate_on_plan -> propose_plan -> update). Tracks loop iteration count (Loop N of M), member votes, amendments, and convergence status with strict maxLoops capping.",
   "parameters": {
     "type": "object",
     "properties": {
@@ -13,14 +13,14 @@
         "default": 1,
         "description": "Current 1-based loop iteration index (e.g. 1, 2, 3...)"
       },
-      "totalLoops": {
-        "type": "number",
-        "description": "Target or total expected loops for this planning/execution cycle"
-      },
       "maxLoops": {
         "type": "number",
         "default": 3,
-        "description": "Strict maximum number of allowed loop iterations (1 to 10). Clamps loopNumber to prevent infinite looping."
+        "description": "Strict maximum loop count allowed before forced convergence (clamped between 1 and 10)"
+      },
+      "totalLoops": {
+        "type": "number",
+        "description": "Target or total expected loops for this planning/execution cycle"
       },
       "stage": {
         "type": "string",
@@ -50,28 +50,28 @@
         "items": {
           "type": "string"
         },
-        "description": "Context observations gathered during 'observe'"
+        "description": "Context observations gathered during observe"
       },
       "understandings": {
         "type": "array",
         "items": {
           "type": "string"
         },
-        "description": "Key invariants or constraints analyzed during 'understand'"
+        "description": "Key invariants or constraints analyzed during understand"
       },
       "councilEvaluations": {
         "type": "array",
         "items": {
           "type": "string"
         },
-        "description": "Evaluations emitted during 'evaluate_with_council'"
+        "description": "Evaluations emitted during evaluate_with_council"
       },
       "adversarialCritiques": {
         "type": "array",
         "items": {
           "type": "string"
         },
-        "description": "Critiques raised during 'adversarial_council_evaluation'"
+        "description": "Critiques raised during adversarial_council_evaluation"
       },
       "memberPlans": {
         "type": "array",
@@ -99,36 +99,31 @@
             "feedback": {
               "type": "string"
             }
-          },
-          "required": [
-            "memberId",
-            "memberName",
-            "proposal"
-          ]
+          }
         },
         "description": "Independent candidate plans from Flash, Opus, and GPT-OSS"
       },
       "voteSummary": {
         "type": "string",
-        "description": "Synthesis of votes and ranking from 'share_and_vote_on_plan'"
+        "description": "Synthesis of votes and ranking from share_and_vote_on_plan"
       },
       "refinements": {
         "type": "array",
         "items": {
           "type": "string"
         },
-        "description": "Plan amendments made during 'iterate_on_plan'"
+        "description": "Plan amendments made during iterate_on_plan"
       },
       "proposedPlanSummary": {
         "type": "string",
-        "description": "Final proposed plan summary from 'propose_plan'"
+        "description": "Final proposed plan summary from propose_plan"
       },
       "updatesApplied": {
         "type": "array",
         "items": {
           "type": "string"
         },
-        "description": "Actions or DAG mutations applied during 'update'"
+        "description": "Actions or DAG mutations applied during update"
       },
       "metrics": {
         "type": "object",

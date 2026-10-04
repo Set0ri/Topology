@@ -47,8 +47,9 @@ function getModelMeta(modelId: string, customName?: string, customAvatar?: strin
     };
   }
   if (id.includes('claude') || id.includes('opus') || id.includes('anthropic')) {
+    const is55 = id.includes('5.5') || id.includes('5-5');
     return {
-      name: customName || 'Claude 4.6 Opus',
+      name: customName || (is55 ? 'Claude 5.5 Opus' : 'Claude 4.6 Opus'),
       avatar: customAvatar || '🧠',
       family: 'Anthropic',
       bubbleBg: 'bg-purple-950/20',

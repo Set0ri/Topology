@@ -1,0 +1,16 @@
+{
+  "name": "topology_switch_plan",
+  "description": "Switch the active visible plan displayed on the Topology canvas to another registered plan ID.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "planId": {
+        "type": "string",
+        "description": "The ID of the plan to switch to"
+      }
+    },
+    "required": [
+      "planId"
+    ]
+  }
+}

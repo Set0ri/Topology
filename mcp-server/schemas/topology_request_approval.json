@@ -1,0 +1,32 @@
+{
+  "name": "topology_request_approval",
+  "description": "Pause execution at a Human-in-the-Loop review gate. Emits an alert in Topology and awaits supervisor sign-off.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "planId": {
+        "type": "string",
+        "description": "Optional plan ID owning the node"
+      },
+      "nodeId": {
+        "type": "string",
+        "description": "Node ID requiring human review"
+      },
+      "notes": {
+        "type": "string",
+        "description": "Summary of what was achieved and what the user needs to inspect or approve"
+      },
+      "proposedArtifacts": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "List of files/artifacts to be verified"
+      }
+    },
+    "required": [
+      "nodeId",
+      "notes"
+    ]
+  }
+}

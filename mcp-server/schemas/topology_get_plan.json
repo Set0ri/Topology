@@ -1,0 +1,22 @@
+{
+  "name": "topology_get_plan",
+  "description": "Retrieve live Topology DAG plans, node execution states, and human approval decisions.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "planId": {
+        "type": "string",
+        "description": "Optional specific plan ID to retrieve. If omitted, returns the active plan."
+      },
+      "listAll": {
+        "type": "boolean",
+        "default": false,
+        "description": "If true, returns a summary list of all active plans running on the server."
+      },
+      "includeApprovals": {
+        "type": "boolean",
+        "default": true
+      }
+    }
+  }
+}

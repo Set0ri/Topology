@@ -1,0 +1,20 @@
+{
+  "name": "topology_release_lock",
+  "description": "Release an exclusive lock held on a node or resource.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "nodeId": {
+        "type": "string",
+        "description": "Node or resource ID to unlock"
+      },
+      "agentId": {
+        "type": "string",
+        "description": "ID of the agent releasing the lock (or \"force\" to break)"
+      }
+    },
+    "required": [
+      "nodeId"
+    ]
+  }
+}

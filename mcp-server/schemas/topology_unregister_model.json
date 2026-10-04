@@ -1,0 +1,16 @@
+{
+  "name": "topology_unregister_model",
+  "description": "Unregister a custom model from the Topology model registry and remove its quotas from .topology/models.json.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "modelId": {
+        "type": "string",
+        "description": "Unique model identifier to unregister (e.g. \"deepseek-v3\")"
+      }
+    },
+    "required": [
+      "modelId"
+    ]
+  }
+}

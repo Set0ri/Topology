@@ -1,65 +1,101 @@
 {
   "name": "topology_register_model",
-  "description": "Register or update an extensible custom model for the Multi-Model Council and Quota/Budget Tracker (supports gemini, anthropic, openai, openai_compatible, ollama providers).",
+  "description": "Register or update an extensible custom model for the Multi-Model Council and Budget Tracker. Supports OpenAI-compatible endpoints, Ollama, DeepSeek, OpenRouter, Anthropic, and Gemini with custom RPM/TPM quotas and pricing.",
   "parameters": {
     "type": "object",
     "properties": {
       "id": {
         "type": "string",
-        "description": "Unique identifier for the model (e.g. 'deepseek-v3', 'mistral-large', 'llama-3.3-70b')"
+        "description": "Unique model identifier (e.g. \"deepseek-v3\", \"llama3.3-70b\", \"mistral-large\")"
       },
       "name": {
         "type": "string",
-        "description": "Human-readable display name for the model"
+        "description": "Human-readable display name (e.g. \"DeepSeek V3\", \"Llama 3.3 70B\")"
       },
-      "provider": {
+      "family": {
         "type": "string",
-        "description": "Provider family: 'gemini', 'anthropic', 'openai', 'openai_compatible', 'ollama'"
-      },
-      "role": {
-        "type": "string",
-        "description": "Council role / specialization (e.g. 'Synthesizer & Code Auditor', 'Domain Specialist')"
+        "description": "Provider family or coalition (e.g. \"Ollama\", \"DeepSeek\", \"OpenRouter\")"
       },
       "avatar": {
         "type": "string",
-        "description": "Emoji or icon avatar representing the model"
+        "default": "🤖",
+        "description": "Emoji avatar or icon representation"
       },
-      "apiEndpoint": {
+      "color": {
         "type": "string",
-        "description": "Optional custom API endpoint URL (e.g. 'https://api.deepseek.com/v1', 'http://localhost:11434/v1')"
+        "default": "#6366f1",
+        "description": "Hex color for card badges and graphs"
+      },
+      "role": {
+        "type": "string",
+        "description": "Council deliberation role (e.g. \"Algorithmic Code Optimizer\", \"Security Critic\")"
+      },
+      "provider": {
+        "type": "string",
+        "enum": [
+          "openai_compatible",
+          "ollama",
+          "openai",
+          "anthropic",
+          "gemini"
+        ],
+        "default": "openai_compatible",
+        "description": "API transport protocol"
+      },
+      "endpoint": {
+        "type": "string",
+        "description": "Custom API base URL (e.g. \"http://localhost:11434/v1\" or \"https://api.deepseek.com/v1\")"
       },
       "apiKeyEnv": {
         "type": "string",
-        "description": "Environment variable name containing the API key (e.g. 'DEEPSEEK_API_KEY', 'OPENAI_API_KEY')"
+        "description": "Name of environment variable storing the API key (e.g. \"DEEPSEEK_API_KEY\")"
       },
-      "rpmQuota": {
-        "type": "number",
-        "description": "Requests Per Minute rate limit ceiling"
+      "apiKey": {
+        "type": "string",
+        "description": "Optional explicit API key"
       },
-      "tpmQuota": {
-        "type": "number",
-        "description": "Tokens Per Minute throughput quota limit"
+      "modelName": {
+        "type": "string",
+        "description": "Actual model string sent to backend API (e.g. \"deepseek-chat\")"
       },
-      "rpdQuota": {
-        "type": "number",
-        "description": "Requests Per Day quota ceiling"
+      "limits": {
+        "type": "object",
+        "properties": {
+          "rpm": {
+            "type": "number",
+            "default": 60,
+            "description": "Requests-per-minute limit"
+          },
+          "tpm": {
+            "type": "number",
+            "default": 300000,
+            "description": "Tokens-per-minute limit"
+          },
+          "dailyTokens": {
+            "type": "number",
+            "default": 5000000,
+            "description": "Daily token ceiling"
+          }
+        }
       },
-      "tpdQuota": {
-        "type": "number",
-        "description": "Tokens Per Day quota ceiling"
-      },
-      "costPer1kInput": {
-        "type": "number",
-        "description": "Cost in USD per 1,000 prompt tokens"
-      },
-      "costPer1kOutput": {
-        "type": "number",
-        "description": "Cost in USD per 1,000 completion tokens"
+      "ratesPerMillion": {
+        "type": "object",
+        "properties": {
+          "inputUsd": {
+            "type": "number",
+            "default": 0.2,
+            "description": "USD cost per 1M input tokens"
+          },
+          "outputUsd": {
+            "type": "number",
+            "default": 0.8,
+            "description": "USD cost per 1M output tokens"
+          }
+        }
       }
     },
     "required": [
-      "id",
-      "name"
+      "id"
     ]
   }
 }

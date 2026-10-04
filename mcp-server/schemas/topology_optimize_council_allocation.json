@@ -22,7 +22,7 @@
           "surrogate_fallback"
         ],
         "default": "balanced",
-        "description": "Optimization strategy: balanced (high quality within safe limits), cost_optimized (minimizes USD expenditure), maximum_reasoning (top frontier models), or surrogate_fallback (maximizes quota headroom)"
+        "description": "Optimization strategy: \"balanced\" (high quality within safe limits), \"cost_optimized\" (minimizes USD expenditure), \"maximum_reasoning\" (top frontier models), or \"surrogate_fallback\" (maximizes quota headroom)"
       },
       "requiredSpecialists": {
         "type": "array",

@@ -1,0 +1,29 @@
+{
+  "name": "topology_acquire_lock",
+  "description": "Acquire an exclusive lease-based lock on a node or resource to prevent race conditions with other agents. Uses local Git-style lockfile with auto-expiration (TTL).",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "nodeId": {
+        "type": "string",
+        "description": "Node or resource ID to lock"
+      },
+      "agentId": {
+        "type": "string",
+        "description": "ID of the agent claiming the lock"
+      },
+      "ttlSeconds": {
+        "type": "number",
+        "description": "Duration of the lock lease in seconds before auto-expiration (default: 60)",
+        "default": 60
+      },
+      "reason": {
+        "type": "string",
+        "description": "Purpose or operation description for holding the lock"
+      }
+    },
+    "required": [
+      "nodeId"
+    ]
+  }
+}

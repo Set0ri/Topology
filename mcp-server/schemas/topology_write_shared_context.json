@@ -1,0 +1,37 @@
+{
+  "name": "topology_write_shared_context",
+  "description": "Write a shared context entry (architectural contract, database schema, security policy, or intermediate data) to the Topology blackboard repository. Can be scoped globally to the entire workflow or to a specific node.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "scope": {
+        "type": "string",
+        "enum": [
+          "global",
+          "node"
+        ],
+        "default": "global",
+        "description": "Scope: \"global\" for the entire graph or \"node\" for a specific task node"
+      },
+      "key": {
+        "type": "string",
+        "description": "Unique identifier for the context entry (e.g., \"auth_contract\", \"db_schema\")"
+      },
+      "value": {
+        "description": "The context value, can be a JSON object, array, string, or number"
+      },
+      "nodeId": {
+        "type": "string",
+        "description": "Required if scope is \"node\": the target node ID"
+      },
+      "authorAgentRole": {
+        "type": "string",
+        "description": "Specialist role of the authoring agent"
+      }
+    },
+    "required": [
+      "key",
+      "value"
+    ]
+  }
+}

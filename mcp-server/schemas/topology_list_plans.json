@@ -1,0 +1,8 @@
+{
+  "name": "topology_list_plans",
+  "description": "List all running agent plans and workflows currently registered on the Topology server, showing active owners, completion progress, and latest thoughts.",
+  "parameters": {
+    "type": "object",
+    "properties": {}
+  }
+}

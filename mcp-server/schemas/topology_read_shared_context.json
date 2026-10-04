@@ -1,0 +1,25 @@
+{
+  "name": "topology_read_shared_context",
+  "description": "Read shared context entries from the Topology blackboard repository. Retrieve global architectural contracts or node-specific state.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "scope": {
+        "type": "string",
+        "enum": [
+          "global",
+          "node"
+        ],
+        "description": "Optional scope filter: \"global\" or \"node\". Omit to read the full repository"
+      },
+      "key": {
+        "type": "string",
+        "description": "Optional key filter to retrieve a specific entry value directly"
+      },
+      "nodeId": {
+        "type": "string",
+        "description": "Required if reading a specific node's context"
+      }
+    }
+  }
+}

@@ -194,7 +194,7 @@ export class ProviderClient {
     };
 
     const modelCfg = getModelConfig(modelId);
-    const provider = modelCfg?.provider || (modelId === 'gemini-3.8-flash' ? 'gemini' : modelId === 'claude-4.6-opus' ? 'anthropic' : 'openai_compatible');
+    const provider = modelCfg?.provider || (modelId === 'gemini-3.8-flash' ? 'gemini' : (modelId.startsWith('claude') || modelId.startsWith('opus')) ? 'anthropic' : 'openai_compatible');
 
     // 1. Google Gemini Provider
     if (provider === 'gemini' || modelId === 'gemini-3.8-flash') {
@@ -243,13 +243,20 @@ export class ProviderClient {
     }
 
     // 2. Anthropic Messages Provider
-    if (provider === 'anthropic' || modelId === 'claude-4.6-opus') {
+    if (provider === 'anthropic' || modelId === 'claude-4.6-opus' || modelId === 'claude-5.5-opus' || modelId === 'opus-5.5') {
       const apiKey = modelCfg?.apiKey || (modelCfg?.apiKeyEnv ? process.env[modelCfg.apiKeyEnv] : null) || this.getApiKey('anthropic');
       if (!apiKey) return { usedLiveApi: false, reason: 'NO_API_KEY' };
 
       try {
         let baseUrl = (modelCfg?.endpoint || this.getBaseUrl('anthropic')).replace(/\/+$/, '');
-        const modelName = modelCfg?.modelName || (modelId === 'claude-4.6-opus' ? 'claude-3-7-sonnet-20250219' : modelId);
+        const defaultOpusModel = process.env.ANTHROPIC_OPUS_MODEL || 'claude-3-opus-20240229';
+        const modelName = modelCfg?.modelName || (
+          (modelId === 'claude-5.5-opus' || modelId === 'opus-5.5')
+            ? defaultOpusModel
+            : (modelId === 'claude-4.6-opus')
+              ? 'claude-3-7-sonnet-20250219'
+              : modelId
+        );
         const prefix = baseUrl.endsWith('/v1') ? '' : '/v1';
         const url = `${baseUrl}${prefix}/messages`;
         const payload = JSON.stringify({

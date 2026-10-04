@@ -1,6 +1,6 @@
 {
   "name": "topology_update_node",
-  "description": "Update a specific node's progress, status, active thought, tool execution, terminal logs, budget limits, cost, or emitted artifact payloads in the Topology UI. Automatically routes to the correct plan if multiple plans are running.",
+  "description": "Update a specific node's progress, status, active thought, tool execution, terminal logs, or emitted artifact payloads in the Topology UI. Automatically routes to the correct plan if multiple plans are running.",
   "parameters": {
     "type": "object",
     "properties": {
@@ -21,8 +21,7 @@
           "completed",
           "blocked",
           "failed"
-        ],
-        "description": "Updated lifecycle status of the node"
+        ]
       },
       "thought": {
         "type": "string",
@@ -56,30 +55,22 @@
         "description": "Actual consumed cost for this node in USD"
       },
       "tokensUsed": {
-        "description": "Token usage metrics (number or object with input, output, total)",
-        "oneOf": [
-          {
+        "type": "object",
+        "properties": {
+          "input": {
             "type": "number"
           },
-          {
-            "type": "object",
-            "properties": {
-              "input": {
-                "type": "number"
-              },
-              "output": {
-                "type": "number"
-              },
-              "total": {
-                "type": "number"
-              }
-            }
+          "output": {
+            "type": "number"
+          },
+          "total": {
+            "type": "number"
           }
-        ]
+        },
+        "description": "Token usage metrics (input, output, total)"
       },
       "budget": {
         "type": "object",
-        "description": "Complete node budget metrics",
         "properties": {
           "budgetLimitUsd": {
             "type": "number"
@@ -96,7 +87,8 @@
           "totalTokens": {
             "type": "number"
           }
-        }
+        },
+        "description": "Complete node budget metrics"
       }
     },
     "required": [

@@ -1,0 +1,22 @@
+{
+  "name": "topology_handoff_council_plan",
+  "description": "Hand off synthesized consensus from a council deliberation session directly to the active execution DAG in Topology, initializing tasks and unblocking immediate execution.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "sessionId": {
+        "type": "string",
+        "description": "Council session ID (defaults to most recent session)"
+      },
+      "planId": {
+        "type": "string",
+        "description": "Target plan ID (defaults to session plan or active plan)"
+      },
+      "handoffAgentRole": {
+        "type": "string",
+        "default": "ExecutionLead",
+        "description": "Lead agent role for execution handoff"
+      }
+    }
+  }
+}

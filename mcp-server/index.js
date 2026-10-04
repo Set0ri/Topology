@@ -528,7 +528,7 @@ export const TOOLS = [
   },
   {
     name: 'topology_spawn_council',
-    description: 'Spawn a recurrent multi-model council for ideation, planning, and research (Gemini 3.8 Flash, Claude 4.6 Opus, and GPT-OSS 120b). Deliberates in 3 phases (independent ideation -> adversarial peer review -> unified DAG synthesis) with hard budget stops before exceeding Gemini Ultra plan limits.',
+    description: 'Spawn a recurrent multi-model council for ideation, planning, and research (Gemini 3.8 Flash, Claude 5.5 Opus / Claude 4.6 Opus, and GPT-OSS 120b). Deliberates in 3 phases (independent ideation -> adversarial peer review -> unified DAG synthesis) with hard budget stops before exceeding Gemini Ultra plan limits.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -544,7 +544,7 @@ export const TOOLS = [
         members: {
           type: 'array',
           items: { type: 'string' },
-          description: 'Optional list of model IDs to convene on the council. Defaults to ["gemini-3.8-flash", "claude-4.6-opus", "gpt-oss-120b"]. Can include custom registered models (e.g. "deepseek-v3", "llama3.3:70b").'
+          description: 'Optional list of model IDs to convene on the council. Defaults to ["gemini-3.8-flash", "claude-4.6-opus", "gpt-oss-120b"]. Can include claude-5.5-opus / opus-5.5 or custom registered models (e.g. "deepseek-v3", "llama3.3:70b").'
         },
         contextFiles: {
           type: 'array',

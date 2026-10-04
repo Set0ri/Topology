@@ -1,6 +1,6 @@
 {
   "name": "topology_complete_node",
-  "description": "Mark a specific node as completed in the Topology workflow DAG. Records deliverable artifacts, summary notes, consumed costs, and token usage. Automatically transitions the completed node out of \"in_progress\", advances the next pending node to \"in_progress\" (if advanceNextNode is true), and automatically marks the entire plan completed if all nodes are done—preventing hanging plans.",
+  "description": "Mark a specific node as completed in the Topology workflow DAG. Records deliverable artifacts and summary notes. Automatically transitions the completed node out of \"in_progress\", advances the next pending node to \"in_progress\" (if advanceNextNode is true), and automatically marks the entire plan completed if all nodes are done—preventing hanging plans.",
   "parameters": {
     "type": "object",
     "properties": {
@@ -43,7 +43,7 @@
       },
       "budgetUsd": {
         "type": "number",
-        "description": "Final cost or budget for this completed node in USD (alias)"
+        "description": "Final cost or budget for this completed node in USD"
       },
       "tokensUsed": {
         "description": "Token usage consumed during this task (number or object with input, output, total)",
@@ -69,7 +69,6 @@
       },
       "budget": {
         "type": "object",
-        "description": "Complete node budget metrics",
         "properties": {
           "budgetLimitUsd": {
             "type": "number"
@@ -86,7 +85,8 @@
           "totalTokens": {
             "type": "number"
           }
-        }
+        },
+        "description": "Complete node budget metrics"
       }
     },
     "required": [

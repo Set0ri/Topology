@@ -37,6 +37,8 @@ interface QuotaHeadroomPanelProps {
 
 const DEFAULT_MODEL_NAMES: Record<string, { name: string; avatar: string; family: string }> = {
   'gemini-3.8-flash': { name: 'Gemini 3.8 Flash', avatar: '⚡', family: 'Gemini' },
+  'claude-5.5-opus': { name: 'Claude 5.5 Opus', avatar: '🧠', family: 'Anthropic' },
+  'opus-5.5': { name: 'Opus 5.5', avatar: '🧠', family: 'Anthropic' },
   'claude-4.6-opus': { name: 'Claude 4.6 Opus', avatar: '🧠', family: 'Anthropic' },
   'gpt-oss-120b': { name: 'GPT-OSS 120b', avatar: '🌐', family: 'Open-Source' },
   'deepseek-v3': { name: 'DeepSeek V3', avatar: '🐋', family: 'DeepSeek' },

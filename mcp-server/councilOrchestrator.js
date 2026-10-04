@@ -138,15 +138,16 @@ function generateCognitiveContent(modelId, roundIndex, goal, context = {}) {
         estimatedTokens: 1850,
         thought: `Synthesizing architectural DAG for "${goal}". Prioritizing modular boundaries and low-latency feedback loops.`,
       };
-    } else if (modelId === 'claude-4.6-opus') {
+    } else if (modelId === 'claude-4.6-opus' || modelId === 'claude-5.5-opus' || modelId === 'opus-5.5') {
+      const is55 = modelId === 'claude-5.5-opus' || modelId === 'opus-5.5';
       return {
-        perspective: 'Formal Invariants & Conceptual Edge Cases',
+        perspective: is55 ? 'Deep Invariants, Frontier Reasoning & Failure Mode Interrogation' : 'Formal Invariants & Conceptual Edge Cases',
         proposals: [
           `Analyze failure domains: What happens when state desynchronizes during an ungraceful interrupt in "${goal}"?`,
           'Mandate explicit idempotency tokens across all node transformations.',
           'Identify hidden implicit assumptions: ensure causality guarantees are mathematically monotonic.',
         ],
-        estimatedTokens: 2400,
+        estimatedTokens: is55 ? 2800 : 2400,
         thought: `Interrogating invariant boundaries for "${goal}". Uncovering subtle concurrency hazards and state corruption vectors.`,
       };
     } else if (modelId === 'gpt-oss-120b') {
@@ -174,15 +175,16 @@ function generateCognitiveContent(modelId, roundIndex, goal, context = {}) {
       };
     }
   } else if (roundIndex === 2) {
-    if (modelId === 'claude-4.6-opus') {
+    if (modelId === 'claude-4.6-opus' || modelId === 'claude-5.5-opus' || modelId === 'opus-5.5') {
+      const is55 = modelId === 'claude-5.5-opus' || modelId === 'opus-5.5';
       return {
-        perspective: 'Adversarial Critique on Peer Proposals',
+        perspective: is55 ? 'Adversarial Critique & Frontier Proof Verification' : 'Adversarial Critique on Peer Proposals',
         critiques: [
           'Critique of speculative branches: Speculative parallel branches without atomic commit gates risk dirty reads in shared context.',
           'Critique of heavy storage paradigms: Full event-sourcing adds unnecessary storage overhead for short-lived workflows; use append-only WAL with periodic compaction instead.',
         ],
         suggestedAmendments: 'Introduce 2-phase verification barrier before advancing to execution.',
-        estimatedTokens: 2600,
+        estimatedTokens: is55 ? 3000 : 2600,
         thought: `Formulating rigorous critique of speculative execution models. Resolving concurrency ambiguities.`,
       };
     } else if (modelId === 'gpt-oss-120b') {
@@ -478,7 +480,7 @@ export class CouncilOrchestrator {
       const modelPromises = validatedMembers.map(async (memberId) => {
         let activeModelId = memberId;
         const memberCfg = getModelConfig(activeModelId);
-        const estTokens = memberCfg?.defaultEstInputTokens || (memberId === 'claude-4.6-opus' ? 2600 : memberId === 'gpt-oss-120b' ? 2200 : 1900);
+        const estTokens = memberCfg?.defaultEstInputTokens || ((memberId === 'claude-4.6-opus' || memberId === 'claude-5.5-opus' || memberId === 'opus-5.5') ? 2600 : memberId === 'gpt-oss-120b' ? 2200 : 1900);
 
         // Check quota before consumption
         let quotaCheck = budgetTracker.canConsume(activeModelId, estTokens);

@@ -1,6 +1,6 @@
 {
   "name": "topology_spawn_council",
-  "description": "Spawn a recurrent multi-model council for ideation, planning, and research (Gemini 3.8 Flash, Claude 4.6 Opus, and GPT-OSS 120b). Deliberates in 3 phases (independent ideation -> adversarial peer review -> unified DAG synthesis) with hard budget stops before exceeding Gemini Ultra plan limits.",
+  "description": "Spawn a recurrent multi-model council for ideation, planning, and research (Gemini 3.8 Flash, Claude 5.5 Opus / Claude 4.6 Opus, and GPT-OSS 120b). Deliberates in 3 phases (independent ideation -> adversarial peer review -> unified DAG synthesis) with hard budget stops before exceeding Gemini Ultra plan limits.",
   "parameters": {
     "type": "object",
     "properties": {
@@ -11,13 +11,6 @@
       "planId": {
         "type": "string",
         "description": "Optional unique plan ID for visualizing the deliberation on the Topology canvas"
-      },
-      "members": {
-        "type": "array",
-        "items": {
-          "type": "string"
-        },
-        "description": "Optional custom council member model IDs (e.g. [\"gemini-3.8-flash\", \"claude-4.6-opus\", \"deepseek-v3\"]). Defaults to standard 3 models."
       },
       "rounds": {
         "type": "number",
@@ -33,6 +26,13 @@
         ],
         "default": "halt_before_limit",
         "description": "Allocation strategy when a model reaches its 85% safety quota ceiling"
+      },
+      "members": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Optional list of model IDs to convene on the council. Defaults to [\"gemini-3.8-flash\", \"claude-4.6-opus\", \"gpt-oss-120b\"]. Can include claude-5.5-opus / opus-5.5 or custom registered models (e.g. \"deepseek-v3\", \"llama3.3:70b\")."
       },
       "contextFiles": {
         "type": "array",
@@ -50,12 +50,22 @@
       },
       "specialists": {
         "type": "object",
-        "description": "Optional specialist persona overrides for the 3 council seats"
+        "description": "Optional specialist persona overrides for the council seats"
       },
       "saveAdr": {
         "type": "boolean",
         "default": true,
         "description": "Whether to automatically format and write an Architectural Decision Record (ADR) in docs/adr/"
+      },
+      "handoffToPlan": {
+        "type": "boolean",
+        "default": true,
+        "description": "Whether to automatically hand off and populate consensus DAG tasks into the active visualizer plan for immediate autonomous execution"
+      },
+      "handoffAgentRole": {
+        "type": "string",
+        "default": "ExecutionLead",
+        "description": "Specialist role or agent persona assigned to the lead execution task"
       }
     },
     "required": [

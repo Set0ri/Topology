@@ -1,0 +1,29 @@
+{
+  "name": "topology_sync_git_log",
+  "description": "Synchronize the local event log (.topology/topology.log) with the remote Git repository for non-local multi-agent coordination across machines or branches.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "remote": {
+        "type": "string",
+        "default": "origin",
+        "description": "Git remote name"
+      },
+      "branch": {
+        "type": "string",
+        "default": "main",
+        "description": "Git branch name"
+      },
+      "autoCommit": {
+        "type": "boolean",
+        "default": true,
+        "description": "Automatically commit local log additions"
+      },
+      "autoPush": {
+        "type": "boolean",
+        "default": false,
+        "description": "Automatically push committed log events to remote repository"
+      }
+    }
+  }
+}

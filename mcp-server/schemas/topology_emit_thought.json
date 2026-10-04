@@ -1,0 +1,29 @@
+{
+  "name": "topology_emit_thought",
+  "description": "Stream a live thought and tool state to the Topology canvas in real-time as you reason through a problem.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "planId": {
+        "type": "string",
+        "description": "Optional plan ID owning the node"
+      },
+      "nodeId": {
+        "type": "string",
+        "description": "The ID of the currently active node"
+      },
+      "thought": {
+        "type": "string",
+        "description": "Live thought or reasoning step"
+      },
+      "toolName": {
+        "type": "string",
+        "description": "Optional name of the tool in progress"
+      }
+    },
+    "required": [
+      "nodeId",
+      "thought"
+    ]
+  }
+}

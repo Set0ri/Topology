@@ -26,6 +26,9 @@ export type ExecutionType =
 export type ModelEngine = 
   | 'gemini-2.5-pro'
   | 'gemini-2.5-flash'
+  | 'claude-5.5-opus'
+  | 'opus-5.5'
+  | 'claude-4.6-opus'
   | 'claude-3-7-sonnet'
   | 'script-runner'
   | 'human-operator';

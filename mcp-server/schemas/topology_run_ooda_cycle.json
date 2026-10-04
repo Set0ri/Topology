@@ -1,0 +1,50 @@
+{
+  "name": "topology_run_ooda_cycle",
+  "description": "Execute an autonomous multi-loop OODA cycle or advance stages with automated cross-model deliberation, voting synthesis, invariant validation, and DAG synchronization.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "planId": {
+        "type": "string",
+        "description": "Plan ID to execute OODA cycle on"
+      },
+      "targetStage": {
+        "type": "string",
+        "enum": [
+          "observe",
+          "understand",
+          "evaluate_with_council",
+          "adversarial_council_evaluation",
+          "each_member_plans",
+          "share_and_vote_on_plan",
+          "iterate_on_plan",
+          "propose_plan",
+          "update"
+        ],
+        "description": "Specific stage to run, or omit to auto-advance to next sequential stage"
+      },
+      "runFullLoop": {
+        "type": "boolean",
+        "default": false,
+        "description": "If true, runs all remaining stages in sequence for this iteration loop"
+      },
+      "maxLoops": {
+        "type": "number",
+        "default": 3,
+        "description": "Target maximum loop count"
+      },
+      "convergenceThreshold": {
+        "type": "number",
+        "default": 85,
+        "description": "Target consensus percentage (0-100) required to declare convergence"
+      },
+      "contextNotes": {
+        "type": "string",
+        "description": "Optional operational context, findings, or observations"
+      }
+    },
+    "required": [
+      "planId"
+    ]
+  }
+}

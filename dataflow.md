@@ -1378,9 +1378,9 @@ Research demonstrates that combining model families supported under the Gemini U
    - **Role**: Fast Architect, Execution Orchestrator, DAG Lead.
    - **Characteristics**: Extreme throughput, low latency, structured JSON schema emission. Generates initial broad decomposition and synthesizes the final actionable DAG.
    - **Post-Council Role**: Deterministic code generator and tool-calling execution engine.
-2. **Claude 4.6 Opus (`🧠`, Anthropic, `#9334e6`)**:
-   - **Role**: Deep Conceptual Reasoning & Invariant Critic.
-   - **Characteristics**: Interrogates subtle edge cases, concurrency hazards, race conditions, and mathematical/formal correctness. Challenges assumptions in peer proposals.
+2. **Claude 5.5 Opus & Claude 4.6 Opus (`🧠`, Anthropic, `#9334e6`)**:
+   - **Role**: Deep Conceptual Reasoning, Frontier Logic & Invariant Critic.
+   - **Characteristics**: Interrogates subtle edge cases, concurrency hazards, race conditions, and mathematical/formal correctness. Challenges assumptions in peer proposals with frontier depth (`claude-5.5-opus` / `opus-5.5`).
 3. **GPT-OSS 120b (`🌐`, Open-Weight / OpenAI-compatible, `#10a37f`)**:
    - **Role**: Alternative Paradigm & Robustness Auditor.
    - **Characteristics**: Proposes non-standard algorithmic paradigms (e.g. event sourcing vs mutative state), stress-tests failure boundaries, and audits Byzantine failure recovery.
@@ -1389,6 +1389,7 @@ Research demonstrates that combining model families supported under the Gemini U
 | Model | RPM Ceiling | TPM Ceiling | Daily Token Limit | 85% Safe Ceiling (RPM) | 85% Safe Ceiling (TPM) |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **Gemini 3.8 Flash** | 1,000 | 4,000,000 | 100,000,000 | 850 | 3,400,000 |
+| **Claude 5.5 Opus** | 60 | 400,000 | 10,000,000 | 51 | 340,000 |
 | **Claude 4.6 Opus** | 50 | 300,000 | 5,000,000 | 42 | 255,000 |
 | **GPT-OSS 120b** | 120 | 500,000 | 10,000,000 | 102 | 425,000 |
 
@@ -1416,8 +1417,10 @@ To guarantee that the user is never locked out of their primary development mode
 
 ### 4. Registered Tooling & Integration Endpoints
 - **Native Antigravity MCP Tools** (`C:\Users\Logan\.gemini\antigravity\mcp\topology\`):
-  - `topology_spawn_council`: Convenes the multi-model council with goal, rounds, and strategy parameters.
+  - `topology_spawn_council`: Convenes the multi-model council with goal, rounds, members, and strategy parameters.
   - `topology_get_council_budget`: Returns live quota health, RPM/TPM usage, and TTR countdowns.
+  - `topology_optimize_council_allocation`: Computes optimal rosters and surrogate fallbacks.
+  - Global Antigravity Registration: Synchronized automatically via `scripts/register-mcp-council.mjs` to `~/.gemini/config/mcp_config.json` and `~/.gemini/config/skills/` (`topology-planner`, `topology-ooda-loop`).
 - **Bridge API Endpoints** (`http://localhost:5173/api/topology`):
   - `GET /api/topology/council/budget`
   - `POST /api/topology/council/budget/reset`

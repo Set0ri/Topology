@@ -43,6 +43,46 @@ export const DEFAULT_MODEL_CONFIG = {
     defaultEstInputTokens: 1200,
     defaultEstOutputTokens: 2500,
   },
+  'claude-5.5-opus': {
+    id: 'claude-5.5-opus',
+    name: 'Claude 5.5 Opus',
+    family: 'Anthropic',
+    avatar: '🧠',
+    color: '#9334e6',
+    role: 'Deep Reasoning & Invariant Critic',
+    provider: 'anthropic',
+    limits: {
+      rpm: 60,
+      tpm: 400000,
+      dailyTokens: 10000000,
+    },
+    ratesPerMillion: {
+      inputUsd: 15.00,
+      outputUsd: 75.00,
+    },
+    defaultEstInputTokens: 2200,
+    defaultEstOutputTokens: 4000,
+  },
+  'opus-5.5': {
+    id: 'opus-5.5',
+    name: 'Opus 5.5',
+    family: 'Anthropic',
+    avatar: '🧠',
+    color: '#9334e6',
+    role: 'Deep Reasoning & Invariant Critic',
+    provider: 'anthropic',
+    limits: {
+      rpm: 60,
+      tpm: 400000,
+      dailyTokens: 10000000,
+    },
+    ratesPerMillion: {
+      inputUsd: 15.00,
+      outputUsd: 75.00,
+    },
+    defaultEstInputTokens: 2200,
+    defaultEstOutputTokens: 4000,
+  },
   'claude-4.6-opus': {
     id: 'claude-4.6-opus',
     name: 'Claude 4.6 Opus',
@@ -833,7 +873,8 @@ class BudgetTracker {
 
       // Relative capability score
       let capabilityTier = 0.80;
-      if (modelId === 'claude-4.6-opus') capabilityTier = 1.0;
+      if (modelId === 'claude-5.5-opus' || modelId === 'opus-5.5') capabilityTier = 1.05;
+      else if (modelId === 'claude-4.6-opus') capabilityTier = 1.0;
       else if (modelId.includes('deepseek-r1')) capabilityTier = 0.95;
       else if (modelId.includes('deepseek-v3') || modelId.includes('gpt-4o')) capabilityTier = 0.90;
       else if (modelId === 'gemini-3.8-flash') capabilityTier = 0.85;
@@ -870,14 +911,16 @@ class BudgetTracker {
       currentSet.add(targetModelId.toLowerCase());
 
       let candidateIds = [];
-      if (targetModelId === 'claude-4.6-opus') {
-        candidateIds = ['deepseek-v3', 'deepseek-r1', 'gpt-4o', 'gpt-oss-120b', 'gemini-3.8-flash'];
+      if (targetModelId === 'claude-5.5-opus' || targetModelId === 'opus-5.5') {
+        candidateIds = ['claude-4.6-opus', 'deepseek-v3', 'deepseek-r1', 'gpt-4o', 'gpt-oss-120b', 'gemini-3.8-flash'];
+      } else if (targetModelId === 'claude-4.6-opus') {
+        candidateIds = ['claude-5.5-opus', 'deepseek-v3', 'deepseek-r1', 'gpt-4o', 'gpt-oss-120b', 'gemini-3.8-flash'];
       } else if (targetModelId === 'gemini-3.8-flash') {
-        candidateIds = ['gpt-oss-120b', 'deepseek-v3', 'claude-4.6-opus'];
+        candidateIds = ['gpt-oss-120b', 'deepseek-v3', 'claude-5.5-opus', 'claude-4.6-opus'];
       } else if (targetModelId === 'gpt-oss-120b') {
-        candidateIds = ['deepseek-v3', 'llama-3.3-70b', 'gemini-3.8-flash', 'claude-4.6-opus'];
+        candidateIds = ['deepseek-v3', 'llama-3.3-70b', 'gemini-3.8-flash', 'claude-5.5-opus', 'claude-4.6-opus'];
       } else {
-        candidateIds = ['gpt-oss-120b', 'gemini-3.8-flash', 'claude-4.6-opus'];
+        candidateIds = ['gpt-oss-120b', 'gemini-3.8-flash', 'claude-5.5-opus', 'claude-4.6-opus'];
       }
 
       // Check prioritized candidates first
@@ -1089,7 +1132,9 @@ class BudgetTracker {
     // --- Archetype 3: Maximum Reasoning Frontier ---
     const maxReasonSubstitutions = [];
     const maxReasonModels = [];
-    const reasoningTargets = ['claude-4.6-opus', 'gemini-3.8-flash', 'gpt-oss-120b'];
+    const reasoningTargets = allConfigs['claude-5.5-opus']
+      ? ['claude-5.5-opus', 'gemini-3.8-flash', 'gpt-oss-120b']
+      : ['claude-4.6-opus', 'gemini-3.8-flash', 'gpt-oss-120b'];
     for (const targetId of reasoningTargets) {
       if (!allConfigs[targetId]) continue;
       const ev = modelEvaluations[targetId];
@@ -1125,7 +1170,7 @@ class BudgetTracker {
       }
     }
     // Record any substitutions relative to default base
-    for (const baseId of ['claude-4.6-opus', 'gpt-oss-120b']) {
+    for (const baseId of ['claude-5.5-opus', 'claude-4.6-opus', 'gpt-oss-120b']) {
       if (allConfigs[baseId] && !surrogateFallbackModels.includes(baseId)) {
         const highHeadroomModel = surrogateFallbackModels.find(id => id !== 'gemini-3.8-flash') || surrogateFallbackModels[0];
         surrogateFallbackSubstitutions.push({
